@@ -1,0 +1,19 @@
+
+
+
+
+type inner : Affine = { name : string, size : int }
+type outer : Affine = { inner : inner, tag : string }
+
+fun size_of (value : borrow inner) : int =
+    case value of
+        { size = size } => size
+
+fun name_length (value : borrow outer) : int =
+    case value of
+        { inner = inner } => size_of (borrow inner)
+
+fun main () =
+    let val value = { inner = { name = "a" ^ "b", size = 7 }, tag = "t" ^ "u" }
+        val _ = print_int (name_length (borrow value))
+    in print_int (name_length (borrow value)) end

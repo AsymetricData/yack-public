@@ -1,0 +1,6 @@
+type point : Copy = { x : int, y : int }
+
+fun main () =
+    let val p : point = { x = 1 }
+    in ()
+    end

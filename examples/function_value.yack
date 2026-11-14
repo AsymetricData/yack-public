@@ -1,0 +1,6 @@
+fun inc (x : int) : int = x + 1
+
+fun main () =
+    let val f = inc
+    in print_int (f (1))
+    end

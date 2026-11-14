@@ -1,0 +1,6 @@
+fun add (x : int64, y : int64) : int64 = x + y
+
+fun main () =
+    let val value = add (40, 2)
+    in if value > 0 then () else ()
+    end

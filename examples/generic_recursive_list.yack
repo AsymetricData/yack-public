@@ -1,0 +1,12 @@
+fun length (values : 'a list) : int =
+    case values of
+        Nil => 0
+      | Cons (_, rest) => 1 + length (rest)
+
+fun main () =
+    let val ints = Cons ((1, Cons ((2, Nil))))
+        val bools = Cons ((true, Nil))
+        val first = length (ints)
+        val second = length (bools)
+    in print_int (first + second)
+    end

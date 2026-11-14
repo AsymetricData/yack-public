@@ -1,0 +1,154 @@
+import yack/string
+
+(* Indique si un caractère est le séparateur POSIX `/`.
+   - `value` : code entier du caractère à tester.
+
+   Retourne vrai uniquement pour le code 47. *)
+fun is_separator_code (value : int) : bool = value = 47
+
+(* Indique si un chemin commence par `/`.
+   - `value` : chemin emprunté pour examiner son premier caractère.
+
+   Retourne faux pour la chaîne vide. *)
+fun is_absolute (value : borrow string) : bool =
+    if string.length (value) = 0 then
+        false
+    else
+        is_separator_code (string.char_at_unchecked (value, 0))
+
+(* Recherche depuis la fin l'indice du séparateur POSIX précédent.
+   - `value` : chemin emprunté durant la recherche.
+   - `index` : indice maximal inclus dans la recherche.
+
+   Retourne l'indice trouvé, ou `-1` si aucun séparateur n'existe. *)
+fun last_separator_from (value : borrow string, index : int) : int =
+    if index < 0 then
+        -1
+    else if is_separator_code (string.char_at_unchecked (value, index)) then
+        index
+    else
+        last_separator_from (value, index - 1)
+
+(* Renvoie l'indice du dernier séparateur POSIX du chemin.
+   - `value` : chemin emprunté, sans modification.
+
+   Retourne `-1` si le chemin ne contient pas `/`. *)
+fun last_separator (value : borrow string) : int =
+    last_separator_from (value, string.length (value) - 1)
+
+(* Extrait le dernier composant d'un chemin.
+   - `value` : chemin emprunté pour localiser son dernier séparateur.
+
+   Retourne une nouvelle chaîne ; un chemin vide ou terminé par `/` donne `.`. *)
+fun base (value : borrow string) : string =
+    let
+        val size = string.length (value)
+        val separator = last_separator (value)
+    in
+        if size = 0 then
+            "."
+        else if separator < 0 then
+            string.copy (value)
+        else if separator = size - 1 then
+            "."
+        else
+            string.slice (value, separator + 1, size)
+    end
+
+(* Extrait le répertoire parent d'un chemin.
+   - `value` : chemin emprunté durant la recherche du séparateur final.
+
+   Retourne une nouvelle chaîne ; sans répertoire parent, retourne `.` et pour un
+   séparateur à l'indice zéro, retourne `/`. *)
+fun dir (value : borrow string) : string =
+    let
+        val size = string.length (value)
+        val separator = last_separator (value)
+    in
+        if size = 0 then
+            "."
+        else if separator < 0 then
+            "."
+        else if separator = 0 then "/" else string.slice (value, 0, separator)
+    end
+
+(* Recherche de droite à gauche le point d'extension avant tout séparateur.
+   - `value` : chemin emprunté durant la recherche.
+   - `index` : indice maximal inclus dans la recherche.
+
+   Retourne l'indice du point ou `-1` si aucun point d'extension n'est trouvé. *)
+fun extension_from (value : borrow string, index : int) : int =
+    if index < 0 then
+        -1
+    else if is_separator_code (string.char_at_unchecked (value, index)) then
+        -1
+    else if string.char_at_unchecked (value, index) = 46 then
+        index
+    else
+        extension_from (value, index - 1)
+
+(* Extrait l'extension du dernier composant du chemin.
+   - `value` : chemin emprunté, sans modification.
+
+   Retourne l'extension avec son point initial ; chaîne vide si elle est absente ou
+   si le chemin se termine par un point. *)
+fun extension (value : borrow string) : string =
+    let
+        val size = string.length (value)
+        val dot = extension_from (value, size - 1)
+    in
+        if dot < 0 then
+            ""
+        else if dot = size - 1 then "" else string.slice (value, dot, size)
+    end
+
+(* Retire l'extension du dernier composant du chemin.
+   - `value` : chemin emprunté pour la recherche du point d'extension.
+
+   Retourne une nouvelle chaîne ; si aucun point n'existe avant le séparateur, une
+   copie du chemin est rendue. *)
+fun strip_extension (value : borrow string) : string =
+    let
+        val size = string.length (value)
+        val dot = extension_from (value, size - 1)
+    in
+        if dot < 0 then string.copy (value) else string.slice (value, 0, dot)
+    end
+
+(* Assemble deux chemins en évitant un séparateur `/` doublé.
+   - `left` : chemin de gauche emprunté.
+   - `right` : chemin de droite emprunté.
+
+   Retourne une nouvelle chaîne ; si un côté est vide, rend une copie de l'autre. Les
+   séparateurs existants sont préservés. *)
+fun join (left : borrow string, right : borrow string) : string =
+    let
+        val leftSize = string.length (left)
+        val rightSize = string.length (right)
+    in
+        if leftSize = 0 then
+            string.copy (right)
+        else if rightSize = 0 then
+            string.copy (left)
+        else if is_separator_code (string.char_at_unchecked (left, leftSize - 1)) then
+            if is_separator_code (string.char_at_unchecked (right, 0)) then
+                string.copy (left) ^ string.slice (right, 1, rightSize)
+            else
+                string.copy (left) ^ string.copy (right)
+        else if is_separator_code (string.char_at_unchecked (right, 0)) then
+            string.copy (left) ^ string.copy (right)
+        else
+            string.copy (left) ^ "/" ^ string.copy (right)
+    end
+
+(* Assemble une liste de chemins dans l'ordre avec `join`.
+   - `values` : liste possédée consommée récursivement ; ses chaînes sont empruntées
+     pour fabriquer le résultat.
+
+   Retourne une chaîne possédée, vide pour une liste vide. *)
+fun join_all (values : string list) : string =
+    case values of
+        Nil => ""
+      | Cons (value, Nil) => string.copy (borrow value)
+      | Cons (value, rest) =>
+          let val tail = join_all (rest) in join (borrow value, borrow tail) end

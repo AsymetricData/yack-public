@@ -1,0 +1,14 @@
+
+
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), 1)
+        val values = array.push_unchecked (values, 2)
+        val values = array.push_unchecked (values, 3)
+        val values = array.push_unchecked (values, 4)
+    in
+        let val values = array.push_unchecked (values, 5)
+        in print_int (array.length (borrow values))
+        end
+    end

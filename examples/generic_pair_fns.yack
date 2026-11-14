@@ -1,0 +1,14 @@
+datatype ('a, 'b) pair = Pair of 'a * 'b
+
+fun swap (value : ('a, 'b) pair) : ('b, 'a) pair =
+    case value of
+        Pair (left, right) => Pair ((right, left))
+
+fun main () =
+    let val value = swap (Pair ((40, true)))
+        val result =
+          case value of
+              Pair (flag, number) =>
+                if flag then number else 0
+    in print_int (result)
+    end

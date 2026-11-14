@@ -1,0 +1,9 @@
+fun main () =
+  let val names : string map = map_new ()
+      val _ = map_set (names, "a" ^ "1", "alice")
+      val _ = map_set (names, "b" ^ "2", "bob" ^ "!")
+      val _ = map_set (names, "a" ^ "1", "alicia" ^ "?")
+      val _ = map_remove (names, "b" ^ "2")
+      val value = map_get_borrow (names, "a" ^ "1")
+  in print_int (string_length (value) * 10 + map_length (names))
+  end

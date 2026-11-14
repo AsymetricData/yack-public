@@ -1,0 +1,10 @@
+# expect: returns %1, which carries the borrow %1 of `s` (%0)
+# A borrow of an owned parameter returned: the owner is freed before the
+# return, the caller gets a dangling pointer.  The drop is reported too;
+# this trap guards the return rule (its own message).
+fun yack_f {
+  b0(%0.s : string):
+    %1 : &string = borrow &%0.s
+    drop %0.s : string
+    return %1
+}

@@ -1,0 +1,18 @@
+import yack/string
+
+
+datatype box : Affine = Box of (borrow string)
+
+fun unbox_and_move (line : string) : string =
+    let val boxed = Box (borrow line)
+    in
+        case boxed of
+            Box text =>
+                if string_length (text) >= 0 then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "hello")
+        val out = unbox_and_move (s)
+    in print_string (out)
+    end

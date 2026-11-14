@@ -1,0 +1,11 @@
+# expect: borrows `v` (%1) after it was consumed  # at 20:7
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string = concat %0.s, %0.s
+    drop %1.v! : string
+    %2.r : &string = borrow &%1.v  # at 20:7
+    %3.n : int = string.string_length %2.r!
+    %4 : unit = call print_int %3.n!
+    return %4!
+}

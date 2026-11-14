@@ -1,0 +1,5 @@
+fun main () =
+  let val values : string array = array_new ()
+      val _ = array_push (values, "x")
+  in print_string (array_get (values, 0))
+  end

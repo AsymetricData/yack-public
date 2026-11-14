@@ -1,0 +1,46 @@
+
+
+
+
+
+
+
+
+
+type cell = { value : int }
+
+type pair = { first : cell, second : int }
+
+fun pick (item : borrow cell) : borrow cell = item
+
+fun field_walk (previous : borrow cell, n : int, acc : int) : int =
+    if n <= 0 then acc + previous.value
+    else
+        let val local = { first = { value = n }, second = n }
+        in field_walk (borrow local.first, n - 1, acc + previous.value)
+        end
+
+fun mut_walk (previous : borrow mut cell, n : int, acc : int) : int =
+    if n <= 0 then acc + previous.value
+    else
+        let val local = { value = n }
+            val view = borrow mut local
+        in mut_walk (view, n - 1, acc + previous.value)
+        end
+
+fun shadow_walk (previous : borrow cell, n : int, acc : int) : int =
+    if n <= 0 then acc + previous.value
+    else
+        let val rest = { value = n }
+            val x = pick (borrow rest)
+        in shadow_walk (x, n - 1, acc + previous.value)
+        end
+
+fun main () =
+    let val start = { value = 0 }
+        val changing = { value = 0 }
+        val first = field_walk (borrow start, 1000, 0)
+        val second = mut_walk (borrow mut changing, 1000, 0)
+        val third = shadow_walk (borrow start, 1000, 0)
+    in print_int (first + second + third)
+    end

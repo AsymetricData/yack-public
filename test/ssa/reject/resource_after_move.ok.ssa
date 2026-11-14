@@ -1,0 +1,13 @@
+# The same graph, accepted: peek first, then close.  A `resource` may
+# also be discarded: the branch that never closes it is not a leak.
+fun yack_f {
+  b0(%0.r : resource):
+    %1 : int = call yack_peek %0.r
+    %2 : bool = const true
+    branch %2 b1 b2
+  b1:
+    %3 : unit = call yack_close move %0.r
+    return %1
+  b2:
+    return %1
+}

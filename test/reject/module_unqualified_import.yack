@@ -1,0 +1,3 @@
+import fixtures/Hidden
+
+fun main () = print_int (secret ())

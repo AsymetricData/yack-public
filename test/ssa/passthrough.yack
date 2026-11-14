@@ -1,0 +1,32 @@
+datatype shape = Circle of int | Rect of int * int
+
+fun area (s : shape) : int =
+    case s of
+        Circle r => r * r
+      | Rect (w, h) => w * h
+
+fun pass (s : shape) : shape = s
+
+fun build (name : string) : string =
+    let val a = name ^ "-"
+        val b = a ^ "x"
+        val c = b ^ "y"
+        val d = c
+    in d end
+
+fun relay (n : int) : int =
+    let val s = Rect ((n, 2))
+        val t = pass (s)
+        val u = t
+    in area (u) end
+
+fun boxed (n : int) : int =
+    arena
+        val a = build ("k")
+        val b = a
+    in string_length (borrow b) + n end
+
+fun main () =
+    let val _ = print_int (relay (4))
+        val _ = print_int (boxed (1))
+    in print_string (build ("z")) end

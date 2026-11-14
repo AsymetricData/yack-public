@@ -1,0 +1,109 @@
+import Application
+import alpage/Alpage
+import alpage/Request
+import alpage/Test
+import yack/io
+
+fun say (message : string) : unit =
+    io.print_line (borrow message)
+
+fun text_is (actual : borrow string, expected : string) : bool =
+    let val wanted = borrow expected
+    in string_eq (actual, wanted)
+    end
+
+fun has_header_from (name : borrow string, headers : (string * string) list) : bool =
+    case headers of
+        Nil => false
+      | pair :: rest =>
+            let val key = pair.0
+            in
+                if string_eq (name, borrow key) then true
+                else has_header_from (name, rest)
+            end
+
+fun has_header (name : string, headers : (string * string) list) : bool =
+    has_header_from (borrow name, headers)
+
+fun main () =
+    let val started = Test.start (Application.application (), Alpage.config (0))
+    in
+        case started of
+            Error message => say (message)
+          | Ok client =>
+                let val get_request =
+                        Request.parse ("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    val get_result = Test.request (client, get_request)
+                    val get_response = get_result.0
+                    val client = get_result.1
+                    val get_parts =
+                        case get_response of
+                            { status = status, headers = headers, body = body } =>
+                                (status, headers, body)
+                    val get_status = get_parts.0
+                    val get_headers = get_parts.1
+                    val get_body = get_parts.2
+                    val _ =
+                        if get_status = 200 then say ("ok get status")
+                        else say ("FAIL get status")
+                    val _ =
+                        if text_is (borrow get_body, "hello") then say ("ok get body")
+                        else say ("FAIL get body")
+                    val _ =
+                        if has_header ("X-Frame-Options", get_headers) then
+                            say ("ok security header")
+                        else say ("FAIL security header")
+                    val post_request =
+                        Request.parse (
+                            "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 17\r\n\r\n{\"items\":[1,2,3]}"
+                        )
+                    val post_result = Test.request (client, post_request)
+                    val post_response = post_result.0
+                    val client = post_result.1
+                    val post_parts =
+                        case post_response of
+                            { status = status, headers = _headers, body = body } =>
+                                (status, body)
+                    val post_status = post_parts.0
+                    val post_body = post_parts.1
+                    val _ =
+                        if post_status = 200 then say ("ok sum status")
+                        else say ("FAIL sum status")
+                    val _ =
+                        if text_is (borrow post_body, "{\"sum\":6}") then
+                            say ("ok sum body")
+                        else say ("FAIL sum body")
+                    val missing_request =
+                        Request.parse ("GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    val missing_result = Test.request (client, missing_request)
+                    val missing_response = missing_result.0
+                    val client = missing_result.1
+                    val missing_status =
+                        case missing_response of
+                            { status = status, headers = _headers, body = _body } => status
+                    val _ =
+                        if missing_status = 404 then say ("ok not found")
+                        else say ("FAIL not found")
+                    val wrong_method_request =
+                        Request.parse ("GET /sum HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    val wrong_method_result = Test.request (client, wrong_method_request)
+                    val wrong_method_response = wrong_method_result.0
+                    val client = wrong_method_result.1
+                    val wrong_method_parts =
+                        case wrong_method_response of
+                            { status = status, headers = headers, body = _body } =>
+                                (status, headers)
+                    val wrong_method_status = wrong_method_parts.0
+                    val wrong_method_headers = wrong_method_parts.1
+                    val _ =
+                        if wrong_method_status = 405 then
+                            say ("ok method not allowed")
+                        else say ("FAIL method not allowed")
+                    val _ =
+                        if has_header ("Allow", wrong_method_headers) then
+                            say ("ok allow header")
+                        else say ("FAIL allow header")
+                in
+                    Test.close (client)
+                end
+    end

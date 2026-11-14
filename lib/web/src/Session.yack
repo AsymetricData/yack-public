@@ -1,0 +1,203 @@
+import yack/io
+import yack/list
+import yack/string
+
+(* yack/web/Session : sessions serveur en mémoire.
+
+Le cookie ne contient qu'un identifiant opaque. Les données restent dans le
+processus sous forme d'une chaîne `clé=valeur` séparée par des retours à la
+ligne. Cette représentation évite de faire circuler des listes Affine entre le
+store et la requête : le serveur peut copier et libérer une seule chaîne. *)
+type store : Affine = { entries : (string, string) list }
+
+fun empty () : store = { entries = Nil }
+
+fun lookup_from
+    (id : borrow string, entries : (string, string) list)
+    : string * (string, string) list =
+    case entries of
+        Nil => ("", Nil)
+      | entry :: rest =>
+          let val entry_id = entry.0
+              val data = entry.1
+              val same = string_eq (id, borrow entry_id)
+          in
+              if same then
+                  let val copied =
+                          let val text = borrow data
+                          in
+                              string_copy (text)
+                          end
+                  in
+                      (copied, Cons (((entry_id, data), rest)))
+                  end
+              else
+                  let val tail = lookup_from (id, rest)
+                  in
+                      (tail.0, Cons (((entry_id, data), tail.1)))
+                  end
+          end
+
+(* Charge la session et rend le store reconstruit. *)
+fun lookup (store : store, id : borrow string) : string * store =
+    case store of
+        { entries = entries } =>
+            let val found = lookup_from (id, entries)
+            in
+                (found.0, { entries = found.1 })
+            end
+
+fun remove_from_acc
+    (id : borrow string, entries : (string, string) list,
+     acc : (string, string) list)
+    : (string, string) list =
+    case entries of
+        Nil => list.reverse (acc)
+      | entry :: rest =>
+          let val entry_id = entry.0
+              val data = entry.1
+              val same = string_eq (id, borrow entry_id)
+          in
+              if same then
+                  remove_from_acc (id, rest, acc)
+              else
+                  remove_from_acc (id, rest, Cons (((entry_id, data), acc)))
+          end
+
+fun remove_from
+    (id : borrow string, entries : (string, string) list)
+    : (string, string) list =
+    remove_from_acc (id, entries, Nil)
+
+fun set (store : store, id : string, data : string) : store =
+    case store of
+        { entries = entries } =>
+            let val filtered =
+                    let val key = borrow id
+                    in
+                        remove_from (key, entries)
+                    end
+            in
+                { entries = Cons (((id, data), filtered)) }
+            end
+
+fun remove (store : store, id : borrow string) : store =
+    case store of
+        { entries = entries } => { entries = remove_from (id, entries) }
+
+fun parse_line (line : string) : (string, string) =
+    let val equal =
+            let val text = borrow line
+                val equal_sign = "="
+            in string.index_of_from (text, borrow equal_sign, 0)
+            end
+    in
+        if equal < 0 then
+            (line, "")
+        else
+            ( string_slice (borrow line, 0, equal),
+              string_slice (borrow line, equal + 1, string_length (borrow line))
+            )
+    end
+
+fun parse_lines_acc
+    (lines : string list, acc : (string, string) list)
+    : (string, string) list =
+    case lines of
+        Nil => list.reverse (acc)
+      | line :: rest =>
+          let val empty =
+                  let val text = borrow line
+                  in string.is_empty (text)
+                  end
+          in
+              if empty then parse_lines_acc (rest, acc)
+              else
+                  let val pair = parse_line (line)
+                  in parse_lines_acc (rest, Cons ((pair, acc)))
+                  end
+          end
+
+fun parse_lines (lines : string list) : (string, string) list =
+    parse_lines_acc (lines, Nil)
+
+(* Analyse `k=v\nk2=v2`. *)
+fun parse (data : borrow string) : (string, string) list =
+    parse_lines (string.split (10, data))
+
+fun get_from
+    (values : (string, string) list, name : borrow string) : string option =
+    case values of
+        Nil => None
+      | pair :: rest =>
+          let val key = pair.0
+              val value = pair.1
+          in
+              if string_eq (borrow key, name) then Some (value)
+              else get_from (rest, name)
+          end
+
+fun get (data : borrow string, name : borrow string) : string option =
+    get_from (parse (data), name)
+
+fun remove_name
+    (name : borrow string, values : (string, string) list)
+    : (string, string) list =
+    case values of
+        Nil => Nil
+      | pair :: rest =>
+          let val key = pair.0
+              val value = pair.1
+          in
+              if string_eq (borrow key, name) then
+                  remove_name (name, rest)
+              else Cons (((key, value), remove_name (name, rest)))
+          end
+
+fun apply_one
+    (base : (string, string) list, name : string, value : string)
+    : (string, string) list =
+    let val filtered =
+            let val key = borrow name
+            in remove_name (key, base)
+            end
+    in Cons (((name, value), filtered))
+    end
+
+fun apply_pairs
+    (base : (string, string) list, changes : (string, string) list)
+    : (string, string) list =
+    case changes of
+        Nil => base
+      | pair :: rest =>
+          apply_pairs (apply_one (base, pair.0, pair.1), rest)
+
+fun render_pairs (values : (string, string) list) : string =
+    case values of
+        Nil => ""
+      | pair :: rest =>
+          let val key = pair.0
+              val value = pair.1
+              val tail = render_pairs (rest)
+              val empty =
+                  let val text = borrow tail
+                  in string.is_empty (text)
+                  end
+          in
+              if empty then key ^ "=" ^ value
+              else key ^ "=" ^ value ^ "\n" ^ tail
+          end
+
+(* Applique des changements à une session sérialisée. *)
+fun apply (base : string, changes : (string, string) list) : string =
+    let val parsed = parse (borrow base)
+        val updated = apply_pairs (parsed, changes)
+    in render_pairs (updated)
+    end
+
+(* Identifiant opaque. Linux fournit un UUID par lecture de
+   `/proc/sys/kernel/random/uuid`. *)
+fun new_id () : string =
+    case io.read_file "/proc/sys/kernel/random/uuid" of
+        Ok (text) => string.trim (borrow text)
+      | Error (_message) => "yack-fallback-session-id"

@@ -1,0 +1,12 @@
+
+
+
+type handle : Linear = { fd : int }
+
+fun close (h : handle) : int = case h of { fd = fd } => fd
+
+fun main () =
+    let val h : handle = { fd = 3 }
+        val a = close (h)
+    in print_int (a + close (h))
+    end

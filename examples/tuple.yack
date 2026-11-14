@@ -1,0 +1,6 @@
+fun main () =
+    let val pair = (40, 2)
+        val x = pair.0
+        val y = pair.1
+    in print_int (x + y)
+    end

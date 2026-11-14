@@ -1,0 +1,8 @@
+fun apply (f : consume string -> unit, text : string) : unit = f (text)
+
+fun main () =
+    let val f = x => print_string (x)
+        val s = "a" ^ "b"
+        val _ = apply (f, s)
+    in ()
+    end

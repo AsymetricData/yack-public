@@ -1,0 +1,5 @@
+
+fun main () =
+    let val s = "abc" in
+      print_int (string_char_at_unchecked (borrow s, 5))
+    end

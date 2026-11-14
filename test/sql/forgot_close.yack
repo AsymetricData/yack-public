@@ -1,0 +1,9 @@
+
+
+
+import sql/Sqlite
+
+fun main () =
+    case Sqlite.open (":memory:") of
+        Error message => print_string (message)
+      | Ok db => print_string ("opened")

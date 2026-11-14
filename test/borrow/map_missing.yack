@@ -1,0 +1,7 @@
+fun main () =
+    let val values : int map = map_new ()
+        val n = map_get_copy_borrow (borrow values, "missing")
+        val h = map_has_borrow (borrow values, "missing")
+    in
+        print_int (n + (if h then 1 else 0))
+    end

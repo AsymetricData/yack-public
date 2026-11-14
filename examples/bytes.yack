@@ -1,0 +1,6 @@
+fun main () =
+    let val text = "hello"
+        val bytes = bytes_from_string (borrow text)
+        val copy = bytes_to_string (bytes)
+    in print_string (copy)
+    end

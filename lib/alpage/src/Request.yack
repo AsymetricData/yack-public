@@ -1,0 +1,42 @@
+import web/Request as Base
+
+type t : Affine = {
+    inner : Base.t,
+    params : (string * string) list
+}
+
+fun parse (text : string) : t =
+    { inner = Base.parse (text), params = Nil }
+
+fun with_params (request : t, params : (string * string) list) : t =
+    case request of
+        { inner = inner, params = _old } =>
+            { inner = inner, params = params }
+
+fun params (request : t) : (string * string) list =
+    case request of
+        { params = params } => params
+
+fun method (request : borrow t) : string =
+    case request of
+        { inner = inner } => Base.method (borrow inner)
+
+fun path (request : borrow t) : string =
+    case request of
+        { inner = inner } => Base.path (borrow inner)
+
+fun query (request : borrow t, name : string) : string option =
+    case request of
+        { inner = inner } => Base.query (borrow inner, name)
+
+fun body (request : borrow t) : string =
+    case request of
+        { inner = inner } => Base.body (borrow inner)
+
+fun header (request : borrow t, name : string) : string option =
+    case request of
+        { inner = inner } => Base.header (borrow inner, name)
+
+fun cookie (request : borrow t, name : string) : string option =
+    case request of
+        { inner = inner } => Base.cookie (borrow inner, name)

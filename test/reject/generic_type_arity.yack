@@ -1,0 +1,4 @@
+
+fun bad (value : option) : int = 0
+
+fun main () = ()

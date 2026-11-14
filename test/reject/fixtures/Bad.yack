@@ -1,0 +1,5 @@
+fun consume (text : string) : int =
+    let val first = text
+        val second = text
+    in string_length (borrow first)
+    end

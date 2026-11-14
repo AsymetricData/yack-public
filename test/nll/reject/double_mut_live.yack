@@ -1,0 +1,15 @@
+
+
+fun touch (value : borrow mut string) : unit = ()
+
+fun bad (value : string) : unit =
+    let val first = borrow mut value
+        val second = borrow mut value
+        val _ = touch (first)
+    in ()
+    end
+
+fun main () : unit =
+    let val s = "hello"
+    in bad (s)
+    end

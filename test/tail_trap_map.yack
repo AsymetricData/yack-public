@@ -1,0 +1,21 @@
+
+
+
+
+
+
+type cell = { value : int }
+
+fun key (n : int) : string = if n % 2 = 0 then "even" else "odd"
+
+fun walk (cells : borrow cell map, previous : borrow cell, n : int, acc : int) : int =
+    if n <= 0 then acc + previous.value
+    else walk (cells, map_get_borrow_view (cells, key (n)), n - 1, acc + previous.value)
+
+fun main () =
+    let val cells : cell map = map_new ()
+        val _ = map_set (cells, "even", { value = 1 })
+        val _ = map_set (cells, "odd", { value = 1000 })
+        val start = { value = 0 }
+    in print_int (walk (borrow cells, borrow start, 1000, 0))
+    end

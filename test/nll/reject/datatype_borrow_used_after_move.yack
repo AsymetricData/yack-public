@@ -1,0 +1,16 @@
+import yack/string
+
+
+
+datatype box : Affine = Box of (borrow string)
+
+fun bad (line : string) : string =
+    let val boxed = Box (borrow line)
+        val moved = line
+    in
+        case boxed of
+            Box text =>
+                if string_length (text) >= 0 then moved else moved
+    end
+
+fun main () : unit = ()

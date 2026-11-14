@@ -1,0 +1,16 @@
+import yack/string
+
+
+
+fun branch_then_move (flag : bool, line : string) : string =
+    let val borrowed = borrow line
+        val size = if flag then string_length (borrowed) else 0
+    in
+        if size >= 0 then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "hello")
+        val out = branch_then_move (false, s)
+    in print_string (out)
+    end

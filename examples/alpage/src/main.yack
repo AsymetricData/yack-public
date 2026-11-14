@@ -1,0 +1,8 @@
+import Application
+import alpage/Alpage
+import yack/io
+
+fun main () =
+    case Alpage.run (Application.application (), Alpage.config (18092)) of
+        Ok _ => ()
+      | Error message => io.print_line (borrow message)

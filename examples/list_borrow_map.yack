@@ -1,0 +1,15 @@
+import yack/list
+
+fun double (x : int) : int = x * 2
+
+fun size (text : borrow string) : int = string_length (text)
+
+fun main () =
+    let val ints = [1, 2, 3]
+        val doubled = list.borrow_map_int (double, borrow ints)
+        val total = list.sum_int (doubled) + list.length (ints)
+        val texts = ["a", "bb"]
+        val sizes = list.borrow_map (size, borrow texts)
+    in
+        print_int (total + list.sum_int (sizes) + list.length (texts))
+    end

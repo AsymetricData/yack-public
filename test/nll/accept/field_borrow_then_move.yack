@@ -1,0 +1,17 @@
+import yack/string
+
+type user : Affine = { name : string }
+
+
+fun take_name (user : user) : string =
+    let val name = borrow user.name
+        val size = string_length (name)
+    in
+        if size >= 0 then user.name else user.name
+    end
+
+fun main () : unit =
+    let val user : user = { name = string_copy (borrow "abc") }
+        val name = take_name (user)
+    in print_string (name)
+    end

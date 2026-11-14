@@ -1,0 +1,4 @@
+fun add (x : int64, y : int64) : int64 = x + y
+
+fun main () =
+    print_int64 (add (9223372036854775807, 1))

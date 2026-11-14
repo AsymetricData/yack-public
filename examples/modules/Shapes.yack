@@ -1,0 +1,11 @@
+type point : Copy = { x : int, y : int }
+
+datatype shape = Circle of int | Rect of point
+
+fun area (value : shape) : int =
+    case value of
+        Circle (radius) => radius * radius * 3
+      | Rect (p) => p.x * p.y
+
+fun point_x (p : point) : int =
+    p.x

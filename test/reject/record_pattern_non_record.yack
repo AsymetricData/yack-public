@@ -1,0 +1,5 @@
+fun bad (value : int) : int =
+    case value of
+        { x = y } => y
+
+fun main () = ()

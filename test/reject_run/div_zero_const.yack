@@ -1,0 +1,4 @@
+
+
+fun main () =
+    print_int (10 / 0)

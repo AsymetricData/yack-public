@@ -1,0 +1,3 @@
+import fixtures/Conflict.{list_length}
+
+fun main () = print_int (list_length (41))

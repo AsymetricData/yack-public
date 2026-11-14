@@ -1,0 +1,58 @@
+(* Inverse une valeur booléenne.
+   - `value` : booléen à inverser.
+
+   Retourne `false` pour `true` et `true` pour `false`. Aucun effet mémoire. *)
+fun not (value : bool) : bool = if value then false else true
+
+(* Calcule la conjonction de deux booléens.
+   - `left` : premier booléen.
+   - `right` : second booléen.
+
+   Retourne `true` uniquement si les deux opérandes sont vrais. Aucun effet mémoire. *)
+fun and (left : bool, right : bool) : bool = if left then right else false
+
+(* Calcule la disjonction de deux booléens.
+   - `left` : premier booléen.
+   - `right` : second booléen.
+
+   Retourne `true` si au moins un opérande est vrai. Aucun effet mémoire. *)
+fun or (left : bool, right : bool) : bool = if left then true else right
+
+(* Calcule le « ou » exclusif de deux booléens.
+   - `left` : premier booléen.
+   - `right` : second booléen.
+
+   Retourne `true` si exactement un opérande est vrai, sinon `false`. Aucun effet
+   mémoire. *)
+fun xor (left : bool, right : bool) : bool = if left then not (right) else right
+
+(* Convertit un booléen en sa représentation textuelle minuscule.
+   - `value` : booléen à convertir.
+
+   Retourne la chaîne `"true"` ou `"false"`. Aucun effet mémoire sur les arguments. *)
+fun to_string (value : bool) : string = if value then "true" else "false"
+
+(* Analyse la représentation textuelle exacte d'un booléen.
+   - `text` : chaîne empruntée en lecture seule, attendue égale à `"true"` ou
+     `"false"`.
+
+   Retourne `Some (true)`, `Some (false)` ou `None` si le texte ne correspond pas. Ne
+   consomme ni ne modifie la chaîne. *)
+fun from_string (text : borrow string) : bool option =
+    let
+        val trueText = "true"
+        val falseText = "false"
+    in
+        if string_eq (text, borrow trueText) then
+            Some (true)
+        else if string_eq (text, borrow falseText) then Some (false) else None
+    end
+
+(* Compare deux booléens en ordonnant `false` avant `true`.
+   - `left` : premier booléen à comparer.
+   - `right` : second booléen à comparer.
+
+   Retourne -1 si `left` vaut `false` et `right` `true`, 1 dans le cas inverse, sinon
+   0. Aucun effet mémoire. *)
+fun compare (left : bool, right : bool) : int =
+    if left = right then 0 else if left then 1 else -1

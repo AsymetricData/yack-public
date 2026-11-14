@@ -1,0 +1,12 @@
+# The same graph, accepted: the view is dropped with its root.
+fun yack_main {
+  b0:
+    %0.a : string = view const "a"
+    %1.b : string = view const "b"
+    %2.p : string * string = tuple move %0.a, move %1.b
+    %3.x : string = view bind 0 %2.p
+    %4.n : int = string.string_length %3.x
+    drop %2.p! : string * string
+    %5 : unit = call print_int %4.n!
+    return %5!
+}

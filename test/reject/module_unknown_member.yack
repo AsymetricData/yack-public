@@ -1,0 +1,4 @@
+import yack/os
+
+fun main () =
+    os.nope ()

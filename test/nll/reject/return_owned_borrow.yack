@@ -1,0 +1,8 @@
+type user : Affine = { name : string }
+
+
+
+fun bad_return (user : user) : borrow user =
+    borrow user
+
+fun main () = ()

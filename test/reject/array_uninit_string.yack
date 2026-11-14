@@ -1,0 +1,5 @@
+fun main () =
+    let val values : string array = array_make_uninit (2)
+    in
+        ()
+    end

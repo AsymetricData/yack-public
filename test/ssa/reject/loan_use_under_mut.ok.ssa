@@ -1,0 +1,10 @@
+# The same graph, accepted: the mutable borrow's last use comes first.
+fun yack_f {
+  b0(%0.s : string):
+    %1.m : &mut string = borrow mut &%0.s
+    %4 : unit = call yack_touch %1.m
+    %2.r : &string = borrow &%0.s
+    %3 : int = string.string_length %2.r
+    drop %0.s : string
+    return %3
+}

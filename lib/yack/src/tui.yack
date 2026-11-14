@@ -1,0 +1,331 @@
+import yack/ansi
+import yack/io
+import yack/list
+import yack/string
+
+(* Calcule la largeur intérieure d'un cadre, en retirant ses deux bordures.
+   - `width` : largeur totale souhaitée.
+
+   Retourne zéro si la largeur ne permet pas de retirer les bordures. *)
+fun inner_width (width : int) : int =
+    if width > 2 then width - 2 else 0
+
+(* Repère l'index juste après une séquence CSI, ou la fin du texte si elle est
+   incomplète.
+   - `text` : chaîne empruntée et parcourue sans mutation.
+   - `index` : index du premier octet du contenu CSI.
+   - `size` : longueur de `text` en octets.
+
+   Retourne l'index suivant la séquence ou `size`. *)
+fun csi_end (text : borrow string, index : int, size : int) : int =
+    if index >= size then size
+    else
+        let val code = string_char_at_unchecked (text, index)
+        in
+            if code >= 64 then
+                if code <= 126 then index + 1
+                else csi_end (text, index + 1, size)
+            else csi_end (text, index + 1, size)
+        end
+
+(* Parcourt le texte en ignorant les séquences de contrôle ANSI et accumule sa
+   largeur.
+   - `text` : contenu emprunté, non modifié.
+   - `index`, `size` : position courante et longueur en octets.
+   - `count` : largeur visible déjà accumulée.
+
+   Retourne le compte final; les caractères UTF-8 sont comptés par point de code. *)
+fun display_width_from
+        (text : borrow string, index : int, size : int, count : int) : int =
+    if index >= size then count
+    else
+        let val code = string_char_at_unchecked (text, index)
+        in
+            if code = 27 then
+                if index + 1 < size then
+                    if string_char_at_unchecked (text, index + 1) = 91 then
+                        display_width_from
+                            (text, csi_end (text, index + 2, size), size, count)
+                    else display_width_from (text, index + 1, size, count)
+                else count
+            else if code >= 128 then
+                if code < 192 then
+                    display_width_from (text, index + 1, size, count)
+                else display_width_from (text, index + 1, size, count + 1)
+            else display_width_from (text, index + 1, size, count + 1)
+        end
+
+(* Mesure la largeur visible d'un texte, en ignorant les séquences ANSI.
+   - `text` : chaîne empruntée et laissée intacte.
+
+   Retourne le nombre de points de code UTF-8 visibles (largeur de colonne
+   approximée). *)
+fun display_width (text : borrow string) : int =
+    display_width_from (text, 0, string_length (text), 0)
+
+(* Complète un texte avec des espaces jusqu'à la largeur visible demandée.
+   - `text` : chaîne empruntée, laissée intacte.
+   - `width` : largeur cible en colonnes.
+
+   Retourne une nouvelle chaîne; si le texte est déjà assez large, il est copié sans
+   troncature. *)
+fun pad_display (text : borrow string, width : int) : string =
+    let val size = display_width (text)
+        val missing = width - size
+        val space = " "
+    in
+        if missing <= 0 then string.copy (text)
+        else string.copy (text) ^ string.repeat (borrow space, missing)
+    end
+
+(* Répète un motif autant de fois que demandé.
+   - `text` : motif consommé par l'appel; une copie locale est passée à
+     `string.repeat`.
+   - `count` : nombre de répétitions.
+
+   Retourne la chaîne répétée. *)
+fun repeat_text (text : string, count : int) : string =
+    let val copy = string.copy (borrow text)
+    in string.repeat (borrow copy, count)
+    end
+
+(* Construit le bord supérieur d'une boîte avec son titre éventuel.
+   - `title` : titre emprunté, non modifié.
+   - `width` : largeur totale du bord.
+
+   Retourne une nouvelle ligne Unicode dont le titre est ajusté à l'espace intérieur. *)
+fun box_top (title : borrow string, width : int) : string =
+    let val inner = inner_width (width)
+        val titleText =
+            if string.is_empty (title) then ""
+            else "─ " ^ string.copy (title) ^ " "
+        val titleSize = string.utf8_length (borrow titleText)
+        val shown =
+            if titleSize > inner then string.utf8_slice (borrow titleText, 0, inner)
+            else string.copy (borrow titleText)
+        val shownSize = string.utf8_length (borrow shown)
+        val fill = if shownSize >= inner then 0 else inner - shownSize
+    in "╭" ^ string.copy (borrow shown) ^ repeat_text ("─", fill) ^ "╮"
+    end
+
+(* Encadre une ligne et la complète à la largeur intérieure disponible.
+   - `line` : texte emprunté, non modifié.
+   - `width` : largeur totale incluant les bordures.
+
+   Retourne une ligne de boîte; un texte Unicode complexe peut ne pas être tronqué
+   exactement. *)
+fun box_line (line : borrow string, width : int) : string =
+    let val inner = inner_width (width)
+        val contentWidth = if inner >= 2 then inner - 2 else 0
+        val clipped =
+            if display_width (line) > contentWidth then
+                if display_width (line) = string.utf8_length (line) then
+                    string.utf8_slice (line, 0, contentWidth)
+                else string.copy (line)
+            else string.copy (line)
+    in "│ " ^ pad_display (borrow clipped, contentWidth) ^ " │"
+    end
+
+(* Construit le bord inférieur d'une boîte à la largeur indiquée.
+   - `width` : largeur totale souhaitée.
+
+   Retourne une nouvelle ligne Unicode avec les coins et le remplissage horizontal. *)
+fun box_bottom (width : int) : string =
+    "╰" ^ repeat_text ("─", inner_width (width)) ^ "╯"
+
+(* Encadre chaque ligne de la liste et les assemble avec des retours à la ligne.
+   - `lines` : lignes consommées récursivement; les éléments sont empruntés pour le
+     rendu.
+   - `width` : largeur totale de chaque ligne encadrée.
+
+   Retourne le corps assemblé; ne modifie pas la liste. *)
+fun box_lines (lines : string list, width : int) : string =
+    case lines of
+        Nil => ""
+      | Cons (line, rest) =>
+            box_line (borrow line, width) ^ "\n" ^ box_lines (rest, width)
+
+(* Rend un cadre complet avec titre, lignes de contenu et bordures.
+   - `title` : titre consommé puis emprunté pour les opérations de chaîne.
+   - `body` : contenu consommé puis découpé en lignes.
+   - `width` : largeur totale souhaitée.
+
+   Retourne l'écran sous forme de chaîne; aucune sortie terminale n'est produite. *)
+fun box (title : string, body : string, width : int) : string =
+    let val lines = string.lines (borrow body)
+        val empty = ""
+        val blankTop = box_line (borrow empty, width)
+        val blankBottom = box_line (borrow empty, width)
+    in
+        box_top (borrow title, width) ^ "\n" ^
+        blankTop ^ "\n" ^
+        box_lines (lines, width) ^
+        blankBottom ^ "\n" ^
+        box_bottom (width)
+    end
+
+(* Rend récursivement les entrées d'un menu avec un marqueur de sélection.
+   - `items` : liste d'entrées consommée récursivement; chaque texte est emprunté.
+   - `selected` : index de l'entrée sélectionnée.
+   - `index` : index de l'entrée actuellement rendue.
+   - `width` : largeur minimale de chaque entrée.
+
+   Retourne les lignes formatées avec retours à la ligne, sans modifier les textes. *)
+fun menu_lines
+        (items : string list,
+         selected : int,
+         index : int,
+         width : int) : string =
+    case items of
+        Nil => ""
+      | Cons (item, rest) =>
+            let val marker = if index = selected then "❯ " else "  "
+                val line = marker ^ string.copy (borrow item)
+                val padded = pad_display (borrow line, width)
+                val styled =
+                    if index = selected then
+                        ansi.reverse () ^ padded ^ ansi.reset ()
+                    else padded
+            in styled ^ "\n" ^ menu_lines (rest, selected, index + 1, width)
+            end
+
+(* Rend un menu textuel et met en évidence l'entrée sélectionnée.
+   - `items` : entrées consommées par le rendu récursif.
+   - `selected` : index à sélectionner, indexé à partir de zéro.
+   - `width` : largeur minimale des entrées.
+
+   Retourne le menu sous forme de chaîne; n'écrit pas sur le terminal. *)
+fun menu (items : string list, selected : int, width : int) : string =
+    menu_lines (items, selected, 0, width)
+
+(* Construit une barre de progression Unicode et son pourcentage borné entre 0 et
+   100.
+   - `current` : progression courante, bornée à l'affichage.
+   - `total` : valeur représentant la progression complète; si non positive,
+     pourcentage nul.
+   - `width` : largeur de la barre, ramenée à au moins un caractère.
+
+   Retourne le rendu sous forme de chaîne sans effet terminal. *)
+fun progress (current : int, total : int, width : int) : string =
+    let val barWidth = if width > 0 then width else 1
+        val filled =
+            if total <= 0 then 0
+            else (current * barWidth) / total
+        val safe =
+            if filled < 0 then 0
+            else if filled > barWidth then barWidth
+            else filled
+        val percent =
+            if total <= 0 then 0
+            else (current * 100) / total
+        val percentSafe =
+            if percent < 0 then 0
+            else if percent > 100 then 100
+            else percent
+        val full = "━"
+        val head = "╸"
+        val rest = "─"
+        val body =
+            if safe >= barWidth then string.repeat (borrow full, barWidth)
+            else
+                string.repeat (borrow full, safe) ^ head ^
+                string.repeat (borrow rest, barWidth - safe - 1)
+    in body ^ "  " ^ int_to_string (percentSafe) ^ "%"
+    end
+
+(* Retourne une trame du spinner cyclique à huit caractères.
+   - `frame` : numéro de trame; les valeurs négatives sélectionnent la première.
+
+   Retourne le glyphe correspondant, ou `-` si l'index ne désigne aucune trame. *)
+fun spinner (frame : int) : string =
+    let val frames =
+            Cons
+                (("⠋",
+                  Cons
+                    (("⠙",
+                      Cons
+                        (("⠹",
+                          Cons
+                            (("⠸",
+                              Cons
+                                (("⠼",
+                                  Cons
+                                    (("⠴",
+                                      Cons (("⠦", Cons (("⠧", Nil)))))
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+        val index =
+            let val value = frame % 8
+            in if value < 0 then 0 else value
+            end
+    in
+        case list.nth (frames, index) of
+            None => "-"
+          | Some (value) => value
+    end
+
+(* Rend une barre d'état inversée avec son texte complété à la largeur utile.
+   - `value` : contenu consommé puis emprunté pour le remplissage.
+   - `width` : largeur totale incluant les marges.
+
+   Retourne une chaîne contenant les séquences ANSI de style, sans l'imprimer. *)
+fun status_bar (value : string, width : int) : string =
+    let val body =
+            pad_display (borrow value, width - 4)
+    in ansi.reverse () ^ "  " ^ body ^ "  " ^ ansi.reset ()
+    end
+
+(* Formate une paire clé-valeur avec la clé atténuée et complétée sur 12 colonnes.
+   - `key` : libellé consommé puis emprunté pour le remplissage.
+   - `value` : texte de valeur consommé et ajouté tel quel.
+
+   Retourne la ligne formatée avec les séquences ANSI de style. *)
+fun kv (key : string, value : string) : string =
+    let val label = pad_display (borrow key, 12)
+    in ansi.dim () ^ "  " ^ label ^ ansi.reset () ^ value
+    end
+
+(* Calcule le nouvel index sélectionné selon une touche de navigation.
+   - `key` : touche consommée puis empruntée pour comparaison (`j`/`down`, `k`/`up`).
+   - `selected` : index actuellement sélectionné.
+   - `count` : nombre d'entrées; les bornes sont ramenées à zéro si le menu est vide.
+
+   Retourne l'index borné entre zéro et le dernier élément, sans modifier les
+   arguments. *)
+fun menu_step
+        (key : string, selected : int, count : int) : int =
+    let val down = "j"
+        val downArrow = "down"
+        val up = "k"
+        val upArrow = "up"
+        val last = if count <= 0 then 0 else count - 1
+    in
+        if string.equals (borrow key, borrow down) then
+            if selected >= last then last else selected + 1
+        else if string.equals (borrow key, borrow downArrow) then
+            if selected >= last then last else selected + 1
+        else if string.equals (borrow key, borrow up) then
+            if selected <= 0 then 0 else selected - 1
+        else if string.equals (borrow key, borrow upArrow) then
+            if selected <= 0 then 0 else selected - 1
+        else selected
+    end
+
+(* Efface l'écran puis écrit le rendu brut sur stdout, sans ajouter de nouvelle
+   ligne.
+   - `screen` : contenu consommé par concaténation et emprunté pendant l'écriture.
+
+   Effets : produit une séquence ANSI d'effacement et émet le contenu sur stdout. *)
+fun render (screen : string) : unit =
+    let val text = ansi.clear_screen () ^ screen
+    in io.print_raw (borrow text)
+    end

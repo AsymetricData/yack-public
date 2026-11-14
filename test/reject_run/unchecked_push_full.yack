@@ -1,0 +1,11 @@
+
+
+fun fill (xs : int array, k : int) : int array =
+    if k = 0 then xs
+    else
+      let val _ = array_push_unchecked (xs, k) in fill (xs, k - 1) end
+
+fun main () =
+    let val xs = fill (array_make (7, 3), 100)
+    in print_int (array_length (xs))
+    end

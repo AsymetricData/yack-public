@@ -1,0 +1,12 @@
+import yack/string
+
+
+
+fun main () : unit =
+    let val names : string map = map_new ()
+        val _ = map_set (names, "a", "hello")
+        val first = map_get_borrow (names, "a")
+        val n = string_length (first)
+        val _ = map_set (names, "a", "bye")
+    in print_int (n)
+    end

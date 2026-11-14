@@ -1,0 +1,10 @@
+fun use (p : borrow (int * string)) : int =
+    case p of
+        (x, y) => x + string_length (y)
+
+fun main () =
+    let val p = (40, "ab")
+        val result = use (borrow p)
+    in
+        print_int (result)
+    end

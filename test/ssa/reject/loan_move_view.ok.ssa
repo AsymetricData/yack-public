@@ -1,0 +1,8 @@
+# The same graph, accepted: the view is read before the root moves.
+fun yack_f {
+  b0(%0.p : string * string):
+    %1.x : string = view field 1 %0.p
+    %3 : int = string.string_length %1.x
+    %2 : unit = call yack_sink move %0.p
+    return %3
+}

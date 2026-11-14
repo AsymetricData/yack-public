@@ -1,0 +1,10 @@
+type user : Affine = { name : int }
+
+fun pick (value : borrow user) : (borrow user, int) =
+    (value, 0)
+
+fun main () =
+    let val user : user = { name = 1 }
+        val pair = pick (borrow user)
+    in ()
+    end

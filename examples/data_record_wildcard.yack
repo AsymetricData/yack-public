@@ -1,0 +1,8 @@
+type box = { value : int option }
+
+fun main () =
+    let val boxed = { value = Some (42) }
+    in case boxed of
+         { value = Some _ } => ()
+       | _ => ()
+    end

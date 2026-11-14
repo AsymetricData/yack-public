@@ -1,0 +1,7 @@
+
+
+
+fun main () =
+    let val values : int array = array_make (0, 100000000)
+    in print_int (array_length_borrow (borrow values))
+    end

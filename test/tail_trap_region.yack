@@ -1,0 +1,38 @@
+
+
+
+
+
+
+
+
+
+
+
+datatype box = Box of int
+
+fun make (n : int) : box = Box (n)
+
+fun region_walk (previous : box, n : int, acc : int) : int =
+    if n <= 0 then (case previous of Box (value) => acc + value)
+    else
+        let val next = make (n)
+        in
+            case previous of
+                Box (value) => region_walk (next, n - 1, acc + value)
+        end
+
+fun native_walk (previous : box, n : int, acc : int) : int =
+    if n <= 0 then (case previous of Box (value) => acc + value)
+    else
+        let val next = Box (n)
+        in
+            case previous of
+                Box (value) => native_walk (next, n - 1, acc + value)
+        end
+
+fun main () =
+    let val first = region_walk (Box (0), 1000, 0)
+        val second = native_walk (Box (0), 1000, 0)
+    in print_int (first * 10 + second)
+    end

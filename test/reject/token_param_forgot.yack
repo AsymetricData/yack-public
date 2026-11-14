@@ -1,0 +1,7 @@
+fun use_token (token : token) : unit =
+    ()
+
+fun main () =
+    let val token = new_token ()
+    in use_token (token)
+    end

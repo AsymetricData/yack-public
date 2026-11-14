@@ -1,0 +1,221 @@
+
+
+
+import yack/list
+
+fun empty_int () : int list = Nil
+
+fun empty_string () : string list = Nil
+
+fun empty_bool () : bool list = Nil
+
+fun empty_groups () : int list list = Nil
+
+fun ints () : int list = Cons ((1, Cons ((2, Cons ((3, Nil))))))
+
+fun texts () : string list =
+    Cons (("a", Cons (("bb", Cons (("ccc", Nil))))))
+
+fun count_list (values : 'a list) : int =
+    list.foldl (pair => case pair of (acc, _) => acc + 1, 0, values)
+
+fun make_int (_ : int) : int = 7
+
+fun make_text (_ : int) : string = "mapped"
+
+fun make_text_borrow (_ : borrow int) : string = "borrowed"
+
+fun make_text_value (_ : int) : string = "valued"
+
+fun is_even_int (value : int) : bool = value % 2 = 0
+
+fun keep_even_text (value : int) : string option =
+    if value % 2 = 0 then Some ("even") else None
+
+fun add_pair (pair : int * int) : int =
+    case pair of (acc, value) => acc + value
+
+fun drop_text (pair : string * int) : int =
+    case pair of (_, acc) => acc + 1
+
+fun check_basics () : int =
+    (if list.is_empty (empty_int ()) then 1 else 0) +
+    (if list.is_empty (ints ()) then 1 else 0) +
+    list.length (empty_int ()) +
+    list.length (ints ()) +
+    list.sum_int (empty_int ()) +
+    list.sum_int (ints ())
+
+fun check_head_tail () : int =
+    let val first = list.head (texts ())
+        val none = list.head (empty_string ())
+        val rest = list.tail (texts ())
+        val empty = list.tail (empty_string ())
+    in
+        (case first of
+             Some (value) => string_length (borrow value)
+           | None => 0) +
+        (case none of Some (_) => 1 | None => 0) +
+        list.length (rest) +
+        list.length (empty)
+    end
+
+fun check_reverse () : int =
+    count_list
+      (list.reverse_into
+         (Cons ((1, Cons ((2, Nil)))), Cons ((3, Nil)))) +
+    count_list (list.reverse (ints ())) +
+    count_list (list.reverse (empty_int ()))
+
+fun check_append () : int =
+    count_list (list.append (ints (), ints ())) +
+    count_list (list.append (empty_int (), ints ())) +
+    count_list (list.append (ints (), empty_int ())) +
+    count_list (list.append_from (ints (), ints (), Nil)) +
+    count_list (list.append_from (Nil, ints (), Nil))
+
+fun check_concat () : int =
+    let val groups =
+          Cons ((Cons ((1, Cons ((2, Nil)))),
+                 Cons ((Nil, Cons ((Cons ((3, Nil)), Nil))))))
+    in
+        count_list (list.concat (groups)) +
+        count_list (list.concat (empty_groups ())) +
+        count_list (list.concat (Cons ((empty_int (), empty_groups ()))))
+    end
+
+fun check_nth () : int =
+    (case list.nth (texts (), 1) of
+         Some (value) => string_length (borrow value)
+       | None => 0) +
+    (case list.nth (texts (), -1) of Some (_) => 1 | None => 0) +
+    (case list.nth (texts (), 9) of Some (_) => 1 | None => 0) +
+    (case list.nth (empty_string (), 0) of Some (_) => 1 | None => 0)
+
+fun check_take_drop () : int =
+    count_list (list.take (texts (), 2)) +
+    count_list (list.take (texts (), 0)) +
+    count_list (list.take (texts (), 9)) +
+    count_list (list.take_from (texts (), 1, Nil)) +
+    count_list (list.drop (texts (), 1)) +
+    count_list (list.drop (texts (), 0)) +
+    count_list (list.drop (texts (), 9)) +
+    list.length (ints ())
+
+fun check_range_repeat () : int =
+    count_list (list.range (0, 4)) +
+    count_list (list.range (4, 4)) +
+    count_list (list.range_from (1, 4, Nil)) +
+    count_list (list.repeat_int (5, 3)) +
+    count_list (list.repeat_int (5, 0)) +
+    count_list (list.repeat_int_from (5, 2, Nil))
+
+fun check_extrema () : int =
+    (case list.max_int (ints ()) of Some (value) => value | None => 0) +
+    (case list.max_int (empty_int ()) of Some (_) => 1 | None => 0) +
+    (case list.max_int_from (ints (), None) of
+         Some (value) => value
+       | None => 0) +
+    (case list.min_int (ints ()) of Some (value) => value | None => 0) +
+    (case list.min_int (empty_int ()) of Some (_) => 1 | None => 0) +
+    (case list.min_int_from (ints (), None) of
+         Some (value) => value
+       | None => 0) +
+    list.sum_int_from (ints (), 10)
+
+fun check_searches () : int =
+    (if list.contains_int (ints (), 2) then 1 else 0) +
+    (if list.contains_int (ints (), 9) then 1 else 0) +
+    (case list.index_of_int (ints (), 2) of Some (value) => value | None => 0) +
+    (case list.index_of_int (ints (), 9) of Some (_) => 1 | None => 0) +
+    (case list.index_of_int_from (ints (), 3, 10) of
+         Some (value) => value
+       | None => 0) +
+    (if list.contains_string (texts (), borrow "bb") then 1 else 0) +
+    (if list.contains_string (texts (), borrow "zz") then 1 else 0) +
+    (case list.index_of_string (texts (), borrow "bb") of
+         Some (value) => value
+       | None => 0) +
+    (case list.index_of_string (texts (), borrow "zz") of
+         Some (_) => 1
+       | None => 0) +
+    (case list.index_of_string_from (texts (), borrow "ccc", 10) of
+         Some (value) => value
+       | None => 0)
+
+fun check_booleans () : int =
+    (if list.any_true (Cons ((true, Cons ((false, Nil))))) then 1 else 0) +
+    (if list.any_true (Cons ((false, Cons ((false, Nil))))) then 1 else 0) +
+    (if list.any_true (empty_bool ()) then 1 else 0) +
+    (if list.all_true (Cons ((true, Cons ((true, Nil))))) then 1 else 0) +
+    (if list.all_true (Cons ((true, Cons ((false, Nil))))) then 1 else 0) +
+    (if list.all_true (empty_bool ()) then 1 else 0)
+
+fun check_zip_int_string () : int =
+    count_list (list.zip_int_string (ints (), texts ())) +
+    count_list (list.zip_int_string (Cons ((1, Nil)), texts ())) +
+    count_list (list.zip_int_string (ints (), Cons (("a", Nil)))) +
+    count_list (list.zip_int_string (empty_int (), texts ())) +
+    count_list (list.zip_int_string (ints (), empty_string ())) +
+    count_list (list.zip_int_string_from (ints (), texts (), Nil))
+
+fun check_discard () : int =
+    let val one = list.discard_value ("gone")
+        val many = list.discard_list (texts ())
+        val none = list.discard_list (empty_int ())
+    in 3 end
+
+fun check_map () : int =
+    count_list (list.map (make_int, ints ())) +
+    count_list (list.map (make_text, ints ())) +
+    count_list (list.map (make_int, empty_int ())) +
+    count_list (list.map_from (make_text, ints (), Nil)) +
+    list.length (ints ())
+
+fun check_borrow_map () : int =
+    let val values = ints ()
+        val mapped = list.borrow_map (make_text_borrow, borrow values)
+        val mapped_int = list.borrow_map_int (make_text_value, borrow values)
+        val direct = list.borrow_map_from (make_text_borrow, borrow values, Nil)
+        val direct_int =
+          list.borrow_map_int_from (make_text_value, borrow values, Nil)
+    in
+        count_list (mapped) + count_list (mapped_int) +
+        count_list (direct) + count_list (direct_int)
+    end
+
+fun check_filter () : int =
+    let val values = ints ()
+        val kept = list.filter (is_even_int, values)
+        val direct =
+          list.filter_from (is_even_int, ints (), Cons ((9, Nil)))
+    in count_list (kept) + count_list (direct) end
+
+fun check_folds () : int =
+    list.foldl (add_pair, 0, ints ()) +
+    list.foldl (add_pair, 0, empty_int ()) +
+    list.foldr (drop_text, 0, texts ()) +
+    list.foldr (drop_text, 0, empty_string ()) +
+    list.foldr_from (drop_text, 0, texts ())
+
+fun check_zip () : int =
+    count_list (list.zip (ints (), texts ())) +
+    count_list (list.zip (Cons ((1, Nil)), texts ())) +
+    count_list (list.zip (ints (), Cons (("a", Nil)))) +
+    count_list (list.zip (empty_int (), texts ())) +
+    count_list (list.zip (ints (), empty_string ())) +
+    count_list (list.zip_from (ints (), texts (), Nil))
+
+fun check_filter_map () : int =
+    count_list (list.filter_map (keep_even_text, ints ())) +
+    count_list (list.filter_map (keep_even_text, empty_int ())) +
+    count_list (list.filter_map_from (keep_even_text, ints (), Nil))
+
+fun main () =
+    print_int
+      (check_basics () + check_head_tail () + check_reverse () +
+       check_append () + check_concat () + check_nth () + check_take_drop () +
+       check_range_repeat () + check_extrema () + check_searches () +
+       check_booleans () + check_zip_int_string () + check_discard () +
+       check_map () + check_borrow_map () + check_filter () + check_folds () +
+       check_zip () + check_filter_map ())

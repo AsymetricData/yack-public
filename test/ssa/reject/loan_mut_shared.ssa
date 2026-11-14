@@ -1,0 +1,11 @@
+# expect: takes mutable borrow `m` (%2) of `s` (%0) while its borrow `r` (%1) of `s` (%0) is live
+# A mutable borrow while a shared one is still read after it.
+fun yack_f {
+  b0(%0.s : string):
+    %1.r : &string = borrow &%0.s
+    %2.m : &mut string = borrow mut &%0.s
+    %3 : int = string.string_length %1.r
+    %4 : unit = call yack_touch %2.m
+    drop %0.s : string
+    return %3
+}

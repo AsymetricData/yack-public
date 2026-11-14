@@ -1,0 +1,4 @@
+fun main () =
+    let val resource = new_resource ()
+    in ()
+    end

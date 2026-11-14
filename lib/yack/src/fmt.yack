@@ -1,0 +1,111 @@
+import yack/string
+
+(* Convertit un entier en chaîne décimale.
+   - `value` : entier scalaire consommé.
+
+   Retourne sa représentation textuelle sans ajouter de saut de ligne. *)
+fun format_int (value : int) : string = int_to_string (value)
+
+(* Convertit un entier 64 bits en chaîne décimale.
+   - `value` : entier 64 bits scalaire consommé.
+
+   Retourne sa représentation textuelle sans ajouter de saut de ligne. *)
+fun format_int64 (value : int64) : string = int64_to_string (value)
+
+(* Convertit un flottant en chaîne.
+   - `value` : flottant scalaire consommé.
+
+   Retourne le résultat de `float_to_string`, sans saut de ligne. *)
+fun format_float (value : float) : string = float_to_string (value)
+
+(* Convertit un booléen en son littéral textuel.
+   - `value` : booléen scalaire consommé.
+
+   Retourne `true` ou `false` en minuscules. *)
+fun format_bool (value : bool) : string = if value then "true" else "false"
+
+(* Convertit un code de caractère en chaîne.
+   - `value` : code entier à convertir.
+
+   Retourne la chaîne du caractère si le code est non négatif, sinon la chaîne vide. *)
+fun format_char (value : int) : string =
+    if value < 0 then "" else string_of_char (value)
+
+(* Copie une chaîne empruntée afin d'en rendre une chaîne possédée.
+   - `value` : chaîne empruntée, laissée intacte.
+
+   Retourne une copie indépendante du texte. *)
+fun string_to_string (value : borrow string) : string = string.copy (value)
+
+(* Fournit le séparateur de ligne sous forme de chaîne. Retourne une nouvelle chaîne
+   contenant le saut de ligne `\n`. *)
+fun newline () : string = "\n"
+
+(* Fournit une tabulation sous forme de chaîne. Retourne une nouvelle chaîne
+   contenant le caractère `\t`. *)
+fun tab () : string = "\t"
+
+(* Affiche une chaîne suivie d'un saut de ligne.
+   - `value` : texte emprunté, copié avant écriture et non modifié.
+
+   Écrit sur la sortie standard ; ne retourne aucune donnée. *)
+fun print_line (value : borrow string) : unit =
+    print_string (string.copy (value) ^ "\n")
+
+(* Affiche le littéral d'un booléen suivi d'un saut de ligne.
+   - `value` : booléen scalaire consommé.
+
+   Écrit sur la sortie standard et ne retourne aucune donnée. *)
+fun print_bool_line (value : bool) : unit = print_string (format_bool (value) ^ "\n")
+
+(* Affiche une chaîne empruntée suivie d'un saut de ligne.
+   - `value` : texte emprunté, non modifié.
+
+   Délègue à `print_line`, qui copie le texte avant écriture standard. *)
+fun print_string_line (value : borrow string) : unit = print_line (value)
+
+(* Assemble une liste de chaînes en les séparant par un texte donné.
+   - `separator` : chaîne séparatrice consommée par `string.join`.
+   - `values` : chaînes ordonnées consommées par `string.join`.
+
+   Retourne une nouvelle chaîne ; ne modifie pas les entrées en place. *)
+fun join (separator : string, values : string list) : string =
+    string.join (separator, values)
+
+(* Répète une chaîne empruntée un nombre de fois donné.
+   - `value` : motif emprunté, non modifié.
+   - `count` : nombre de répétitions.
+
+   Retourne une nouvelle chaîne produite par `string.repeat`. *)
+fun repeat (value : borrow string, count : int) : string = string.repeat (value, count)
+
+(* Complète une chaîne à gauche jusqu'à la largeur demandée.
+   - `value` : chaîne empruntée, non modifiée.
+   - `width` : largeur minimale visée.
+   - `fill` : code du caractère de remplissage.
+
+   Retourne le résultat de `string.pad_left` dans une nouvelle chaîne. *)
+fun pad_left (value : borrow string, width : int, fill : int) : string =
+    string.pad_left (value, width, fill)
+
+(* Complète une chaîne à droite jusqu'à la largeur demandée.
+   - `value` : chaîne empruntée, non modifiée.
+   - `width` : largeur minimale visée.
+   - `fill` : code du caractère de remplissage.
+
+   Retourne le résultat de `string.pad_right` dans une nouvelle chaîne. *)
+fun pad_right (value : borrow string, width : int, fill : int) : string =
+    string.pad_right (value, width, fill)
+
+(* Entoure une copie de chaîne de guillemets doubles.
+   - `value` : chaîne empruntée, non modifiée ni échappée.
+
+   Retourne une nouvelle chaîne de la forme `"texte"`. *)
+fun quote (value : borrow string) : string = "\"" ^ string.copy (value) ^ "\""
+
+(* Concatène les chaînes d'une liste sans séparateur.
+   - `values` : chaînes ordonnées consommées par la jointure.
+
+   Retourne une nouvelle chaîne ; aucune entrée n'est mutée. *)
+fun concat (values : string list) : string =
+    let val empty = "" in string.join (empty, values) end

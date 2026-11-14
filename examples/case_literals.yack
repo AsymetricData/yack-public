@@ -1,0 +1,17 @@
+fun classify (value : int) : int =
+    case value of
+        0 => 10
+      | 1 => 11
+      | _ => 12
+
+fun flip (value : bool) : bool =
+    case value of true => false | false => true
+
+fun main () =
+    let val a = classify (0)
+        val b = classify (1)
+        val c = classify (9)
+        val d = flip (true)
+        val printed = print_int (a + b + c)
+    in print_bool (d)
+    end

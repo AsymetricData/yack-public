@@ -1,0 +1,200 @@
+import net/Http
+import net/Url
+import web/Cookie
+import web/Session
+import yack/string
+
+(* yack/web/Request : requête HTTP possédée, lue par emprunt.
+
+Les accesseurs prennent `borrow t` : lire une requête ne la consomme plus.
+Un handler garde la propriété, lit autant de fois qu'il veut, puis laisse la
+requête se libérer une seule fois à la fin. `with_session` reste un
+reconstructeur possédé.
+
+La requête ne garde que le texte brut et des offsets. Method, path, query,
+headers, cookies et body sont découpés à la demande : un handler qui ne lit
+que `?name=` ne paie ni la liste des en-têtes ni celle des cookies. *)
+type t : Affine = {
+    raw : string,
+    method_start : int,
+    method_len : int,
+    target_start : int,
+    target_len : int,
+    header_start : int,
+    header_len : int,
+    body_start : int,
+    session_id : string option,
+    session_data : string
+}
+
+(* Analyse une requête HTTP brute sans découper les champs optionnels. *)
+fun parse (text : string) : t =
+    case Http.parse_request (text) of
+        {
+            text = raw,
+            method_start = method_start,
+            method_len = method_len,
+            target_start = target_start,
+            target_len = target_len,
+            version_start = _version_start,
+            version_len = _version_len,
+            header_start = header_start,
+            header_len = header_len
+        } =>
+            let
+                val session_name = "yack_sid"
+                val cookie_name = "cookie"
+                val session_id =
+                    let val cookie_header =
+                            Http.find_header_in_range
+                                ( borrow raw
+                                , header_start
+                                , header_start + header_len
+                                , borrow cookie_name
+                                )
+                    in
+                        case cookie_header of
+                            None => None
+                          | Some value =>
+                                Cookie.find_in_header
+                                    (borrow session_name, borrow value)
+                    end
+            in
+                {
+                    raw = raw,
+                    method_start = method_start,
+                    method_len = method_len,
+                    target_start = target_start,
+                    target_len = target_len,
+                    header_start = header_start,
+                    header_len = header_len,
+                    body_start = header_start + header_len + 2,
+                    session_id = session_id,
+                    session_data = ""
+                }
+            end
+
+(* Remplace les données de session, après chargement par le serveur. *)
+fun with_session (
+    request : t,
+    session_id : string option,
+    session_data : string
+) : t =
+    case request of
+        {
+            raw = raw,
+            method_start = method_start,
+            method_len = method_len,
+            target_start = target_start,
+            target_len = target_len,
+            header_start = header_start,
+            header_len = header_len,
+            body_start = body_start,
+            session_id = _old_id,
+            session_data = _old_data
+        } =>
+            {
+                raw = raw,
+                method_start = method_start,
+                method_len = method_len,
+                target_start = target_start,
+                target_len = target_len,
+                header_start = header_start,
+                header_len = header_len,
+                body_start = body_start,
+                session_id = session_id,
+                session_data = session_data
+            }
+
+fun method (request : borrow t) : string =
+    case request of
+        { raw = raw, method_start = start, method_len = length } =>
+            string_slice (raw, start, start + length)
+
+fun target (request : borrow t) : string =
+    case request of
+        { raw = raw, target_start = start, target_len = length } =>
+            string_slice (raw, start, start + length)
+
+fun path (request : borrow t) : string =
+    case request of
+        { raw = raw, target_start = start, target_len = length } =>
+            Url.path_in_range (raw, start, start + length)
+
+fun content_length_in
+    (raw : borrow string, start : int, length : int) : int =
+    let val name = "content-length"
+        val found =
+            Http.find_header_in_range
+                (raw, start, start + length, borrow name)
+    in
+        case found of
+            None => 0
+          | Some text =>
+                (case string_to_int (borrow text) of
+                     Some value => value
+                   | None => 0)
+    end
+
+fun content_length (request : borrow t) : int =
+    case request of
+        { raw = raw, header_start = start, header_len = length } =>
+            content_length_in (raw, start, length)
+
+fun body (request : borrow t) : string =
+    case request of
+        {
+            raw = raw,
+            header_start = header_start,
+            header_len = header_len,
+            body_start = start
+        } =>
+            let val raw_length = string_length (raw)
+                val content_end =
+                    start + content_length_in (raw, header_start, header_len)
+                val body_end =
+                    if content_end < raw_length then content_end else raw_length
+            in
+                if start < 0 then
+                    ""
+                else if start > raw_length then ""
+                else
+                    string_slice (raw, start, body_end)
+            end
+
+(* Copie l'identifiant : `option` ne peut pas transporter un emprunt. *)
+fun session_id (request : borrow t) : string option =
+    case request of
+        { session_id = value } =>
+            (case value of
+                 None => None
+               | Some text => Some (string_slice (text, 0, string_length (text))))
+
+fun header (request : borrow t, name : string) : string option =
+    case request of
+        { raw = raw, header_start = start, header_len = length } =>
+            Http.find_header_in_range (raw, start, start + length, borrow name)
+
+fun query (request : borrow t, name : string) : string option =
+    case request of
+        { raw = raw, target_start = start, target_len = length } =>
+            Url.query_value_in_range_option
+                (raw, start, start + length, borrow name)
+
+fun cookie (request : borrow t, name : string) : string option =
+    case request of
+        { raw = raw, header_start = start, header_len = length } =>
+            let val header_name = "cookie"
+                val cookie_header =
+                    Http.find_header_in_range
+                        (raw, start, start + length, borrow header_name)
+            in
+                case cookie_header of
+                    None => None
+                  | Some text => Cookie.find_in_header (borrow name, borrow text)
+            end
+
+fun session (request : borrow t, name : string) : string option =
+    case request of
+        { session_data = session_data } =>
+            Session.get (session_data, borrow name)

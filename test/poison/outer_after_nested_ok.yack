@@ -1,0 +1,16 @@
+
+
+
+fun main () =
+    arena
+        val outer = "ou" ^ "ter"
+        val _ = arena
+                    val inner = "in" ^ "ner"
+                in ()
+                end
+        val fresh = "fr" ^ "esh"
+    in
+        print_int
+            (string_char_at_unchecked (borrow outer, 0) +
+             string_char_at_unchecked (borrow fresh, 0))
+    end

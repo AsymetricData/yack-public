@@ -1,0 +1,18 @@
+type UserId = int
+type Name = string
+type 'a Box = 'a list
+type ('a, 'b) Entry = 'a * 'b
+type User = { id : UserId, name : Name }
+type UserAlias = User
+
+fun make (id : UserId, name : Name) : User =
+    { id = id, name = name }
+
+fun main () =
+    let
+        val user : UserAlias = make (7, "yack")
+        val box : int Box = Cons ((1, Nil))
+        val entry : (int, string) Entry = (user.id, user.name)
+    in
+        print_int (user.id + list_length (box))
+    end

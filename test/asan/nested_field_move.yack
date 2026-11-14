@@ -1,0 +1,16 @@
+type inner : Affine = { name : string, tag : string }
+type outer : Affine = { inner : inner, other : string }
+
+fun loop (n : int) : unit =
+    if n = 0 then ()
+    else
+        let val o : outer =
+                { inner = { name = "a" ^ "aa", tag = "t" ^ "tt" }
+                , other = "o" ^ "oo"
+                }
+            val name = o.inner.name
+            val _ = print_string (name)
+        in loop (n - 1)
+        end
+
+fun main () = loop (500)

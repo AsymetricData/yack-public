@@ -1,0 +1,35 @@
+
+
+
+datatype 'a box = Box of 'a
+
+datatype inner = Inner of int box
+
+datatype outer = Outer of inner
+
+type text_box = { value : string }
+
+type text_inner = { box : text_box }
+
+type text_outer = { inner : text_inner }
+
+fun keep_datatypes (value : outer) : int = 1
+
+fun keep_records (value : text_outer) : int = 1
+
+fun keep_options (value : int option option option) : int = 1
+
+fun keep_results (value : int option result) : int = 1
+
+fun main () =
+    print_int
+      (keep_datatypes (Outer (Inner (Box (7)))) +
+       keep_records
+         ({ inner = { box = { value = "nested string" } } }) +
+       keep_options (Some (Some (Some (5)))) +
+       keep_options (Some (Some (None))) +
+       keep_options (Some (None)) +
+       keep_options (None) +
+       keep_results (Ok (Some (3))) +
+       keep_results (Ok (None)) +
+       keep_results (Error ("nested error")))

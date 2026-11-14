@@ -1,0 +1,7 @@
+fun make (x : int) : int * int = (x, x + 1)
+
+fun main () =
+    let val value = make (40)
+        val result = value.0 + value.1
+    in print_int (result)
+    end

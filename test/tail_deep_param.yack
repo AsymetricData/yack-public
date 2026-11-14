@@ -1,0 +1,10 @@
+
+
+type pair = { name : string, count : int }
+
+fun loop (n : int, pair : pair) : int =
+    if n = 0 then pair.count
+    else loop (n - 1, { name = "k" ^ int_to_string (n % 10), count = pair.count + 1 })
+
+fun main () =
+    print_int (loop (1000000, { name = "a" ^ "b", count = 0 }))

@@ -1,0 +1,9 @@
+fun add (a, b) = a + b
+
+fun double (x) = x * 2
+
+fun main () =
+    let val n = 5 |> add (3) |> double
+    in
+        print_int (n)
+    end

@@ -1,0 +1,4 @@
+datatype cell : Copy = Cell of int
+
+fun main () =
+    print_int (list_length (Cons ((Cell (1), Cons ((Cell (2), Nil))))))

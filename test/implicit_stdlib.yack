@@ -1,0 +1,4 @@
+import yack/os
+
+fun main () =
+    print_string (os.getenv_or ("YACK_IMPLICIT_STDLIB_TEST", "ok"))

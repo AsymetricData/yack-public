@@ -1,0 +1,9 @@
+fun classify (n) =
+    case n of
+        0 => 10
+      | x if x < 0 => 20
+      | x if x > 10 => 30
+      | _ => 40
+
+fun main () =
+    print_int (classify (0) + classify (-5) + classify (11) + classify (5))

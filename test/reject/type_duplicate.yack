@@ -1,0 +1,4 @@
+type duplicate : Affine = { value : int }
+type duplicate : Copy = { value : int }
+
+fun main () = ()

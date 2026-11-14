@@ -1,0 +1,86 @@
+(* Indique si une option contient une valeur.
+   - `value` : option examinée ; elle est reçue par valeur et consommée par ce test.
+
+   Retourne `true` pour `Some _` et `false` pour `None`. Ne modifie aucune donnée en
+   place. *)
+fun is_some (value : 'a option) : bool =
+    case value of
+        None => false
+      | Some _ => true
+
+(* Indique si une option est vide.
+   - `value` : option examinée ; elle est reçue par valeur et consommée par ce test.
+
+   Retourne `true` pour `None` et `false` pour `Some _`. Ne modifie aucune donnée en
+   place. *)
+fun is_none (value : 'a option) : bool =
+    case value of
+        None => true
+      | Some _ => false
+
+(* Extrait la valeur d'une option ou utilise une valeur de repli.
+   - `value` : option consommée ; son contenu est transféré au résultat si présent.
+   - `default` : valeur consommée et retournée uniquement si `value` vaut `None`.
+
+   Retourne le contenu de `Some` ou `default` pour `None`. Aucun argument n'est
+   emprunté ni modifié en place. *)
+fun unwrap_or (value : 'a option, default : 'a) : 'a =
+    case value of
+        None => default
+      | Some inner => inner
+
+(* Convertit une option en résultat en associant un message à l'absence de valeur.
+   - `value` : option consommée ; la valeur de `Some` est transférée au résultat.
+   - `message` : chaîne transférée à `Error` si l'option vaut `None` ; elle n'est pas
+     utilisée dans le cas `Some`.
+
+   Retourne `Ok` avec le contenu ou `Error` avec le message. Aucun argument n'est
+   emprunté ni modifié en place. *)
+fun to_result (value : 'a option, message : string) : 'a result =
+    case value of
+        None => Error (message)
+      | Some inner => Ok (inner)
+
+(* Convertit un résultat en option en écartant son erreur éventuelle.
+   - `value` : résultat consommé ; la valeur de `Ok` est transférée à l'option.
+
+   Retourne `Some` pour `Ok` et `None` pour `Error`, dont le message est abandonné.
+   Aucune mutation en place. *)
+fun from_result (value : 'a result) : 'a option =
+    case value of
+        Ok inner => Some (inner)
+      | Error _ => None
+
+(* Compare la présence des valeurs de deux options.
+   - `left` : première option consommée pour inspecter sa variante.
+   - `right` : seconde option consommée pour inspecter sa variante.
+
+   Retourne -1 si `left` vaut `None` et `right` `Some`, 1 dans le cas inverse, et 0
+   si les variantes sont identiques. Les contenus ne sont pas comparés et aucune
+   donnée n'est modifiée en place. *)
+fun compare (left : 'a option, right : 'a option) : int =
+    case left of
+        None =>
+            (case right of
+                 None => 0
+               | Some (_) => -1)
+      | Some (_) =>
+            (case right of
+                 None => 1
+               | Some (_) => 0)
+
+(* Applique `f` au contenu de `Some` et laisse `None` inchangé.
+   - `f` : fonction appliquée au contenu.
+   - `value` : option consommée. *)
+fun map (f : consume 'a -> 'b, value : 'a option) : 'b option =
+    case value of
+        None => None
+      | Some inner => Some (f (inner))
+
+(* Enchaîne une fonction qui rend elle-même une option.
+   - `f` : fonction appliquée au contenu.
+   - `value` : option consommée. *)
+fun and_then (f : consume 'a -> 'b option, value : 'a option) : 'b option =
+    case value of
+        None => None
+      | Some inner => f (inner)

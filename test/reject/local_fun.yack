@@ -1,0 +1,9 @@
+fun make_adder (n : int) : int -> int =
+    let fun add (x) = x + n
+    in add
+    end
+
+fun main () =
+    let val f = make_adder (2)
+    in print_int (f (3))
+    end

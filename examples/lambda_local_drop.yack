@@ -1,0 +1,4 @@
+fun apply (f : int -> unit, n : int) : unit = f (n)
+
+fun main () =
+    apply (x => let val text = "a" ^ "aa" in print_string (text) end, 1)

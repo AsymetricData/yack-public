@@ -1,0 +1,9 @@
+datatype box = Box of int
+fun value_of (item : borrow box) : int =
+    case item of Box (value) => value
+fun main () =
+    let val boxes : box array = array_new ()
+        val _ = array_push (boxes, Box (42))
+        val item = array_get_borrow (boxes, 0)
+    in print_int (value_of (item))
+    end

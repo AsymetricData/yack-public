@@ -1,0 +1,10 @@
+datatype chain = Link of int * string * chain | End
+fun build_chain (n : int, acc : chain) : chain =
+    if n = 0 then acc
+    else build_chain (n - 1, Link ((n, if n % 3 = 0 then "a" else "bcd", acc)))
+fun length_of (c : borrow chain, acc : int) : int =
+    case c of End => acc | Link (_, _, rest) => length_of (rest, acc + 1)
+fun main () =
+    let val chain = build_chain (10000000, End)
+    in print_int (length_of (borrow chain, 0))
+    end

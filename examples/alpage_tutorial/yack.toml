@@ -1,0 +1,10 @@
+[package]
+name = "alpage_tutorial"
+version = "0.1.0"
+
+[dependencies]
+alpage = { path = "../../lib/alpage" }
+web = { path = "../../lib/web" }
+http_server = { path = "../../lib/http_server" }
+net = { path = "../../lib/net" }
+yack = { path = "../../lib/yack" }

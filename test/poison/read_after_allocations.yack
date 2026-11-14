@@ -1,0 +1,18 @@
+
+
+fun main () =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "old")
+        val _ = arena
+                    val text = "he" ^ "llo"
+                    val _ = array_put_arena (values, 0, text)
+                in ()
+                end
+    in
+        arena
+            val reuse = "ZZZZ" ^ "ZZZZ"
+            val value = array_get_borrow (values, 0)
+        in
+            print_int (string_char_at_unchecked (value, 0))
+        end
+    end

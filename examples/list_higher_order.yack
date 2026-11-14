@@ -1,0 +1,18 @@
+import yack/list
+
+fun add_pair (pair : int * int) : int =
+    case pair of
+        (acc, x) => acc + x
+
+fun digits_pair (pair : int * int) : int =
+    case pair of
+        (x, acc) => acc * 10 + x
+
+fun main () =
+    let val left = list.foldl (add_pair, 0, list.range (1, 5))
+        val right = list.foldr (digits_pair, 0, list.range (1, 4))
+        val pairs = list.zip (Cons ((1, Cons ((2, Nil)))),
+                              Cons (("a", Cons (("b", Nil)))))
+        val count = list.length (pairs)
+    in print_int (left + right + count)
+    end

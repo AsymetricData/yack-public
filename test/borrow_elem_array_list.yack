@@ -1,0 +1,9 @@
+fun first (items : borrow int list array) : int =
+    case array_get_borrow_view (items, 0) of
+        x :: _ => x
+      | [] => 0
+fun main () =
+    let val xs : int list array = array_new ()
+        val _ = array_push (xs, [42, 1])
+    in print_int (first (borrow xs))
+    end

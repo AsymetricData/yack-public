@@ -1,0 +1,17 @@
+
+
+
+
+
+fun build (n : int, acc : int list) : int list =
+    if n = 0 then acc else build (n - 1, Cons ((n, acc)))
+
+fun walk (current : borrow int list, count : int) : int =
+    case current of
+        Nil => count
+      | Cons ((_, rest)) => walk (rest, count + 1)
+
+fun main () =
+    let val values = build (10000000, Nil)
+    in print_int (walk (borrow values, 0))
+    end

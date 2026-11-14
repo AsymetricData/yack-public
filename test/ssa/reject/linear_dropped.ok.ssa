@@ -1,0 +1,7 @@
+# The same graph, accepted: the token is consumed by a call.
+fun yack_main {
+  b0:
+    %0 : token = call new_token
+    %1 : unit = call consume_token move %0!
+    return %1!
+}

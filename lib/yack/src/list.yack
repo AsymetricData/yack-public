@@ -1,0 +1,484 @@
+(* Parcours de `length` avec un compteur.
+   - `values` : liste consommée pour le parcours ; elle n’est pas rendue.
+   - `count` : cellules déjà comptées. *)
+fun length_from (values : 'a list, count : int) : int =
+    case values of
+        Nil => count
+      | Cons (_, rest) => length_from (rest, count + 1)
+
+(* Compte les cellules de la liste.
+   - `values` : liste consommée pour le parcours ; elle n’est pas rendue. *)
+fun length (values : 'a list) : int =
+    length_from (values, 0)
+
+(* Indique si la liste est vide.
+   - `values` : liste consommée ; elle n’est pas rendue. *)
+fun is_empty (values : 'a list) : bool =
+    case values of
+        Nil => true
+      | Cons (_, _) => false
+
+(* Renvoie la tête dans `Some`, ou `None` pour une liste vide.
+   - `values` : liste consommée ; l’élément de tête est déplacé dans le résultat et
+     la queue est abandonnée. *)
+fun head (values : 'a list) : 'a option =
+    case values of
+        Nil => None
+      | Cons (value, _) => Some (value)
+
+(* Renvoie la queue de la liste, ou une liste vide si elle est vide.
+   - `values` : liste consommée ; la cellule de tête est abandonnée et la queue est
+     déplacée au résultat. *)
+fun tail (values : 'a list) : 'a list =
+    case values of
+        Nil => Nil
+      | Cons (_, rest) => rest
+
+(* Construit l’inverse de `values` en le transférant dans l’accumulateur.
+   - `values` : liste consommée cellule par cellule.
+   - `acc` : liste accumulée, consommée puis rendue inversée avec le reste. *)
+fun reverse_into (values : 'a list, acc : 'a list) : 'a list =
+    case values of
+        Nil => acc
+      | Cons (value, rest) => reverse_into (rest, Cons ((value, acc)))
+
+(* Rend la liste dans l’ordre inverse.
+   - `values` : liste consommée ; ses éléments sont déplacés, sans duplication, dans
+     la liste rendue. *)
+fun reverse (values : 'a list) : 'a list = reverse_into (values, Nil)
+
+(* Parcours de `append` : inverse `left` dans `acc`, puis le reverse sur `right`.
+   - `left` : préfixe consommé.
+   - `right` : suffixe conservé jusqu’au dernier tour.
+   - `acc` : préfixe inversé, consommé puis rendu dans l’ordre. *)
+fun append_from
+        (left : 'a list, right : 'a list, acc : 'a list) : 'a list =
+    case left of
+        Nil => reverse_into (acc, right)
+      | Cons (value, rest) => append_from (rest, right, Cons ((value, acc)))
+
+(* Concatène deux listes dans l’ordre, sans dupliquer leurs éléments.
+   - `left` : liste consommée pour reconstruire son préfixe.
+   - `right` : liste consommée puis déplacée telle quelle à la fin.
+
+   Rend la liste concaténée. *)
+fun append (left : 'a list, right : 'a list) : 'a list =
+    append_from (left, right, Nil)
+
+(* Parcours de `concat` avec un accumulateur inversé.
+   - `lists` : liste externe et listes internes consommées.
+   - `acc` : éléments déjà aplatis, dans l’ordre inverse. *)
+fun concat_from (lists : 'a list list, acc : 'a list) : 'a list =
+    case lists of
+        Nil => reverse (acc)
+      | Cons (values, rest) => concat_from (rest, reverse_into (values, acc))
+
+(* Aplatie une liste de listes en concaténant leurs éléments dans l’ordre.
+   - `lists` : liste externe et listes internes consommées ; les cellules et éléments
+     sont déplacés, non copiés. *)
+fun concat (lists : 'a list list) : 'a list =
+    concat_from (lists, Nil)
+
+(* Renvoie l’élément à l’indice zéro-based, ou `None` si l’indice est négatif ou hors
+   limites.
+   - `values` : liste consommée ; les cellules parcourues et les éléments non rendus
+     sont abandonnés.
+   - `index` : indice recherché. *)
+fun nth (values : 'a list, index : int) : 'a option =
+    if index < 0 then
+        None
+    else
+        case values of
+            Nil => None
+          | Cons (value, rest) =>
+              if index = 0 then Some (value) else nth (rest, index - 1)
+
+(* Parcours de `take` avec un accumulateur inversé.
+   - `values` : liste consommée ; le suffixe non retenu est abandonné.
+   - `count` : nombre d’éléments encore demandé.
+   - `acc` : préfixe retenu, dans l’ordre inverse. *)
+fun take_from
+        (values : 'a list, count : int, acc : 'a list) : 'a list =
+    if count <= 0 then
+        reverse (acc)
+    else
+        case values of
+            Nil => reverse (acc)
+          | Cons (value, rest) =>
+                take_from (rest, count - 1, Cons ((value, acc)))
+
+(* Rend les `count` premiers éléments, ou toute la liste si elle est plus courte.
+   - `values` : liste consommée ; le préfixe est reconstruit en déplaçant ses
+     éléments, le reste est abandonné.
+   - `count` : nombre d’éléments demandé ; une valeur inférieure ou égale à zéro rend
+     une liste vide. *)
+fun take (values : 'a list, count : int) : 'a list =
+    take_from (values, count, Nil)
+
+(* Supprime les `count` premières cellules et rend le suffixe restant.
+   - `values` : liste consommée ; le préfixe supprimé est abandonné et le suffixe
+     déplacé au résultat.
+   - `count` : nombre de cellules à supprimer ; une valeur inférieure ou égale à zéro
+     conserve la liste entière. *)
+fun drop (values : 'a list, count : int) : 'a list =
+    if count <= 0 then
+        values
+    else
+        case values of
+            Nil => Nil
+          | Cons (_, rest) => drop (rest, count - 1)
+
+(* Construit les entiers de `current` à `stop` exclu en utilisant `acc` comme
+   accumulateur.
+   - `current` : prochaine valeur à inclure.
+   - `stop` : borne exclusive.
+   - `acc` : liste Affine consommée à chaque étape, puis inversée et rendue. *)
+fun range_from (current : int, stop : int, acc : int list) : int list =
+    if current >= stop then
+        reverse (acc)
+    else
+        range_from (current + 1, stop, Cons ((current, acc)))
+
+(* Construit la liste des entiers de `start` inclus à `stop` exclu.
+   - `start` : première valeur.
+   - `stop` : borne supérieure exclusive ; si elle est inférieure ou égale à `start`,
+     rend une liste vide. *)
+fun range (start : int, stop : int) : int list = range_from (start, stop, Nil)
+
+(* Parcours de `repeat_int` avec un accumulateur inversé.
+   - `value` : entier recopié dans chaque cellule.
+   - `count` : répétitions encore à construire.
+   - `acc` : cellules déjà construites, dans l’ordre inverse. *)
+fun repeat_int_from (value : int, count : int, acc : int list) : int list =
+    if count <= 0 then
+        reverse (acc)
+    else
+        repeat_int_from (value, count - 1, Cons ((value, acc)))
+
+(* Construit une liste contenant `value` répété `count` fois.
+   - `value` : entier recopié dans chaque cellule.
+   - `count` : nombre de répétitions ; une valeur inférieure ou égale à zéro rend une
+     liste vide. *)
+fun repeat_int (value : int, count : int) : int list =
+    repeat_int_from (value, count, Nil)
+
+(* Parcours de `sum_int` avec un accumulateur.
+   - `values` : liste Affine consommée par le parcours ; elle n’est pas rendue.
+   - `total` : somme des éléments déjà parcourus. *)
+fun sum_int_from (values : int list, total : int) : int =
+    case values of
+        Nil => total
+      | Cons (value, rest) => sum_int_from (rest, total + value)
+
+(* Calcule la somme des entiers de la liste.
+   - `values` : liste Affine consommée par le parcours ; elle n’est pas rendue.
+
+   L’addition est vérifiée : replier de droite à gauche garde les mêmes
+   points de débordement que la version récursive d’origine. Inverser
+   d’abord, puis accumuler, évite que `[max_int, 1, -1]` déborde sur
+   `max_int + 1`. *)
+fun sum_int (values : int list) : int =
+    sum_int_from (reverse (values), 0)
+
+(* Parcours de `max_int` avec le meilleur élément déjà vu.
+   - `values` : liste Affine consommée ; elle n’est pas rendue.
+   - `best` : maximum courant, ou `None` avant le premier élément. *)
+fun max_int_from (values : int list, best : int option) : int option =
+    case values of
+        Nil => best
+      | Cons (value, rest) =>
+            case best of
+                None => max_int_from (rest, Some (value))
+              | Some other =>
+                    if value >= other then
+                        max_int_from (rest, Some (value))
+                    else
+                        max_int_from (rest, Some (other))
+
+(* Renvoie le maximum de la liste, ou `None` si elle est vide.
+   - `values` : liste Affine consommée ; elle n’est pas rendue. *)
+fun max_int (values : int list) : int option =
+    max_int_from (values, None)
+
+(* Parcours de `min_int` avec le plus petit élément déjà vu.
+   - `values` : liste Affine consommée ; elle n’est pas rendue.
+   - `best` : minimum courant, ou `None` avant le premier élément. *)
+fun min_int_from (values : int list, best : int option) : int option =
+    case values of
+        Nil => best
+      | Cons (value, rest) =>
+            case best of
+                None => min_int_from (rest, Some (value))
+              | Some other =>
+                    if value <= other then
+                        min_int_from (rest, Some (value))
+                    else
+                        min_int_from (rest, Some (other))
+
+(* Renvoie le minimum de la liste, ou `None` si elle est vide.
+   - `values` : liste Affine consommée ; elle n’est pas rendue. *)
+fun min_int (values : int list) : int option =
+    min_int_from (values, None)
+
+(* Indique si la liste contient l’entier recherché.
+   - `values` : liste Affine consommée ; elle n’est pas rendue.
+   - `needle` : entier recherché. *)
+fun contains_int (values : int list, needle : int) : bool =
+    case values of
+        Nil => false
+      | Cons (value, rest) =>
+          if value = needle then true else contains_int (rest, needle)
+
+(* Recherche `needle` à partir de `index` et renvoie son indice, ou `None` si absent.
+   - `values` : liste Affine consommée par le parcours.
+   - `needle` : entier recherché.
+   - `index` : indice de la tête courante. *)
+fun index_of_int_from (values : int list, needle : int, index : int) : int option =
+    case values of
+        Nil => None
+      | Cons (value, rest) =>
+          if value = needle then
+              Some (index)
+          else
+              index_of_int_from (rest, needle, index + 1)
+
+(* Renvoie l’indice zéro-based de la première occurrence de `needle`, ou `None` si
+   absent.
+   - `values` : liste Affine consommée ; elle n’est pas rendue.
+   - `needle` : entier recherché. *)
+fun index_of_int (values : int list, needle : int) : int option =
+    index_of_int_from (values, needle, 0)
+
+(* Indique si la liste contient la chaîne recherchée.
+   - `values` : liste Affine consommée ; elle n’est pas rendue.
+   - `needle` : chaîne empruntée en lecture seule, non consommée. *)
+fun contains_string (values : string list, needle : borrow string) : bool =
+    case values of
+        Nil => false
+      | Cons (value, rest) =>
+          if string_eq (borrow value, needle) then
+              true
+          else
+              contains_string (rest, needle)
+
+(* Recherche la chaîne à partir de `index` et renvoie son indice, ou `None` si
+   absente.
+   - `values` : liste Affine consommée par le parcours.
+   - `needle` : chaîne empruntée en lecture seule, non consommée.
+   - `index` : indice de la tête courante. *)
+fun index_of_string_from (values : string list, needle : borrow string, index : int) : int option =
+    case values of
+        Nil => None
+      | Cons (value, rest) =>
+          if string_eq (borrow value, needle) then
+              Some (index)
+          else
+              index_of_string_from (rest, needle, index + 1)
+
+(* Renvoie l’indice zéro-based de la première occurrence de la chaîne, ou `None` si
+   absente.
+   - `values` : liste Affine consommée ; elle n’est pas rendue.
+   - `needle` : chaîne empruntée en lecture seule, non consommée. *)
+fun index_of_string (values : string list, needle : borrow string) : int option =
+    index_of_string_from (values, needle, 0)
+
+(* Indique si au moins un élément de la liste vaut `true`.
+   - `values` : liste Affine consommée par le parcours ; elle n’est pas rendue. *)
+fun any_true (values : bool list) : bool =
+    case values of
+        Nil => false
+      | Cons (value, rest) => if value then true else any_true (rest)
+
+(* Indique si tous les éléments de la liste valent `true` ; la liste vide satisfait
+   cette propriété.
+   - `values` : liste Affine consommée par le parcours ; elle n’est pas rendue. *)
+fun all_true (values : bool list) : bool =
+    case values of
+        Nil => true
+      | Cons (value, rest) => if value then all_true (rest) else false
+
+(* Parcours de `zip_int_string` avec un accumulateur inversé.
+   - `left` : liste d’entiers consommée.
+   - `right` : liste de chaînes consommée.
+   - `acc` : couples associés, dans l’ordre inverse. *)
+fun zip_int_string_from
+        (left : int list, right : string list, acc : (int, string) list)
+        : (int, string) list =
+    case left of
+        Nil => reverse (acc)
+      | Cons (a, restLeft) =>
+            case right of
+                Nil => reverse (acc)
+              | Cons (b, restRight) =>
+                    zip_int_string_from
+                      (restLeft, restRight, Cons (((a, b), acc)))
+
+(* Associe les éléments de même rang en couples `(int, string)`, jusqu’à épuisement
+   de l’une des listes.
+   - `left` : liste d’entiers Affine consommée.
+   - `right` : liste de chaînes Affine consommée.
+
+   Les éléments associés sont déplacés dans la liste de couples rendue ; les suffixes
+   non associés sont abandonnés. *)
+fun zip_int_string (left : int list, right : string list) : (int, string) list =
+    zip_int_string_from (left, right, Nil)
+
+(* Consomme une valeur et l’abandonne. Sert aux branches qui n’utilisent pas un
+   paramètre Affine déjà possédé par la fonction.
+   - `value` : valeur consommée puis abandonnée. *)
+fun discard_value (value : 'a) : unit = ()
+
+(* Consomme et abandonne une liste entière.
+   - `values` : liste consommée. *)
+fun discard_list (values : 'a list) : unit =
+    case values of
+        Nil => ()
+      | Cons (_, rest) => discard_list (rest)
+
+(* Parcours de `map` avec un accumulateur inversé.
+   - `f` : fonction appliquée à chaque élément, consommée par le parcours.
+   - `values` : liste consommée.
+   - `acc` : résultats, dans l’ordre inverse. *)
+fun map_from
+        (f : consume 'a -> 'b, values : 'a list, acc : 'b list) : 'b list =
+    case values of
+        Nil => reverse (acc)
+      | Cons (value, rest) =>
+            map_from (f, rest, Cons ((f (value), acc)))
+
+(* Applique `f` à chaque élément et rend la liste des résultats, dans l’ordre.
+   - `f` : fonction appliquée à chaque élément, consommée par le parcours.
+   - `values` : liste consommée. *)
+fun map (f : consume 'a -> 'b, values : 'a list) : 'b list =
+    map_from (f, values, Nil)
+
+(* Parcours de `borrow_map` avec un accumulateur inversé.
+   - `f` : fonction appliquée à chaque élément emprunté, consommée.
+   - `values` : liste empruntée en lecture seule, non consommée.
+   - `acc` : résultats, dans l’ordre inverse. *)
+fun borrow_map_from
+        (f : (borrow 'a) -> 'b, values : borrow ('a list), acc : 'b list)
+        : 'b list =
+    case values of
+        Nil => reverse (acc)
+      | Cons (value, rest) =>
+            borrow_map_from (f, rest, Cons ((f (value), acc)))
+
+(* Applique `f` à chaque élément emprunté, sans consommer la liste.
+   - `f` : fonction appliquée à chaque élément, consommée par le parcours ; elle
+     reçoit un emprunt partagé de l’élément.
+   - `values` : liste empruntée en lecture seule, non consommée. *)
+fun borrow_map
+        (f : (borrow 'a) -> 'b, values : borrow ('a list)) : 'b list =
+    borrow_map_from (f, values, Nil)
+
+(* Parcours de `borrow_map_int` avec un accumulateur inversé.
+   - `f` : fonction appliquée à chaque entier, consommée par le parcours.
+   - `values` : liste d’entiers empruntée, non consommée.
+   - `acc` : résultats, dans l’ordre inverse. *)
+fun borrow_map_int_from
+        (f : int -> 'b, values : borrow (int list), acc : 'b list)
+        : 'b list =
+    case values of
+        Nil => reverse (acc)
+      | Cons (value, rest) =>
+            borrow_map_int_from (f, rest, Cons ((f (value), acc)))
+
+(* Variante de `borrow_map` pour les listes d’entiers : `f` reçoit la valeur Copy
+   par valeur plutôt qu’un emprunt.
+   - `f` : fonction appliquée à chaque entier, consommée par le parcours.
+   - `values` : liste d’entiers empruntée, non consommée. *)
+fun borrow_map_int (f : int -> 'b, values : borrow (int list)) : 'b list =
+    borrow_map_int_from (f, values, Nil)
+
+(* Parcours de `filter` avec un accumulateur inversé.
+   - `keep` : prédicat consommé par le parcours.
+   - `values` : liste consommée.
+   - `acc` : éléments retenus, dans l’ordre inverse. *)
+fun filter_from
+        (keep : 'a -> bool, values : 'a list, acc : 'a list) : 'a list =
+    case values of
+        Nil => reverse (acc)
+      | Cons (value, rest) =>
+            if keep (value) then filter_from (keep, rest, Cons ((value, acc)))
+            else filter_from (keep, rest, acc)
+
+(* Garde les éléments pour lesquels `keep` rend `true`, dans l’ordre.
+   - `keep` : prédicat consommé par le parcours.
+   - `values` : liste consommée. *)
+fun filter (keep : 'a -> bool, values : 'a list) : 'a list =
+    filter_from (keep, values, Nil)
+
+(* Plie la liste de la gauche vers la droite.
+   - `f` : fonction `(accumulateur, élément) -> accumulateur`, consommée.
+   - `init` : accumulateur initial.
+   - `values` : liste consommée. *)
+fun foldl (f : consume ('acc * 'a) -> 'acc, init : 'acc, values : 'a list) : 'acc =
+    case values of
+        Nil => init
+      | Cons (value, rest) =>
+            let val next = f ((init, value))
+            in foldl (f, next, rest)
+            end
+
+(* Parcours de `foldr` sur la liste déjà inversée.
+   - `f` : fonction `(élément, accumulateur) -> accumulateur`, consommée.
+   - `init` : accumulateur initial.
+   - `values` : liste inversée, consommée de la gauche vers la droite. *)
+fun foldr_from
+        (f : consume ('a * 'acc) -> 'acc, init : 'acc, values : 'a list)
+        : 'acc =
+    case values of
+        Nil => init
+      | Cons (value, rest) => foldr_from (f, f ((value, init)), rest)
+
+(* Plie la liste de la droite vers la gauche.
+   - `f` : fonction `(élément, accumulateur) -> accumulateur`, consommée.
+   - `init` : accumulateur initial.
+   - `values` : liste consommée. *)
+fun foldr (f : consume ('a * 'acc) -> 'acc, init : 'acc, values : 'a list) : 'acc =
+    foldr_from (f, init, reverse (values))
+
+(* Parcours de `zip` avec un accumulateur inversé.
+   - `left`, `right` : listes consommées ; les suffixes non associés sont abandonnés.
+   - `acc` : couples associés, dans l’ordre inverse. *)
+fun zip_from
+        (left : 'a list, right : 'b list, acc : ('a * 'b) list)
+        : ('a * 'b) list =
+    case left of
+        Nil =>
+            let val discarded = discard_list (right) in reverse (acc) end
+      | Cons (a, restLeft) =>
+            case right of
+                Nil =>
+                    let val first = discard_value (a)
+                        val second = discard_list (restLeft)
+                    in reverse (acc) end
+              | Cons (b, restRight) =>
+                    zip_from (restLeft, restRight, Cons (((a, b), acc)))
+
+(* Associe les éléments de même rang, jusqu’à épuisement d’une liste.
+   - `left`, `right` : listes consommées ; les suffixes non associés sont abandonnés. *)
+fun zip (left : 'a list, right : 'b list) : ('a * 'b) list =
+    zip_from (left, right, Nil)
+
+(* Parcours de `filter_map` avec un accumulateur inversé.
+   - `f` : fonction consommée par le parcours.
+   - `values` : liste consommée.
+   - `acc` : résultats retenus, dans l’ordre inverse. *)
+fun filter_map_from
+        (f : consume 'a -> 'b option, values : 'a list, acc : 'b list)
+        : 'b list =
+    case values of
+        Nil => reverse (acc)
+      | Cons (value, rest) =>
+            case f (value) of
+                None => filter_map_from (f, rest, acc)
+              | Some (mapped) =>
+                    filter_map_from (f, rest, Cons ((mapped, acc)))
+
+(* Applique `f` et ne garde que les résultats `Some`, dans l’ordre.
+   - `f` : fonction consommée par le parcours.
+   - `values` : liste consommée. *)
+fun filter_map (f : consume 'a -> 'b option, values : 'a list) : 'b list =
+    filter_map_from (f, values, Nil)

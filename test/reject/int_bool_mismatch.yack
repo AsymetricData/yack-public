@@ -1,0 +1,4 @@
+fun bad (x : int, y : bool) =
+    x + y
+
+fun main () = ()

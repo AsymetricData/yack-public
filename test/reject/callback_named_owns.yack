@@ -1,0 +1,6 @@
+fun eat (text : string) : unit = ()
+
+fun apply (f : string -> unit, text : string) : unit = f (text)
+
+fun main () =
+    apply (eat, "a" ^ "aa")

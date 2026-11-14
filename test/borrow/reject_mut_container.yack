@@ -1,0 +1,6 @@
+fun bad (values : int list) : unit =
+    let val borrowed = borrow mut values
+    in ()
+    end
+
+fun main () = ()

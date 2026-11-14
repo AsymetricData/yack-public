@@ -1,0 +1,14 @@
+fun maybe_print (flag : bool, text : string) : unit =
+    if flag then () else print_string (text)
+
+fun maybe_case (flag : bool, text : string) : unit =
+    case flag of
+        true => ()
+      | false => print_string (text)
+
+fun main () =
+    let val first = maybe_print (true, "dropped")
+        val second = maybe_case (false, "printed")
+        val third = maybe_case (true, "dropped by case")
+    in ()
+    end

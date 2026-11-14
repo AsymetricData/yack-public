@@ -1,0 +1,156 @@
+import yack/int
+import yack/list
+import yack/option
+import yack/string
+
+(* Supprime un éventuel champ vide final d'une liste de chaînes.
+   - `values` : liste consommée, inversée puis reconstruite.
+
+   Retourne la liste possédée sans son dernier élément vide, s'il y en avait un. *)
+fun drop_trailing_empty (values : string list) : string list =
+    let val reversed = list.reverse (values)
+    in
+        case reversed of
+            Nil => Nil
+          | Cons (last, rest) =>
+                if string.is_empty (borrow last) then list.reverse (rest)
+                else
+                    list.reverse
+                        (Cons ((string.copy (borrow last), rest)))
+    end
+
+(* Lit les arguments complets du processus depuis `/proc/self/cmdline`. Retourne une
+   liste possédée incluant le nom du programme ; en cas d'échec de lecture, retourne
+   la liste vide. *)
+fun args () : string list =
+    case io.read_file "/proc/self/cmdline" of
+        Error (_) => Nil
+      | Ok (raw) =>
+            drop_trailing_empty
+                (string.split (0, borrow raw))
+
+(* Rend les arguments de commande en omettant le nom du programme. Retourne une liste
+   possédée ; elle est vide si aucun argument n'est présent. *)
+fun command_args () : string list =
+    case args () of
+        Nil => Nil
+      | Cons (_, rest) => rest
+
+(* Compte tous les arguments du processus, nom du programme inclus. Retourne le
+   nombre d'éléments de `args ()`. *)
+fun argc () : int =
+    list.length (args ())
+
+(* Lit l'argument du processus à l'indice donné.
+   - `index` : indice transmis à `list.nth` (zéro pour le nom du programme).
+
+   Retourne l'argument optionnel possédé ; `None` si l'indice est hors limites. *)
+fun arg (index : int) : string option =
+    list.nth (args (), index)
+
+(* Coupe une chaîne au premier caractère correspondant au code donné.
+   - `text` : chaîne empruntée pendant la recherche.
+   - `separator` : code entier du caractère recherché.
+
+   Retourne deux chaînes possédées avant/après le séparateur, ou `None` s'il est
+   absent. *)
+fun split_first (text : borrow string, separator : int) : (string * string) option =
+    let val index = string_find_char (text, separator)
+        val size = string.length (text)
+    in
+        if index < 0 then None
+        else
+            Some
+                (( string.slice (text, 0, index)
+                 , string.slice (text, index + 1, size)
+                 ))
+    end
+
+(* Convertit les entrées `NOM=valeur` en paires nom/valeur.
+   - `entries` : lignes consommées récursivement ; les entrées sans `=` sont
+     ignorées.
+
+   Retourne une liste possédée des paires valides, séparée au premier `=`. *)
+fun env_pairs (entries : string list) : (string * string) list =
+    case entries of
+        Nil => Nil
+      | Cons (entry, rest) =>
+            case split_first (borrow entry, 61) of
+                None => env_pairs (rest)
+              | Some ((key, value)) =>
+                    Cons (((key, value), env_pairs (rest)))
+
+(* Lit l'environnement du processus depuis `/proc/self/environ`. Retourne les entrées
+   sous forme de paires possédées ; en cas d'échec de lecture, retourne une liste
+   vide. *)
+fun env () : (string * string) list =
+    case io.read_file "/proc/self/environ" of
+        Error (_) => Nil
+      | Ok (raw) =>
+            env_pairs
+                (drop_trailing_empty
+                     (string.split (0, borrow raw)))
+
+(* Recherche une variable dans une liste de paires d'environnement.
+   - `name` : nom emprunté pour la comparaison.
+   - `entries` : liste possédée consommée récursivement jusqu'à la clé trouvée.
+
+   Retourne la valeur associée si elle existe. *)
+fun getenv_from
+        (name : borrow string, entries : (string * string) list) : string option =
+    case entries of
+        Nil => None
+      | Cons ((key, value), rest) =>
+            if string.equals (name, borrow key) then Some (value)
+            else getenv_from (name, rest)
+
+(* Lit une variable dans l'environnement courant.
+   - `name` : nom de variable copié pour la recherche.
+
+   Retourne la valeur possédée si définie, ou `None`. *)
+fun getenv (name : string) : string option =
+    let val key = string.copy (borrow name)
+    in getenv_from (borrow key, env ())
+    end
+
+(* Lit une variable d'environnement avec valeur de repli.
+   - `name` : nom de variable consommé par la recherche.
+   - `default` : chaîne rendue telle quelle si la variable est absente.
+
+   Retourne la valeur d'environnement ou la valeur de repli. *)
+fun getenv_or (name : string, default : string) : string =
+    case getenv (name) of
+        None => default
+      | Some (value) => value
+
+(* Renvoie le répertoire personnel configuré par `HOME`. Retourne la valeur de
+   `HOME`, ou `.` si elle est absente. *)
+fun home () : string =
+    getenv_or ("HOME", ".")
+
+(* Renvoie le répertoire courant déclaré par `PWD`. Retourne la valeur de `PWD`, ou
+   `.` si elle est absente. *)
+fun cwd () : string =
+    getenv_or ("PWD", ".")
+
+(* Indique si la variable d'environnement `CI` est définie. Retourne vrai même si sa
+   valeur est la chaîne vide. *)
+fun is_ci () : bool =
+    option.is_some (getenv ("CI"))
+
+(* Termine le processus avec le code fourni.
+   - `code` : code de sortie transmis au builtin `os.exit`.
+
+   Ne retourne normalement pas ; termine immédiatement le processus. *)
+fun exit (code : int) : unit =
+    os.exit (code)
+
+(* Termine normalement le processus avec le code 0. Ne retourne pas ; délègue au
+   builtin `os.exit`. *)
+fun exit_ok () : unit = os.exit (0)
+(* Termine le processus avec le code 2, conventionnellement réservé à l'usage. Ne
+   retourne pas ; délègue au builtin `os.exit`. *)
+fun exit_usage () : unit = os.exit (2)
+(* Termine le processus avec le code 1 pour signaler un échec. Ne retourne pas ;
+   délègue au builtin `os.exit`. *)
+fun exit_failure () : unit = os.exit (1)

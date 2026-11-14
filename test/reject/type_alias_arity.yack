@@ -1,0 +1,4 @@
+type 'a Box = 'a list
+
+fun main () =
+    let val values : Box = Nil in list_length (values) end

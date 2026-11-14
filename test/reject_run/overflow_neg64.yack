@@ -1,0 +1,7 @@
+fun negate (x : int64) : int64 = -x
+
+fun main () =
+    let val maximum : int64 = 9223372036854775807
+        val minimum = 0 - maximum - 1
+    in print_int64 (negate (minimum))
+    end

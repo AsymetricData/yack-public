@@ -1,0 +1,6 @@
+fun quotient (x : int64, y : int64) : int64 = x / y
+
+fun main () =
+    let val zero : int64 = 0
+    in print_int64 (quotient (42, zero))
+    end

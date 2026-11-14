@@ -1,0 +1,9 @@
+import yack/array
+datatype box = Box of int
+fun value_of (item : borrow box) : int =
+    case item of Box (value) => value
+fun main () =
+    let val boxes = array.push (array.new (), Box (42))
+        val result = value_of (array.get_borrow (borrow boxes, 0))
+    in print_int (result)
+    end

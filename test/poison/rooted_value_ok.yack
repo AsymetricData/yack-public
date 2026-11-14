@@ -1,0 +1,11 @@
+
+
+fun main () =
+    let val text =
+            arena
+                val local = "he" ^ "llo"
+            in local
+            end
+    in
+        print_int (string_char_at_unchecked (borrow text, 0))
+    end

@@ -1,0 +1,24 @@
+
+
+
+
+import yack/array
+
+datatype box = Box of string
+
+fun size (value : borrow box) : int =
+    case value of
+        Box (text) => string_length (text)
+
+fun main () =
+    let val values : box array = array.new ()
+        val values = array.push (values, Box ("a" ^ "b"))
+        val values = array.push_unchecked (values, Box ("c" ^ "d"))
+        val values = array.set (values, 0, Box ("e" ^ "f"))
+        val pair = array.take (values, 1)
+        val moved = pair.1
+        val values = array.put (pair.0, 1, Box ("g" ^ "h"))
+        val first = array.get_borrow (borrow values, 0)
+        val second = array.get_borrow (borrow values, 1)
+    in print_int (size (first) + size (second) + size (borrow moved))
+    end

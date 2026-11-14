@@ -1,0 +1,8 @@
+[package]
+name = "benchserver"
+version = "0.1.0"
+
+[dependencies]
+net = { path = "../../lib/net" }
+web = { path = "../../lib/web" }
+http_server = { path = "../../lib/http_server" }

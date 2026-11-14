@@ -1,0 +1,7 @@
+fun first_field (item : borrow { a : int, b : string }) : int =
+    item.a
+fun main () =
+    let val rows : { a : int, b : string } map = map_new ()
+        val _ = map_set (rows, "k", { a = 42, b = "xx" })
+    in print_int (first_field (map_get_borrow_view (borrow rows, "k")))
+    end

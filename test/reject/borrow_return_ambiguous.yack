@@ -1,0 +1,6 @@
+type user : Affine = { name : int }
+
+fun choose (left : borrow user, right : borrow user) : borrow user =
+    left
+
+fun main () = ()

@@ -1,0 +1,5 @@
+fun main () =
+  let val names : string map = map_new ()
+      val _ = map_set (names, "a", "b")
+  in print_string (map_get (names, "a"))
+  end

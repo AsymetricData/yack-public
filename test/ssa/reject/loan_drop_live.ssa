@@ -1,0 +1,9 @@
+# expect: drops `s` (%0) while its borrow `b` (%1) of `s` (%0) is live
+# The owner is freed while a borrow of it is still read after.
+fun yack_f {
+  b0(%0.s : string):
+    %1.b : &string = borrow &%0.s
+    drop %0.s : string
+    %2 : int = string.string_length %1.b
+    return %2
+}

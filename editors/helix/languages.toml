@@ -1,0 +1,21 @@
+
+[language-server.yack-lsp]
+command = "/chemin/vers/yack/yack"
+args = ["lsp"]
+
+[[language]]
+name = "yack"
+scope = "source.yack"
+injection-regex = "yack"
+file-types = ["yack"]
+roots = ["yack.toml"]
+block-comment-tokens = { start = "(*", end = "*)" }
+indent = { tab-width = 4, unit = "    " }
+auto-format = true
+rulers = [88]
+language-servers = ["yack-lsp"]
+formatter = { command = "/chemin/vers/yack/yack", args = ["fmt", "--best-effort", "-"] }
+
+[[grammar]]
+name = "yack"
+source = { path = "/chemin/vers/yack/editors/tree-sitter-yack" }

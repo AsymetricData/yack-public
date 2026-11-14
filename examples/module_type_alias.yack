@@ -1,0 +1,7 @@
+import modules/Shapes.{type point as vec, Circle as Dot, area}
+
+fun main () =
+    let val p : vec = { x = 4, y = 5 }
+        val r = Dot (2)
+    in print_int (area (r) + p.x)
+    end

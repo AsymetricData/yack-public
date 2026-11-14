@@ -1,0 +1,16 @@
+(function_declaration) @fold
+(function_binding) @fold
+(type_declaration) @fold
+(datatype_declaration) @fold
+(let_expression) @fold
+(arena_expression) @fold
+(lambda_expression) @fold
+(if_expression) @fold
+(case_expression) @fold
+(case_branch) @fold
+(record_type) @fold
+(record_expression) @fold
+(record_pattern) @fold
+(list_expression) @fold
+(list_pattern) @fold
+(comment) @fold

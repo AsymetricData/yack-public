@@ -1,0 +1,16 @@
+arena in `report`, lines 5–11, stack mode
+
+Freed at `end` (3)
+- 6:20 `^` concatenation
+- 6:32 `int_to_string`
+- 10:9 `^` concatenation
+
+Stored to the root: the container outlives the arena (1)
+- 8:35 `^` concatenation — value of `array_push`
+
+Not arena memory: outlive the block (1)
+- 7:20 `array_new` — function region, freed when the function returns
+
+Strings allocated by `label` while the block runs are freed at `end` too.
+
+Value: `string` — copied out of the arena before it is released.

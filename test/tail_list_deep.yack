@@ -1,0 +1,143 @@
+
+
+
+import yack/list
+
+fun build (n : int, acc : int list) : int list =
+    if n <= 0 then acc
+    else build (n - 1, Cons ((n, acc)))
+
+fun build_ones (n : int, acc : int list) : int list =
+    if n <= 0 then acc
+    else build_ones (n - 1, Cons ((1, acc)))
+
+fun build_texts (n : int, acc : string list) : string list =
+    if n <= 0 then acc
+    else build_texts (n - 1, Cons (("x", acc)))
+
+fun build_bools (n : int, value : bool, acc : bool list) : bool list =
+    if n <= 0 then acc
+    else build_bools (n - 1, value, Cons ((value, acc)))
+
+fun build_groups (n : int, acc : int list list) : int list list =
+    if n <= 0 then acc
+    else build_groups (n - 1, Cons ((build (1000, Nil), acc)))
+
+fun count_list (values : 'a list) : int =
+    list.foldl (pair => case pair of (acc, _) => acc + 1, 0, values)
+
+fun one (value : int) : int = 1
+
+fun one_borrow (value : borrow int) : int = 1
+
+fun is_even (value : int) : bool = value % 2 = 0
+
+fun even_option (value : int) : int option =
+    if value % 2 = 0 then Some (value) else None
+
+fun foldr_count (pair : int * int) : int =
+    case pair of (_, acc) => acc + 1
+
+fun check_length () : int = list.length (build (1000000, Nil))
+
+fun check_reverse () : int = count_list (list.reverse (build (1000000, Nil)))
+
+fun check_append () : int =
+    count_list (list.append (build (1000000, Nil), Nil))
+
+fun check_concat () : int =
+    count_list (list.concat (build_groups (1000, Nil)))
+
+fun check_nth () : int =
+    case list.nth (build (1000000, Nil), 999999) of
+        Some (value) => value
+      | None => 0
+
+fun check_take () : int =
+    count_list (list.take (build (1000000, Nil), 1000000))
+
+fun check_drop () : int =
+    count_list (list.drop (build (1000000, Nil), 500000))
+
+fun check_range () : int = count_list (list.range (0, 1000000))
+
+fun check_repeat () : int = count_list (list.repeat_int (1, 1000000))
+
+fun check_sum () : int = list.sum_int (build_ones (1000000, Nil))
+
+fun check_max () : int =
+    case list.max_int (build_ones (1000000, Nil)) of
+        Some (value) => value
+      | None => 0
+
+fun check_min () : int =
+    case list.min_int (build_ones (1000000, Nil)) of
+        Some (value) => value
+      | None => 0
+
+fun check_map () : int = count_list (list.map (one, build (1000000, Nil)))
+
+fun check_borrow_map () : int =
+    let val values = build (1000000, Nil)
+    in count_list (list.borrow_map (one_borrow, borrow values))
+    end
+
+fun check_borrow_map_int () : int =
+    let val values = build (1000000, Nil)
+    in count_list (list.borrow_map_int (one, borrow values))
+    end
+
+fun check_filter () : int =
+    count_list (list.filter (is_even, build (1000000, Nil)))
+
+fun check_foldl () : int =
+    list.foldl (pair => case pair of (acc, _) => acc + 1, 0,
+                build (1000000, Nil))
+
+fun check_foldr () : int =
+    list.foldr (foldr_count, 0, build (1000000, Nil))
+
+fun check_zip () : int =
+    count_list (list.zip (build (1000000, Nil), build (1000000, Nil)))
+
+fun check_zip_int_string () : int =
+    count_list (list.zip_int_string (build (1000000, Nil),
+                                     build_texts (1000000, Nil)))
+
+fun check_filter_map () : int =
+    count_list (list.filter_map (even_option, build (1000000, Nil)))
+
+fun check_contains_int () : int =
+    if list.contains_int (build (1000000, Nil), -1) then 1 else 0
+
+fun check_index_of_int () : int =
+    case list.index_of_int (build (1000000, Nil), -1) of
+        Some (_) => 1
+      | None => 0
+
+fun check_contains_string () : int =
+    if list.contains_string (build_texts (1000000, Nil), borrow "x") then 1
+    else 0
+
+fun check_index_of_string () : int =
+    case list.index_of_string (build_texts (1000000, Nil), borrow "x") of
+        Some (value) => value
+      | None => 0
+
+fun check_any_true () : int =
+    if list.any_true (build_bools (1000000, false, Nil)) then 1 else 0
+
+fun check_all_true () : int =
+    if list.all_true (build_bools (1000000, true, Nil)) then 1 else 0
+
+fun main () =
+    print_int
+      (check_length () + check_reverse () + check_append () + check_concat () +
+       check_nth () + check_take () + check_drop () + check_range () +
+       check_repeat () + check_sum () + check_max () + check_min () +
+       check_map () + check_borrow_map () + check_borrow_map_int () +
+       check_filter () + check_foldl () + check_foldr () + check_zip () +
+       check_zip_int_string () + check_filter_map () +
+       check_contains_int () + check_index_of_int () +
+       check_contains_string () + check_index_of_string () +
+       check_any_true () + check_all_true ())

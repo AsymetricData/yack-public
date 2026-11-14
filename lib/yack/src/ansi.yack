@@ -1,0 +1,160 @@
+(* Retourne le caractère ESC qui introduit une séquence de contrôle ANSI. *)
+fun esc () : string =
+    string_of_char (27)
+
+(* Construit une séquence CSI à partir de son code.
+   - `code` : code de contrôle, consommé.
+
+   Retourne ESC suivi de `[` et du code. *)
+fun csi (code : string) : string =
+    esc () ^ "[" ^ code
+
+(* Retourne la séquence ANSI qui réinitialise tous les attributs de style. *)
+fun reset () : string = csi ("0m")
+(* Retourne la séquence ANSI qui active le texte en gras. *)
+fun bold () : string = csi ("1m")
+(* Retourne la séquence ANSI qui active le texte atténué. *)
+fun dim () : string = csi ("2m")
+(* Retourne la séquence ANSI qui active l'italique. *)
+fun italic () : string = csi ("3m")
+(* Retourne la séquence ANSI qui souligne le texte. *)
+fun underline () : string = csi ("4m")
+(* Retourne la séquence ANSI qui active le clignotement. *)
+fun blink () : string = csi ("5m")
+(* Retourne la séquence ANSI qui inverse premier plan et arrière-plan. *)
+fun reverse () : string = csi ("7m")
+(* Retourne la séquence ANSI qui masque le texte. *)
+fun hidden () : string = csi ("8m")
+(* Retourne la séquence ANSI qui barre le texte. *)
+fun strike () : string = csi ("9m")
+
+(* Retourne la séquence ANSI qui choisit le noir comme couleur de premier plan. *)
+fun fg_black () : string = csi ("30m")
+(* Retourne la séquence ANSI qui choisit le rouge comme couleur de premier plan. *)
+fun fg_red () : string = csi ("31m")
+(* Retourne la séquence ANSI qui choisit le vert comme couleur de premier plan. *)
+fun fg_green () : string = csi ("32m")
+(* Retourne la séquence ANSI qui choisit le jaune comme couleur de premier plan. *)
+fun fg_yellow () : string = csi ("33m")
+(* Retourne la séquence ANSI qui choisit le bleu comme couleur de premier plan. *)
+fun fg_blue () : string = csi ("34m")
+(* Retourne la séquence ANSI qui choisit le magenta comme couleur de premier plan. *)
+fun fg_magenta () : string = csi ("35m")
+(* Retourne la séquence ANSI qui choisit le cyan comme couleur de premier plan. *)
+fun fg_cyan () : string = csi ("36m")
+(* Retourne la séquence ANSI qui choisit le blanc comme couleur de premier plan. *)
+fun fg_white () : string = csi ("37m")
+(* Retourne la séquence ANSI qui rétablit la couleur de premier plan par défaut. *)
+fun fg_default () : string = csi ("39m")
+
+(* Retourne la séquence ANSI qui choisit le noir comme couleur d'arrière-plan. *)
+fun bg_black () : string = csi ("40m")
+(* Retourne la séquence ANSI qui choisit le rouge comme couleur d'arrière-plan. *)
+fun bg_red () : string = csi ("41m")
+(* Retourne la séquence ANSI qui choisit le vert comme couleur d'arrière-plan. *)
+fun bg_green () : string = csi ("42m")
+(* Retourne la séquence ANSI qui choisit le jaune comme couleur d'arrière-plan. *)
+fun bg_yellow () : string = csi ("43m")
+(* Retourne la séquence ANSI qui choisit le bleu comme couleur d'arrière-plan. *)
+fun bg_blue () : string = csi ("44m")
+(* Retourne la séquence ANSI qui choisit le magenta comme couleur d'arrière-plan. *)
+fun bg_magenta () : string = csi ("45m")
+(* Retourne la séquence ANSI qui choisit le cyan comme couleur d'arrière-plan. *)
+fun bg_cyan () : string = csi ("46m")
+(* Retourne la séquence ANSI qui choisit le blanc comme couleur d'arrière-plan. *)
+fun bg_white () : string = csi ("47m")
+(* Retourne la séquence ANSI qui rétablit la couleur d'arrière-plan par défaut. *)
+fun bg_default () : string = csi ("49m")
+
+(* Retourne la séquence ANSI de premier plan noir intense. *)
+fun bright_black () : string = csi ("90m")
+(* Retourne la séquence ANSI de premier plan rouge intense. *)
+fun bright_red () : string = csi ("91m")
+(* Retourne la séquence ANSI de premier plan vert intense. *)
+fun bright_green () : string = csi ("92m")
+(* Retourne la séquence ANSI de premier plan jaune intense. *)
+fun bright_yellow () : string = csi ("93m")
+(* Retourne la séquence ANSI de premier plan bleu intense. *)
+fun bright_blue () : string = csi ("94m")
+(* Retourne la séquence ANSI de premier plan magenta intense. *)
+fun bright_magenta () : string = csi ("95m")
+(* Retourne la séquence ANSI de premier plan cyan intense. *)
+fun bright_cyan () : string = csi ("96m")
+(* Retourne la séquence ANSI de premier plan blanc intense. *)
+fun bright_white () : string = csi ("97m")
+
+(* Sélectionne une couleur de premier plan dans la palette ANSI de 256 couleurs.
+   - `index` : indice de palette fourni au terminal.
+
+   Retourne la séquence CSI correspondante, sans modifier l'état du terminal. *)
+fun color256 (index : int) : string =
+    csi ("38;5;" ^ int_to_string (index) ^ "m")
+
+(* Sélectionne une couleur d'arrière-plan dans la palette ANSI de 256 couleurs.
+   - `index` : indice de palette fourni au terminal.
+
+   Retourne la séquence CSI correspondante, sans modifier l'état du terminal. *)
+fun bg_color256 (index : int) : string =
+    csi ("48;5;" ^ int_to_string (index) ^ "m")
+
+(* Construit la couleur de premier plan vraie-couleur à partir de ses composantes.
+   - `red`, `green`, `blue` : intensités rouge, vert et bleu (0–255).
+
+   Retourne la séquence ANSI; aucune validation ni écriture terminal n'est faite. *)
+fun rgb (red : int, green : int, blue : int) : string =
+    csi ("38;2;" ^ int_to_string (red) ^ ";" ^
+         int_to_string (green) ^ ";" ^ int_to_string (blue) ^ "m")
+
+(* Construit la couleur d'arrière-plan vraie-couleur à partir de ses composantes.
+   - `red`, `green`, `blue` : intensités rouge, vert et bleu (0–255).
+
+   Retourne la séquence ANSI; aucune validation ni écriture terminal n'est faite. *)
+fun bg_rgb (red : int, green : int, blue : int) : string =
+    csi ("48;2;" ^ int_to_string (red) ^ ";" ^
+         int_to_string (green) ^ ";" ^ int_to_string (blue) ^ "m")
+
+(* Applique les codes de style à un texte et réinitialise les attributs ensuite.
+   - `codes` : codes CSI de style, consommés.
+   - `text` : contenu à envelopper, consommé.
+
+   Retourne une chaîne combinée; n'écrit pas directement sur le terminal. *)
+fun style (codes : string, text : string) : string =
+    csi (codes) ^ text ^ reset ()
+
+(* Retourne la séquence qui efface l'écran puis place le curseur en haut à gauche. *)
+fun clear_screen () : string = csi ("2J") ^ csi ("H")
+(* Retourne la séquence qui efface toute la ligne du curseur. *)
+fun clear_line () : string = csi ("2K")
+(* Retourne la séquence qui place le curseur en haut à gauche. *)
+fun home () : string = csi ("H")
+(* Place le curseur à une position absolue (lignes et colonnes indexées à partir de
+   1).
+   - `row`, `column` : ligne et colonne cibles.
+
+   Retourne la séquence CSI sans effet terminal immédiat. *)
+fun cursor_to (row : int, column : int) : string =
+    csi (int_to_string (row) ^ ";" ^ int_to_string (column) ^ "H")
+(* Retourne la séquence qui remonte le curseur du nombre de lignes demandé.
+   - `count` : déplacement vertical vers le haut. *)
+fun cursor_up (count : int) : string = csi (int_to_string (count) ^ "A")
+(* Retourne la séquence qui descend le curseur du nombre de lignes demandé.
+   - `count` : déplacement vertical vers le bas. *)
+fun cursor_down (count : int) : string = csi (int_to_string (count) ^ "B")
+(* Retourne la séquence qui déplace le curseur vers la droite.
+   - `count` : déplacement horizontal en colonnes. *)
+fun cursor_right (count : int) : string = csi (int_to_string (count) ^ "C")
+(* Retourne la séquence qui déplace le curseur vers la gauche.
+   - `count` : déplacement horizontal en colonnes. *)
+fun cursor_left (count : int) : string = csi (int_to_string (count) ^ "D")
+(* Retourne la séquence qui masque le curseur du terminal. *)
+fun hide_cursor () : string = csi ("?25l")
+(* Retourne la séquence qui réaffiche le curseur du terminal. *)
+fun show_cursor () : string = csi ("?25h")
+(* Retourne la séquence qui mémorise la position actuelle du curseur. *)
+fun save_cursor () : string = csi ("s")
+(* Retourne la séquence qui restaure la position de curseur mémorisée. *)
+fun restore_cursor () : string = csi ("u")
+(* Retourne la séquence qui active l'écran alternatif du terminal. *)
+fun alternate_screen () : string = csi ("?1049h")
+(* Retourne la séquence qui quitte l'écran alternatif du terminal. *)
+fun leave_alternate_screen () : string = csi ("?1049l")

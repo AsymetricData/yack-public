@@ -1,0 +1,45 @@
+import alpage/Alpage
+import alpage/Ctx
+import alpage/Decode
+import alpage/Extract
+import alpage/Middleware
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+import yack/json
+import yack/list
+
+fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text ("hello"))
+
+fun add_pair (pair : int * int) : int =
+    pair.0 + pair.1
+
+fun sum_values (ctx : Ctx.t, values : consume int list) : Reply.t =
+    let val total = list.foldl (add_pair, 0, values)
+    in
+        Reply.ok (
+            Response.json ("{\"sum\":" ^ int_to_string (total) ^ "}")
+        )
+    end
+
+fun decode_items (body : borrow string) : int list result =
+    case json.parse (body) of
+        Error message => Error (message)
+      | Ok value =>
+            (case json.as_object (value) of
+                 Error message => Error (message)
+               | Ok fields =>
+                     let val key = "items"
+                     in json.field_decode (borrow key, Decode.int_list, fields)
+                     end)
+
+fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Extract.json (ctx, request, decode_items, sum_values)
+
+fun application () : Alpage.t =
+    Alpage.new ()
+    |> Alpage.get ("/", home)
+    |> Alpage.post ("/sum", sum)
+    |> Alpage.with (Alpage.log ())
+    |> Alpage.with (Middleware.security_headers ())

@@ -1,0 +1,4 @@
+fun main () =
+    let val text = "hello"
+        val bytes = bytes_from_string (borrow text)
+    in print_int (array_length (bytes)) end

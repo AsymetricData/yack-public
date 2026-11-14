@@ -1,0 +1,78 @@
+fun yack_main {
+  b0:
+    %0 : bool = const true
+    %1 : string = view const "a"
+    %2 : string = view const "1"
+    %3 : string = concat move %1!, move %2!
+    %4 : string = view const "b"
+    %5 : string = view const "2"
+    %6 : string = concat move %4!, move %5!
+    %7.s : string = call yack_pick %0!, move %3!, move %6!
+    %8 : int = const 3
+    %9 : string = view const "zz"
+    %10 : int = call yack_classify %8!, move %9!
+    %11 : unit = call print_int %10!
+    %13 : bool = test _ %11!
+    branch %13 b2 b3
+  b1(%12 : unit):
+    drop %7.s! : string  # at 15:9
+    return %12!
+  b2:
+    print %7.s
+    %14 : unit = const ()  # at 17:22
+    jump b1(%14!)
+  b3:
+    unreachable
+}
+fun yack_classify {
+  b0(%0.n : int, %1.label : string):
+    %3 : bool = test 0 %0.n  # at 9:10
+    branch %3 b2 b3
+  b1(%2 : int):
+    drop %1.label! : string  # at 8:24
+    return %2!
+  b2:
+    %4 : &string = borrow &%1.label  # at 10:36
+    %5 : int = string.string_length %4!  # at 10:36
+    jump b1(%5!)
+  b3:
+    %6 : bool = test m %0.n  # at 10:36
+    branch %6 b4 b5
+  b4:
+    %7.m : int = view bind  %0.n  # at 10:36
+    %8 : int = const 10
+    %9 : bool = > %7.m!, %8!
+    branch %9 b6 b5
+  b5:
+    %11 : bool = test _ %0.n!  # at 11:24
+    branch %11 b7 b8
+  b6:
+    %10.m : int = view bind  %0.n!
+    jump b1(%10.m!)
+  b7:
+    %12 : int = const 1
+    jump b1(%12!)
+  b8:
+    unreachable
+}
+fun yack_pick {
+  b0(%0.flag : bool, %1.left : string, %2.right : string):
+    branch %0.flag b1 b2
+  b1:
+    %4 : &string = borrow &%2.right  # at 5:43
+    %5 : int = string.string_length %4!  # at 5:43
+    %7 : bool = test _ %5!  # at 5:43
+    branch %7 b5 b6
+  b2:
+    drop %1.left! : string  # at 6:10
+    jump b3(move %2.right!)
+  b3(%3 : string):
+    return move %3!
+  b4(%6 : string):
+    drop %2.right! : string  # at 5:13
+    jump b3(move %6!)
+  b5:
+    jump b4(move %1.left!)
+  b6:
+    unreachable
+}

@@ -1,0 +1,9 @@
+fun cb (text : borrow string, out : (borrow string) array) : unit =
+    array_push (out, text)
+
+fun bad (values : borrow (string list), out : (borrow string) array) : unit =
+    case values of
+        Nil => ()
+      | Cons (head, _) => cb (head, out)
+
+fun main () = ()

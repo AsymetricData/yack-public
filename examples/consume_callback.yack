@@ -1,0 +1,7 @@
+fun consumed_length (text : string) : int =
+    string_length (borrow text)
+
+fun apply (f : consume string -> int, text : string) : int = f (text)
+
+fun main () =
+    print_int (apply (consumed_length, "abcd"))

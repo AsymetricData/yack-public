@@ -1,0 +1,23 @@
+
+
+
+
+
+
+type cell = { value : int }
+
+fun walk (previous : borrow cell, n : int, acc : int) : int =
+    if n <= 0 then acc + previous.value
+    else
+        let val local = { value = n }
+        in walk
+             ( (if n % 2 = 0 then borrow local else previous)
+             , n - 1
+             , acc + previous.value
+             )
+        end
+
+fun main () =
+    let val start = { value = 0 }
+    in print_int (walk (borrow start, 1000, 0))
+    end

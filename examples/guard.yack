@@ -1,0 +1,39 @@
+fun parse (value : int result) : int =
+    let guard Ok inner <- value else 0
+    in inner end
+
+fun positive (value : int) : int =
+    let guard value > 0 else 0
+    in value end
+
+fun nested (first : int result, second : int result) : int =
+    let guard Ok a <- first else 0
+        guard Ok b <- second else 0
+    in a + b end
+
+fun arena_string (value : int result) : string =
+    arena
+        guard Ok inner <- value else "bad" ^ "!"
+    in
+        int_to_string (inner)
+    end
+
+fun main () =
+    let val a = parse (Ok (41))
+        val b = parse (Error ("bad"))
+        val c = positive (7)
+        val d = positive (0)
+        val e = nested (Ok (10), Ok (20))
+        val f = nested (Ok (10), Error ("bad"))
+        val g = arena_string (Ok (7))
+        val h = arena_string (Error ("bad"))
+        val _ = print_int (a)
+        val _ = print_int (b)
+        val _ = print_int (c)
+        val _ = print_int (d)
+        val _ = print_int (e)
+        val _ = print_int (f)
+        val _ = print_string (g)
+    in
+        print_string (h)
+    end

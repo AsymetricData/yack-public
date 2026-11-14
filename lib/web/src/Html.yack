@@ -1,0 +1,117 @@
+import yack/string
+
+(* yack/web/Html : DSL HTML minimal, à la Elm.
+
+L'arbre est une valeur. Aucun callback, aucune closure : uniquement des
+noeuds et du rendu. `Raw` est l'unique porte de sortie non échappée. *)
+datatype node =
+    Text of string
+  | Element of {
+      tag : string,
+      attrs : (string, string) list,
+      children : node list
+  }
+  | Raw of string
+
+fun escape_from (text : borrow string, index : int) : string =
+    let val length = string_length (text)
+    in
+        if index >= length then
+            ""
+        else
+            let val code = string_char_at_unchecked (text, index)
+                val escaped =
+                    if code = 38 then
+                        "&amp;"
+                    else if code = 60 then
+                        "&lt;"
+                    else if code = 62 then
+                        "&gt;"
+                    else if code = 34 then
+                        "&quot;"
+                    else if code = 39 then "&#39;" else string_of_char (code)
+            in
+                escaped ^ escape_from (text, index + 1)
+            end
+    end
+
+fun escape (text : borrow string) : string = escape_from (text, 0)
+
+fun text (value : string) : node = Text (value)
+
+fun raw (value : string) : node = Raw (value)
+
+fun attr (name : string, value : string) : string * string = (name, value)
+
+fun el (tag : string, attrs : (string, string) list, children : node list) : node =
+    Element ({ tag = tag, attrs = attrs, children = children })
+
+fun render_attr (attr : string * string) : string =
+    let val name = attr.0
+        val value = attr.1
+    in
+        escape (borrow name) ^ "=\"" ^ escape (borrow value) ^ "\""
+    end
+
+fun render_attrs (attrs : (string, string) list) : string =
+    case attrs of
+        Nil => ""
+      | attr :: rest => " " ^ render_attr (attr) ^ render_attrs (rest)
+
+fun render_children (children : node list) : string =
+    case children of
+        Nil => ""
+      | child :: rest => render (child) ^ render_children (rest)
+
+fun render (node : node) : string =
+    case node of
+        Text value => escape (borrow value)
+      | Raw value => value
+      | Element ({ tag = tag, attrs = attrs, children = children }) =>
+          let
+              val closing =
+                  let val value = borrow tag
+                  in
+                      string_copy (value)
+                  end
+          in
+              "<" ^ tag ^ render_attrs (attrs) ^ ">" ^ render_children (children) ^ "</" ^
+                  closing ^
+                  ">"
+          end
+
+fun div (attrs : (string, string) list, children : node list) : node =
+    el ("div", attrs, children)
+
+fun span (attrs : (string, string) list, children : node list) : node =
+    el ("span", attrs, children)
+
+fun p (attrs : (string, string) list, children : node list) : node =
+    el ("p", attrs, children)
+
+fun h1 (attrs : (string, string) list, children : node list) : node =
+    el ("h1", attrs, children)
+
+fun h2 (attrs : (string, string) list, children : node list) : node =
+    el ("h2", attrs, children)
+
+fun a (attrs : (string, string) list, children : node list) : node =
+    el ("a", attrs, children)
+
+fun ul (attrs : (string, string) list, children : node list) : node =
+    el ("ul", attrs, children)
+
+fun li (attrs : (string, string) list, children : node list) : node =
+    el ("li", attrs, children)
+
+fun form (attrs : (string, string) list, children : node list) : node =
+    el ("form", attrs, children)
+
+fun input (attrs : (string, string) list) : node = el ("input", attrs, Nil)
+
+fun render_page (title_text : string, body : node) : string =
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" ^
+        escape (borrow title_text) ^
+        "</title></head><body>" ^
+        render (body) ^
+        "</body></html>"

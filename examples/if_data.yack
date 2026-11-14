@@ -1,0 +1,8 @@
+
+fun choose (flag : bool) : int option =
+    if flag then Some (42) else None
+
+fun main () =
+    case choose (true) of
+        None => ()
+      | Some x => print_int (x)

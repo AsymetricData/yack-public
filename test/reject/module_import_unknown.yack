@@ -1,0 +1,3 @@
+import fixtures/Math.{triple}
+
+fun main () = print_int (triple (1))

@@ -1,0 +1,43 @@
+import sql/Pool
+import sql/Sql
+
+
+
+fun count_of (result : Sql.result result) : string =
+    case result of
+        Error message => message
+      | Ok rows =>
+          (case rows of
+               Cons ((Cons (((_, Sql.Int number), _)), _)) => int_to_string (number)
+             | _ => "?")
+
+fun main () =
+    case Pool.open ("/tmp/yack-sql-pool-readers.db", 2) of
+        Error message => print_string (message)
+      | Ok pool =>
+          let val (_, pool) = Pool.exec_writer (pool, "drop table if exists t;")
+              val (_, pool) = Pool.exec_writer (pool, "create table t(x integer);")
+              val (_, pool) = Pool.exec_writer (pool, "insert into t values (1), (2), (3);")
+              val (first, pool) = Pool.acquire_reader (pool)
+              val (second, pool) = Pool.acquire_reader (pool)
+              val (third, pool) = Pool.acquire_reader (pool)
+              val (fallback, pool) = Pool.query_reader (pool, "select count(*) from t;")
+              val _ = print_string ("fallback " ^ count_of (fallback))
+              val pool =
+                  case third of
+                      None => let val _ = print_string ("third none") in pool end
+                    | Some reader => Pool.release_reader (pool, reader)
+              val pool =
+                  case first of
+                      None => pool
+                    | Some reader => Pool.release_reader (pool, reader)
+              val pool =
+                  case second of
+                      None => pool
+                    | Some reader => Pool.release_reader (pool, reader)
+              val (counted, pool) = Pool.query_reader (pool, "select count(*) from t;")
+              val _ = print_string ("reader " ^ count_of (counted))
+              val _ = print_string ("readers " ^ int_to_string (Pool.reader_count (borrow pool)))
+          in
+              Pool.close (pool)
+          end

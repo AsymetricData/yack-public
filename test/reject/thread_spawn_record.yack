@@ -1,0 +1,9 @@
+type state = { hits : int }
+
+fun worker (value : int64) : unit = ()
+
+fun main () =
+    let val state = { hits = 0 }
+        val _ = sys.thread_spawn (worker, state)
+    in ()
+    end

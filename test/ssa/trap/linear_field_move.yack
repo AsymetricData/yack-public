@@ -1,0 +1,15 @@
+
+
+
+
+
+type conn : Linear = { tok : token, name : string }
+
+fun main () =
+    let
+        val c : conn = { tok = new_token (), name = "db" ^ "-main" }
+        val n = string_length (borrow c.name)
+        val t = c.tok
+        val _ = consume_token (t)
+    in print_int (n)
+    end

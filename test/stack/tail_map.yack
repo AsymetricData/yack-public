@@ -1,0 +1,9 @@
+fun loop (values : int map, remaining : int) : int =
+    if remaining <= 0 then map_length (values)
+    else loop (values, remaining - 1)
+
+fun main () =
+    let val values = map_new ()
+        val _ = map_set (values, "ok", 1)
+    in print_int (loop (values, 100000))
+    end

@@ -1,0 +1,966 @@
+import yack/char
+
+import yack/list
+
+import yack/string
+
+(* Représente une valeur JSON sous forme d'arbre immuable.
+   - `Null` : valeur JSON nulle ; `Bool` : booléen.
+   - `Number` : texte du nombre, conservé sans conversion flottante.
+   - `String` : chaîne décodée ; `Array` : liste ordonnée de valeurs.
+   - `Object` : liste ordonnée de couples clé-valeur.
+
+   Les constructeurs avec données prennent possession de leurs arguments ; ce type
+   sert à construire, analyser et rendre des documents JSON. *)
+datatype value =
+    Null
+  | Bool of bool
+  | Number of string
+  | String of string
+  | Array of value list
+  | Object of (string, value) list
+
+(* Construit la valeur JSON nulle, sans argument ni mutation. *)
+fun null () : value = Null
+
+(* Emballe un booléen comme valeur JSON.
+   - `input` : booléen scalaire consommé.
+
+   Retourne une nouvelle valeur `Bool`. *)
+fun bool_value (input : bool) : value = Bool (input)
+
+(* Convertit un entier en représentation numérique décimale JSON.
+   - `input` : entier scalaire consommé.
+
+   Retourne `Number` contenant son texte décimal. *)
+fun int_value (input : int) : value = Number (int_to_string (input))
+
+(* Construit un nombre depuis sa représentation textuelle.
+   - `input` : texte consommé et conservé tel quel, sans validation.
+
+   Retourne une valeur `Number`. *)
+fun number_value (input : string) : value = Number (input)
+
+(* Emballe une chaîne comme valeur JSON.
+   - `input` : chaîne consommée et stockée sans échappement préalable.
+
+   Retourne une nouvelle valeur `String`. *)
+fun string_value (input : string) : value = String (input)
+
+(* Construit un tableau JSON depuis une liste ordonnée.
+   - `input` : liste de valeurs consommée par le constructeur.
+
+   Retourne `Array` sans modifier les éléments. *)
+fun array_value (input : value list) : value = Array (input)
+
+(* Construit un objet JSON depuis une liste ordonnée de champs.
+   - `input` : couples clé-valeur consommés par le constructeur.
+
+   Retourne `Object` ; les clés répétées sont conservées. *)
+fun object_value (input : (string, value) list) : value = Object (input)
+
+(* Assemble une clé et sa valeur en entrée d'objet.
+   - `name` : nom de clé consommé.
+   - `value` : valeur associée consommée.
+
+   Retourne le couple, sans mutation. *)
+fun entry (name : string, value : value) : string * value = (name, value)
+
+(* Avance sur les espaces depuis un index dans l'entrée empruntée.
+   - `text` : texte source emprunté, non modifié.
+   - `index` : position initiale incluse.
+   - `size` : limite exclusive de lecture.
+
+   Retourne le premier index non-espace, ou la limite si elle est atteinte. *)
+fun skip_space (text : borrow string, index : int, size : int) : int =
+    if index >= size then
+        index
+    else if char.is_space_code (string.char_at_unchecked (text, index)) then
+        skip_space (text, index + 1, size)
+    else
+        index
+
+(* Convertit un code ASCII hexadécimal en valeur entière.
+   - `code` : code du caractère à examiner.
+
+   Retourne une valeur de 0 à 15, ou -1 si le code n'est pas hexadécimal. *)
+fun hex_digit_value (code : int) : int =
+    if code >= 48 then
+        if code <= 57 then
+            code - 48
+        else if code >= 65 then
+            if code <= 70 then
+                code - 55
+            else if code >= 97 then if code <= 102 then code - 87 else -1 else -1
+        else
+            -1
+    else
+        -1
+
+(* Analyse récursivement quatre chiffres hexadécimaux.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : position du prochain chiffre.
+   - `size` : limite exclusive de lecture.
+   - `count` : nombre de chiffres déjà lus, entre 0 et 4.
+   - `acc` : valeur déjà accumulée.
+
+   Retourne la valeur décodée ou `None` si l'entrée est incomplète/invalide. *)
+fun parse_hex4_from (
+    text : borrow string,
+    index : int,
+    size : int,
+    count : int,
+    acc : int
+) : int option =
+    if count = 4 then
+        Some (acc)
+    else if index >= size then
+        None
+    else
+        let
+            val digit = hex_digit_value (string.char_at_unchecked (text, index))
+        in
+            if digit < 0 then
+                None
+            else
+                parse_hex4_from (text, index + 1, size, count + 1, acc * 16 + digit)
+        end
+
+(* Lit quatre chiffres hexadécimaux à la position donnée.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : index du premier chiffre.
+   - `size` : limite exclusive de lecture.
+
+   Retourne la valeur décodée, ou `None` si les chiffres sont absents/invalides. *)
+fun parse_hex4 (text : borrow string, index : int, size : int) : int option =
+    parse_hex4_from (text, index, size, 0, 0)
+
+(* Encode en UTF-8 un point de code pris en charge.
+   - `code` : point de code à encoder.
+
+   Retourne `Some` chaîne UTF-8, ou `None` pour un point invalide/non pris en charge,
+   notamment les substituts UTF-16. *)
+fun utf8_of_code (code : int) : string option =
+    if code < 0 then
+        None
+    else if code < 128 then
+        Some (string_of_char (code))
+    else if code < 2048 then
+        Some (string_of_char (192 + code / 64) ^ string_of_char (128 + code % 64))
+    else if code < 65536 then
+        if code >= 55296 then
+            if code <= 57343 then
+                None
+            else
+                Some (
+                    string_of_char (224 + code / 4096) ^
+                        string_of_char (128 + code / 64 % 64) ^
+                        string_of_char (128 + code % 64)
+                )
+        else
+            Some (
+                string_of_char (224 + code / 4096) ^
+                    string_of_char (128 + code / 64 % 64) ^
+                    string_of_char (128 + code % 64)
+            )
+    else
+        None
+
+(* Décode un échappement JSON à partir du caractère suivant `\\`.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : position du caractère qui suit la barre inverse.
+   - `size` : limite exclusive de l'entrée.
+
+   Retourne le fragment décodé et l'index suivant, ou une erreur descriptive. *)
+fun parse_escape (text : borrow string, index : int, size : int) : (string, int) result =
+    if index >= size then
+        Error ("unterminated escape at " ^ int_to_string (index))
+    else
+        let
+            val code = string.char_at_unchecked (text, index)
+        in
+            if code = 34 then
+                Ok ((string_of_char (34), index + 1))
+            else if code = 92 then
+                Ok ((string_of_char (92), index + 1))
+            else if code = 47 then
+                Ok ((string_of_char (47), index + 1))
+            else if code = 110 then
+                Ok ((string_of_char (10), index + 1))
+            else if code = 114 then
+                Ok ((string_of_char (13), index + 1))
+            else if code = 116 then
+                Ok ((string_of_char (9), index + 1))
+            else if code = 98 then
+                Ok ((string_of_char (8), index + 1))
+            else if code = 102 then
+                Ok ((string_of_char (12), index + 1))
+            else if code = 117 then
+                let
+                    val parsed = parse_hex4 (text, index + 1, size)
+                in
+                    case parsed of
+                        None => Error ("invalid \\u escape at " ^ int_to_string (index))
+                      | Some value =>
+                          case utf8_of_code (value) of
+                              None =>
+                                  Error (
+                                      "unsupported \\u code point at " ^
+                                          int_to_string (index)
+                                  )
+                            | Some encoded => Ok ((encoded, index + 5))
+                end
+            else
+                Error ("unknown escape at " ^ int_to_string (index))
+        end
+
+(* Accumule le contenu décodé jusqu'au guillemet fermant d'une chaîne.
+   - `text` : source empruntée, non modifiée.
+   - `index` : position du prochain caractère.
+   - `size` : limite exclusive de lecture.
+   - `acc` : texte décodé accumulé, consommé puis prolongé.
+
+   Retourne le contenu et l'index après le guillemet, ou une erreur si la chaîne est
+   incomplète ou contient un échappement invalide. *)
+fun parse_string_chars (text : borrow string, index : int, size : int, acc : string) : (string, int) result =
+    if index >= size then
+        Error ("unterminated string at " ^ int_to_string (index))
+    else
+        let
+            val code = string.char_at_unchecked (text, index)
+        in
+            if code = 34 then
+                Ok ((acc, index + 1))
+            else if code = 92 then
+                let
+                    val escaped = parse_escape (text, index + 1, size)
+                in
+                    case escaped of
+                        Error message => Error (message)
+                      | Ok (decoded, next) =>
+                          parse_string_chars (text, next, size, acc ^ decoded)
+                end
+            else
+                parse_string_chars (text, index + 1, size, acc ^ string_of_char (code))
+        end
+
+(* Analyse une chaîne JSON dont le guillemet ouvrant est à `index`.
+   - `text` : source empruntée, non modifiée.
+   - `index` : position attendue du guillemet ouvrant.
+   - `size` : limite exclusive de l'entrée.
+
+   Retourne le contenu décodé et l'index suivant, ou une erreur de syntaxe. *)
+fun parse_string (text : borrow string, index : int, size : int) : (string, int) result =
+    if index >= size then
+        Error ("expected string at " ^ int_to_string (index))
+    else if string.char_at_unchecked (text, index) <> 34 then
+        Error ("expected string at " ^ int_to_string (index))
+    else
+        parse_string_chars (text, index + 1, size, "")
+
+(* Teste si un code ASCII peut faire partie d'un littéral numérique.
+   - `code` : code du caractère examiné.
+
+   Retourne vrai pour chiffres, signes, point et marqueurs d'exposant ; ce test
+   lexical seul ne garantit pas la validité complète du nombre. *)
+fun is_number_char (code : int) : bool =
+    if code >= 48 then
+        if code <= 57 then
+            true
+        else if code = 101 then true else if code = 69 then true else false
+    else if code = 45 then
+        true
+    else if code = 43 then true else if code = 46 then true else false
+
+(* Cherche la fin du groupe contigu de caractères numériques.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : début du groupe.
+   - `size` : limite exclusive.
+
+   Retourne l'index du premier caractère qui ne peut appartenir au groupe. *)
+fun number_end (text : borrow string, index : int, size : int) : int =
+    if index >= size then
+        index
+    else if is_number_char (string.char_at_unchecked (text, index)) then
+        number_end (text, index + 1, size)
+    else
+        index
+
+(* Lit un littéral numérique en conservant son texte source.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : début de la séquence.
+   - `size` : limite exclusive de lecture.
+
+   Retourne `Number` et l'index final, ou une erreur si aucun caractère numérique
+   n'est trouvé ; la validation de grammaire reste minimale. *)
+fun parse_number (text : borrow string, index : int, size : int) : (value, int) result =
+    let
+        val stop = number_end (text, index, size)
+        val literal = string.slice (text, index, stop)
+    in
+        if stop = index then
+            Error ("expected number at " ^ int_to_string (index))
+        else
+            Ok ((Number (literal), stop))
+    end
+
+(* Vérifie la présence d'un littéral à une position de l'entrée.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : position où commence le texte attendu.
+   - `size` : limite exclusive de l'entrée.
+   - `literal` : texte à comparer, emprunté pendant la comparaison.
+   - `value` : valeur à rendre en cas de correspondance, consommée.
+
+   Retourne la valeur et l'index suivant, ou une erreur précisant la position. *)
+fun expect_literal (
+    text : borrow string,
+    index : int,
+    size : int,
+    literal : string,
+    value : value
+) : (value, int) result =
+    let
+        val literalSize = string.length (borrow literal)
+    in
+        if index + literalSize > size then
+            Error (
+                "expected `" ^ string.copy (borrow literal) ^ "` at " ^
+                    int_to_string (index)
+            )
+        else
+            let
+                val candidate = string.slice (text, index, index + literalSize)
+            in
+                if string.equals (borrow candidate, borrow literal) then
+                    Ok ((value, index + literalSize))
+                else
+                    Error (
+                        "expected `" ^ string.copy (borrow literal) ^ "` at " ^
+                            int_to_string (index)
+                    )
+            end
+    end
+
+(* Analyse récursivement les éléments d'un tableau déjà ouvert.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : début du prochain élément.
+   - `size` : limite exclusive de l'entrée.
+   - `acc` : éléments lus en ordre inverse, consommés puis complétés.
+
+   Retourne les valeurs en ordre source et l'index après `]`, ou une erreur de
+   syntaxe/terminaison. *)
+fun parse_array_items (text : borrow string, index : int, size : int, acc : value list) : (value list, int) result =
+    let
+        val parsed = parse_value (text, index, size)
+    in
+        case parsed of
+            Error message => Error (message)
+          | Ok (value, next) =>
+              let
+                  val after = skip_space (text, next, size)
+              in
+                  if after >= size then
+                      Error ("unterminated array at " ^ int_to_string (after))
+                  else if string.char_at_unchecked (text, after) = 44 then
+                      let
+                          val start = skip_space (text, after + 1, size)
+                      in
+                          parse_array_items (text, start, size, Cons ((value, acc)))
+                      end
+                  else if string.char_at_unchecked (text, after) = 93 then
+                      Ok ((list.reverse (Cons ((value, acc))), after + 1))
+                  else
+                      Error ("expected `,` or `]` at " ^ int_to_string (after))
+              end
+    end
+
+(* Analyse un tableau JSON ouvert à l'index indiqué.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : position du crochet ouvrant.
+   - `size` : limite exclusive de lecture.
+
+   Retourne le tableau et l'index après `]`, ou une erreur de syntaxe. *)
+fun parse_array (text : borrow string, index : int, size : int) : (value, int) result =
+    let
+        val start = skip_space (text, index + 1, size)
+    in
+        if start >= size then
+            Error ("unterminated array at " ^ int_to_string (start))
+        else if string.char_at_unchecked (text, start) = 93 then
+            Ok ((Array (Nil), start + 1))
+        else
+            let
+                val items = parse_array_items (text, start, size, Nil)
+            in
+                case items of
+                    Error message => Error (message)
+                  | Ok (values, next) => Ok ((Array (values), next))
+            end
+    end
+
+(* Analyse récursivement les champs d'un objet déjà ouvert.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : début de la prochaine clé JSON.
+   - `size` : limite exclusive de l'entrée.
+   - `acc` : couples déjà lus en ordre inverse, consommés puis complétés.
+
+   Retourne les couples dans l'ordre source et l'index après `}`, ou une erreur pour
+   clé, séparateur, valeur ou terminaison invalide. *)
+fun parse_object_items (
+    text : borrow string,
+    index : int,
+    size : int,
+    acc : (string, value) list
+) : ((string, value) list, int) result =
+    let
+        val parsedKey = parse_string (text, index, size)
+    in
+        case parsedKey of
+            Error message => Error (message)
+          | Ok (key, afterKey) =>
+              let
+                  val colon = skip_space (text, afterKey, size)
+              in
+                  if colon >= size then
+                      Error ("unterminated object at " ^ int_to_string (colon))
+                  else if string.char_at_unchecked (text, colon) <> 58 then
+                      Error ("expected `:` at " ^ int_to_string (colon))
+                  else
+                      let
+                          val parsedValue = parse_value (text, colon + 1, size)
+                      in
+                          case parsedValue of
+                              Error message => Error (message)
+                            | Ok (value, next) =>
+                                let
+                                    val after = skip_space (text, next, size)
+                                in
+                                    if after >= size then
+                                        Error (
+                                            "unterminated object at " ^
+                                                int_to_string (after)
+                                        )
+                                    else if string.char_at_unchecked (text, after) = 44 then
+                                        let
+                                            val start =
+                                                skip_space (text, after + 1, size)
+                                        in
+                                            parse_object_items (
+                                                text,
+                                                start,
+                                                size,
+                                                Cons (((key, value), acc))
+                                            )
+                                        end
+                                    else if string.char_at_unchecked (text, after) = 125 then
+                                        Ok (
+                                            (
+                                                list.reverse (
+                                                    Cons (((key, value), acc))
+                                                ),
+                                                after + 1
+                                            )
+                                        )
+                                    else
+                                        Error (
+                                            "expected `,` or `}` at " ^
+                                                int_to_string (after)
+                                        )
+                                end
+                      end
+              end
+    end
+
+(* Analyse un objet JSON ouvert à l'index indiqué.
+   - `text` : entrée empruntée, non modifiée.
+   - `index` : position de l'accolade ouvrante.
+   - `size` : limite exclusive de lecture.
+
+   Retourne l'objet et l'index après `}`, ou une erreur de syntaxe. *)
+fun parse_object (text : borrow string, index : int, size : int) : (value, int) result =
+    let
+        val start = skip_space (text, index + 1, size)
+    in
+        if start >= size then
+            Error ("unterminated object at " ^ int_to_string (start))
+        else if string.char_at_unchecked (text, start) = 125 then
+            Ok ((Object (Nil), start + 1))
+        else
+            let
+                val items = parse_object_items (text, start, size, Nil)
+            in
+                case items of
+                    Error message => Error (message)
+                  | Ok (pairs, next) => Ok ((Object (pairs), next))
+            end
+    end
+
+(* Analyse une valeur JSON depuis un index, en sautant les espaces initiaux.
+   - `text` : texte source emprunté, jamais modifié.
+   - `index` : position de départ.
+   - `size` : limite exclusive de lecture.
+
+   Retourne la valeur et l'index suivant, ou une erreur si la syntaxe est invalide ou
+   l'entrée épuisée. *)
+fun parse_value (text : borrow string, index : int, size : int) : (value, int) result =
+    let
+        val start = skip_space (text, index, size)
+    in
+        if start >= size then
+            Error ("unexpected end of input")
+        else
+            let
+                val code = string.char_at_unchecked (text, start)
+            in
+                if code = 123 then
+                    parse_object (text, start, size)
+                else if code = 91 then
+                    parse_array (text, start, size)
+                else if code = 34 then
+                    let
+                        val parsed = parse_string (text, start, size)
+                    in
+                        case parsed of
+                            Error message => Error (message)
+                          | Ok (textValue, next) => Ok ((String (textValue), next))
+                    end
+                else if code = 116 then
+                    expect_literal (text, start, size, "true", Bool (true))
+                else if code = 102 then
+                    expect_literal (text, start, size, "false", Bool (false))
+                else if code = 110 then
+                    expect_literal (text, start, size, "null", Null)
+                else if code = 45 then
+                    parse_number (text, start, size)
+                else if code >= 48 then
+                    if code <= 57 then
+                        parse_number (text, start, size)
+                    else
+                        Error ("unexpected character at " ^ int_to_string (start))
+                else
+                    Error ("unexpected character at " ^ int_to_string (start))
+            end
+    end
+
+(* Analyse un document JSON entier et rejette les caractères finaux superflus.
+   - `text` : document emprunté, non modifié.
+
+   Retourne l'arbre JSON analysé, ou une erreur descriptive. *)
+fun unmarshal (text : borrow string) : value result =
+    let
+        val size = string.length (text)
+        val parsed = parse_value (text, 0, size)
+    in
+        case parsed of
+            Error message => Error (message)
+          | Ok (value, next) =>
+              let
+                  val after = skip_space (text, next, size)
+              in
+                  if after = size then
+                      Ok (value)
+                  else
+                      Error ("trailing characters at " ^ int_to_string (after))
+              end
+    end
+
+(* Convertit un chiffre de 0 à 15 en code ASCII hexadécimal minuscule.
+   - `value` : valeur du chiffre à encoder.
+
+   Retourne le code ASCII correspondant ; l'appelant fournit une valeur valide. *)
+fun hex_digit_code (value : int) : int = if value < 10 then 48 + value else 87 + value
+
+(* Échappe récursivement les caractères d'une chaîne JSON.
+   - `text` : chaîne source empruntée, non modifiée.
+   - `index` : position du prochain caractère à traiter.
+   - `size` : limite exclusive de lecture.
+   - `acc` : texte échappé accumulé, consommé puis prolongé.
+
+   Retourne le texte complet avec guillemets, barres inverses et contrôles
+   représentés par leurs échappements JSON. *)
+fun escape_from (text : borrow string, index : int, size : int, acc : string) : string =
+    if index >= size then
+        acc
+    else
+        let
+            val code = string.char_at_unchecked (text, index)
+        in
+            if code = 34 then
+                escape_from (text, index + 1, size, acc ^ "\\\"")
+            else if code = 92 then
+                escape_from (text, index + 1, size, acc ^ "\\\\")
+            else if code = 10 then
+                escape_from (text, index + 1, size, acc ^ "\\n")
+            else if code = 13 then
+                escape_from (text, index + 1, size, acc ^ "\\r")
+            else if code = 9 then
+                escape_from (text, index + 1, size, acc ^ "\\t")
+            else if code = 8 then
+                escape_from (text, index + 1, size, acc ^ "\\b")
+            else if code = 12 then
+                escape_from (text, index + 1, size, acc ^ "\\f")
+            else if code < 32 then
+                escape_from (
+                    text,
+                    index + 1,
+                    size,
+                    acc ^ "\\u00" ^ string_of_char (hex_digit_code (code / 16)) ^
+                        string_of_char (hex_digit_code (code % 16))
+                )
+            else
+                escape_from (text, index + 1, size, acc ^ string_of_char (code))
+        end
+
+(* Échappe le contenu d'une chaîne JSON sans ajouter de guillemets.
+   - `text` : chaîne source empruntée, non modifiée.
+
+   Retourne une nouvelle chaîne prête à être incluse dans un littéral JSON. *)
+fun escape (text : borrow string) : string =
+    escape_from (text, 0, string.length (text), "")
+
+(* Rend les éléments d'une liste séparés par des virgules, sans crochets.
+   - `values` : valeurs en ordre de sortie, consommées par la récursion.
+
+   Retourne le texte JSON des éléments. *)
+fun marshal_values (values : value list) : string =
+    case values of
+        Nil => ""
+      | Cons (value, Nil) => marshal (value)
+      | Cons (value, rest) => marshal (value) ^ "," ^ marshal_values (rest)
+
+(* Rend les champs d'un objet séparés par des virgules, sans accolades.
+   - `fields` : couples clé-valeur ordonnés, consommés par la récursion.
+
+   Retourne les clés échappées entre guillemets et leurs valeurs sérialisées. *)
+fun marshal_fields (fields : (string, value) list) : string =
+    case fields of
+        Nil => ""
+      | Cons ((name, value), Nil) =>
+          "\"" ^ escape (borrow name) ^ "\":" ^ marshal (value)
+      | Cons ((name, value), rest) =>
+          "\"" ^ escape (borrow name) ^ "\":" ^ marshal (value) ^ "," ^
+              marshal_fields (rest)
+
+(* Sérialise une valeur en texte JSON, en conservant l'ordre des listes.
+   - `value` : arbre JSON consommé par inspection, sans mutation en place.
+
+   Retourne le document JSON correspondant. *)
+fun marshal (value : value) : string =
+    case value of
+        Null => "null"
+      | Bool inner => if inner then "true" else "false"
+      | Number literal => literal
+      | String text => "\"" ^ escape (borrow text) ^ "\""
+      | Array values => "[" ^ marshal_values (values) ^ "]"
+      | Object fields => "{" ^ marshal_fields (fields) ^ "}"
+
+(* Vérifie que la valeur JSON est nulle.
+   - `value` : valeur inspectée et consommée par correspondance de motif.
+
+   Retourne `Ok ()` pour `Null`, sinon une erreur de type. *)
+fun as_null (value : value) : unit result =
+    case value of
+        Null => Ok (())
+      | _ => Error ("expected null")
+
+(* Extrait un booléen d'une valeur JSON.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne le booléen si le constructeur est `Bool`, sinon une erreur. *)
+fun as_bool (value : value) : bool result =
+    case value of
+        Bool inner => Ok (inner)
+      | _ => Error ("expected bool")
+
+(* Extrait une chaîne d'une valeur JSON.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne la chaîne si le constructeur est `String`, sinon une erreur. *)
+fun as_string (value : value) : string result =
+    case value of
+        String inner => Ok (inner)
+      | _ => Error ("expected string")
+
+(* Convertit un nombre JSON entier en valeur Yack `int`.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne l'entier si son texte est accepté par `string_to_int`, ou une erreur de
+   type/conversion. *)
+fun as_int (value : value) : int result =
+    case value of
+        Number literal =>
+            (case string_to_int (borrow literal) of
+                 None =>
+                     Error ("expected int, got `" ^ string.copy (borrow literal) ^ "`")
+               | Some inner => Ok (inner))
+      | _ => Error ("expected number")
+
+(* Extrait la liste des éléments d'un tableau JSON.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne la liste si le constructeur est `Array`, sinon une erreur. *)
+fun as_array (value : value) : value list result =
+    case value of
+        Array inner => Ok (inner)
+      | _ => Error ("expected array")
+
+(* Extrait les couples clé-valeur d'un objet JSON.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne la liste si le constructeur est `Object`, sinon une erreur. *)
+fun as_object (value : value) : (string, value) list result =
+    case value of
+        Object inner => Ok (inner)
+      | _ => Error ("expected object")
+
+(* Consomme une valeur JSON sans la rendre.
+   - `value` : valeur abandonnée. *)
+fun discard_value (value : value) : unit = ()
+
+(* Consomme les champs restants d'un objet.
+   - `fields` : champs abandonnés. *)
+fun discard_fields (fields : (string, value) list) : unit =
+    case fields of
+        Nil => ()
+      | Cons (_, rest) => discard_fields (rest)
+
+(* Recherche la première entrée portant une clé donnée.
+   - `name` : clé cherchée, empruntée sans modification.
+   - `fields` : couples parcourus dans l'ordre et consommés par la recherche.
+
+   Retourne la valeur du premier doublon correspondant, ou `None`. *)
+fun find_field (name : borrow string, fields : (string, value) list) : value option =
+    case fields of
+        Nil => None
+      | Cons ((key, value), rest) =>
+          if string.equals (name, borrow key) then
+              let val ignored = discard_fields (rest) in Some (value) end
+          else
+              let val ignored = discard_value (value)
+              in find_field (name, rest)
+              end
+
+(* Recherche optionnellement un champ d'objet par sa clé.
+   - `name` : clé recherchée, empruntée.
+   - `fields` : liste des couples consommée par le parcours.
+
+   Retourne la première valeur correspondante, ou `None`. *)
+fun field (name : borrow string, fields : (string, value) list) : value option =
+    find_field (name, fields)
+
+(* Recherche un champ obligatoire dans une liste de champs.
+   - `name` : clé attendue, empruntée (copiée uniquement pour l'erreur).
+   - `fields` : couples parcourus et consommés par la recherche.
+
+   Retourne la première valeur correspondante, ou une erreur nommant la clé. *)
+fun required (name : borrow string, fields : (string, value) list) : value result =
+    case find_field (name, fields) of
+        None => Error ("missing field `" ^ string.copy (name) ^ "`")
+      | Some value => Ok (value)
+
+(* Recherche un champ obligatoire et le convertit en entier.
+   - `name` : clé cherchée, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne l'entier ou l'erreur de champ manquant/de conversion. *)
+fun field_int (name : borrow string, fields : (string, value) list) : int result =
+    case required (name, fields) of
+        Error message => Error (message)
+      | Ok value =>
+          case as_int (value) of
+              Error message => Error (message)
+            | Ok inner => Ok (inner)
+
+(* Recherche un champ obligatoire et l'extrait comme chaîne.
+   - `name` : clé cherchée, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne la chaîne ou l'erreur de champ manquant/de type. *)
+fun field_string (name : borrow string, fields : (string, value) list) : string result =
+    case required (name, fields) of
+        Error message => Error (message)
+      | Ok value =>
+          case as_string (value) of
+              Error message => Error (message)
+            | Ok inner => Ok (inner)
+
+(* Recherche un champ obligatoire et l'extrait comme booléen.
+   - `name` : clé cherchée, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne le booléen ou l'erreur de champ manquant/de type. *)
+fun field_bool (name : borrow string, fields : (string, value) list) : bool result =
+    case required (name, fields) of
+        Error message => Error (message)
+      | Ok value =>
+          case as_bool (value) of
+              Error message => Error (message)
+            | Ok inner => Ok (inner)
+
+(* Recherche un champ obligatoire et l'extrait comme tableau.
+   - `name` : clé cherchée, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne les éléments ou l'erreur de champ manquant/de type. *)
+fun field_array (name : borrow string, fields : (string, value) list) : value list result =
+    case required (name, fields) of
+        Error message => Error (message)
+      | Ok value =>
+          case as_array (value) of
+              Error message => Error (message)
+            | Ok inner => Ok (inner)
+
+(* Recherche un champ obligatoire et l'extrait comme objet.
+   - `name` : clé cherchée, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne les couples ou l'erreur de champ manquant/de type. *)
+fun field_object (name : borrow string, fields : (string, value) list) : (string, value) list result =
+    case required (name, fields) of
+        Error message => Error (message)
+      | Ok value =>
+          case as_object (value) of
+              Error message => Error (message)
+            | Ok inner => Ok (inner)
+
+(* Applique `f` à chaque valeur d'un tableau JSON.
+   - `f` : fonction appliquée à chaque valeur.
+   - `values` : éléments du tableau, consommés. *)
+fun array_map (f : consume value -> 'a, values : value list) : 'a list =
+    case values of
+        Nil => Nil
+      | Cons (value, rest) =>
+            Cons ((f (value), array_map (f, rest)))
+
+(* Parcours de `array_filter_map` avec un accumulateur inversé.
+   - `f` : fonction appliquée à chaque valeur.
+   - `values` : éléments du tableau, consommés.
+   - `acc` : résultats retenus, dans l’ordre inverse. *)
+fun array_filter_map_from
+        (f : consume value -> 'a option, values : value list, acc : 'a list)
+        : 'a list =
+    case values of
+        Nil => list.reverse (acc)
+      | Cons (value, rest) =>
+            case f (value) of
+                None => array_filter_map_from (f, rest, acc)
+              | Some (mapped) =>
+                    array_filter_map_from (f, rest, Cons ((mapped, acc)))
+
+(* Applique `f` et ne garde que les `Some`, dans l’ordre.
+   - `f` : fonction appliquée à chaque valeur.
+   - `values` : éléments du tableau, consommés. *)
+fun array_filter_map (f : consume value -> 'a option, values : value list) : 'a list =
+    array_filter_map_from (f, values, Nil)
+
+(* Plie les valeurs d'un tableau de la gauche vers la droite.
+   - `f` : fonction `(accumulateur, valeur) -> accumulateur`.
+   - `init` : accumulateur initial.
+   - `values` : éléments du tableau, consommés. *)
+fun array_foldl (f : consume ('acc * value) -> 'acc, init : 'acc, values : value list) : 'acc =
+    case values of
+        Nil => init
+      | Cons (value, rest) =>
+            let val next = f ((init, value))
+            in array_foldl (f, next, rest)
+            end
+
+(* Décode toutes les valeurs d'un tableau, en s'arrêtant à la première erreur.
+   - `decoder` : décodeur appliqué à chaque valeur.
+   - `values` : éléments du tableau, consommés. *)
+fun array_decode (decoder : consume value -> 'a result, values : value list) : 'a list result =
+    case values of
+        Nil => Ok (Nil)
+      | Cons (value, rest) =>
+            case decoder (value) of
+                Error message => Error (message)
+              | Ok decoded =>
+                  case array_decode (decoder, rest) of
+                      Error message => Error (message)
+                    | Ok decodedRest => Ok (Cons ((decoded, decodedRest)))
+
+(* Applique `f` à chaque couple clé-valeur d'un objet.
+   - `f` : fonction appliquée à chaque couple.
+   - `fields` : champs de l'objet, consommés. *)
+fun object_map (f : consume (string * value) -> 'a, fields : (string, value) list) : 'a list =
+    case fields of
+        Nil => Nil
+      | Cons (field, rest) =>
+            Cons ((f (field), object_map (f, rest)))
+
+(* Transforme les valeurs d'un objet en conservant les clés.
+   - `f` : fonction appliquée à chaque valeur.
+   - `fields` : champs de l'objet, consommés. *)
+fun object_map_values (f : consume value -> 'a, fields : (string, value) list) : (string, 'a) list =
+    case fields of
+        Nil => Nil
+      | Cons ((key, value), rest) =>
+            Cons (((key, f (value)), object_map_values (f, rest)))
+
+(* Décode les valeurs d'un objet en conservant les clés.
+   - `decoder` : décodeur appliqué à chaque valeur.
+   - `fields` : champs de l'objet, consommés. *)
+fun object_decode_values (decoder : consume value -> 'a result, fields : (string, value) list) : (string, 'a) list result =
+    case fields of
+        Nil => Ok (Nil)
+      | Cons ((key, value), rest) =>
+            case decoder (value) of
+                Error message => Error (message)
+              | Ok decoded =>
+                  case object_decode_values (decoder, rest) of
+                      Error message => Error (message)
+                    | Ok decodedRest => Ok (Cons (((key, decoded), decodedRest)))
+
+(* Recherche un champ et applique un décodeur à sa valeur.
+   - `name` : clé cherchée, empruntée.
+   - `decoder` : décodeur appliqué à la valeur trouvée.
+   - `fields` : champs de l'objet, consommés. *)
+fun field_decode (name : borrow string, decoder : consume value -> 'a result, fields : (string, value) list) : 'a result =
+    case required (name, fields) of
+        Error message => Error (message)
+      | Ok value => decoder (value)
+
+(* Analyse un document JSON complet (alias de `unmarshal`).
+   - `text` : document emprunté et non modifié.
+
+   Retourne l'arbre JSON analysé ou une erreur de syntaxe. *)
+fun parse (text : borrow string) : value result = unmarshal (text)
+
+(* Sérialise une valeur JSON en texte (alias de `marshal`).
+   - `value` : arbre consommé par inspection, sans mutation en place.
+
+   Retourne le document sérialisé. *)
+fun to_string (value : value) : string = marshal (value)
+
+(* Construit un objet JSON à partir de couples ordonnés.
+   - `fields` : liste des clés et valeurs consommée par le constructeur.
+
+   Retourne `Object` en conservant les éventuelles clés répétées. *)
+fun object (fields : (string, value) list) : value = Object (fields)
+
+(* Construit un tableau JSON à partir d'une liste ordonnée.
+   - `values` : éléments consommés par le constructeur.
+
+   Retourne `Array` sans mutation des valeurs. *)
+fun array (values : value list) : value = Array (values)
+
+(* Construit une valeur JSON de type chaîne.
+   - `input` : chaîne consommée sans échappement préalable.
+
+   Retourne `String`. *)
+fun string (input : string) : value = String (input)
+
+(* Convertit un entier en valeur JSON numérique décimale.
+   - `input` : entier scalaire consommé.
+
+   Retourne `Number` contenant sa représentation décimale. *)
+fun int (input : int) : value = Number (int_to_string (input))
+
+(* Construit une valeur JSON booléenne.
+   - `input` : booléen scalaire consommé.
+
+   Retourne `Bool`. *)
+fun bool (input : bool) : value = Bool (input)
+
+(* Construit une valeur JSON nulle, sans argument ni mutation. *)
+fun null_value () : value = Null

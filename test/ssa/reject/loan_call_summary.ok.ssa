@@ -1,0 +1,16 @@
+# The same graph, accepted: dropping `y` is fine, the summary of
+# `yack_choose` says its result never points into its second argument.
+fun yack_choose {
+  b0(%0.a : &string, %1.b : &string):
+    return %0.a
+}
+fun yack_f {
+  b0(%0.x : string, %1.y : string):
+    %2 : &string = borrow &%0.x
+    %3 : &string = borrow &%1.y
+    %4.r : &string = call yack_choose %2, %3
+    drop %1.y : string
+    %5 : int = string.string_length %4.r
+    drop %0.x : string
+    return %5
+}

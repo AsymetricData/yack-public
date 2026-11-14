@@ -1,0 +1,10 @@
+import yack/list
+
+fun pick (flag : bool, values : string list) : string list =
+    if flag then values else Nil
+
+fun main () =
+    let val values = Cons (("leak", Nil))
+        val kept = pick (false, values)
+    in list.discard_list (kept)
+    end

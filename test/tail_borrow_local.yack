@@ -1,0 +1,68 @@
+
+
+
+
+
+
+
+
+type cell = { value : int }
+
+datatype holder = Holder of cell * int list
+
+fun build (n : int, acc : int list) : int list =
+    if n = 0 then acc else build (n - 1, Cons ((n, acc)))
+
+fun sum_local (current : borrow int list, n : int, acc : int) : int =
+    if n <= 0 then
+        case current of
+            Nil => acc
+          | Cons ((value, _)) => acc + value
+    else
+        let val fresh = Cons ((n, Nil))
+        in sum_local (borrow fresh, n - 1, acc + 1)
+        end
+
+fun shadowed (current : borrow int list, n : int) : int =
+    if n <= 0 then
+        case current of
+            Nil => 0
+          | Cons ((value, _)) => value
+    else
+        let val fresh = build (2, Nil)
+        in
+            case borrow fresh of
+                Nil => 0
+              | Cons ((_, current)) => shadowed (current, n - 1)
+        end
+
+
+
+
+fun let_shadow (current : borrow int list, n : int) : int =
+    if n <= 0 then
+        case current of
+            Nil => 0
+          | Cons ((value, _)) => value
+    else
+        let val fresh = build (2, Nil)
+            val current = borrow fresh
+        in let_shadow (current, n - 1)
+        end
+
+fun view_cell (item : borrow cell, holder : borrow holder, n : int) : int =
+    if n <= 0 then item.value
+    else
+        case holder of
+            Holder ((inner, _)) => view_cell (borrow inner, holder, n - 1)
+
+fun main () =
+    let val start = build (3, Nil)
+        val holder = Holder (({ value = 7 }, Nil))
+        val item = { value = 1 }
+        val first = sum_local (borrow start, 1000, 0)
+        val second = shadowed (borrow start, 1000)
+        val third = view_cell (borrow item, borrow holder, 1000)
+        val fourth = let_shadow (borrow start, 1000)
+    in print_int (first + second + third + fourth)
+    end

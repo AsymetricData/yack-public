@@ -1,0 +1,4 @@
+fun main () =
+    let val value = 1
+    in print_int (value.0)
+    end

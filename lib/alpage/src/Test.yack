@@ -1,0 +1,39 @@
+import alpage/Alpage
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+
+type response : Affine = {
+    status : int,
+    headers : (string * string) list,
+    body : string
+}
+
+type client : Affine = {
+    app : Alpage.t,
+    settings : Alpage.config
+}
+
+fun start (app : Alpage.t, settings : Alpage.config) : client result =
+    Ok ({ app = app, settings = settings })
+
+fun close (client : client) : unit =
+    case client of
+        { app = _app, settings = _settings } => ()
+
+fun inspect (response : Response.t) : response =
+    let val parts = Response.inspect (response)
+    in
+        { status = parts.0, headers = parts.1, body = parts.2 }
+    end
+
+fun request (client : client, request : Request.t) : response * client =
+    case client of
+        { app = app, settings = settings } =>
+            case Alpage.dispatch (app, request) of
+                (reply, app) =>
+                    let val response = Reply.to_response (reply)
+                        val inspected = inspect (response)
+                    in
+                        (inspected, { app = app, settings = settings })
+                    end

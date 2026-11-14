@@ -1,0 +1,4 @@
+fun main () =
+    let val _ = map_set (map_new (), "x", 1)
+    in ()
+    end

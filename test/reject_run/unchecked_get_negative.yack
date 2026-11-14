@@ -1,0 +1,5 @@
+
+fun main () =
+    let val xs = array_make (7, 3) in
+      print_int (array_get_unchecked (xs, 0 - 1))
+    end

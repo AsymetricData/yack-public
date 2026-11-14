@@ -1,0 +1,69 @@
+
+
+
+fun chain (s : string) : string =
+    let val a = s ^ "-"
+        val b = a ^ "x"
+        val c = b ^ "y"
+    in c end
+
+
+fun twice (s : string) : string =
+    let val a = s ^ "!"
+        val n = string_length (borrow a)
+        val b = a ^ "?"
+    in if n > 0 then b else "" end
+
+
+fun shadow (s : string) : string =
+    let val a = s ^ "1"
+        val a = a ^ "2"
+        val a = a ^ "3"
+    in a end
+
+
+fun tail_use (s : string) : string =
+    let val a = s ^ "]"
+    in "[" ^ a end
+
+
+fun effect (s : string) : string =
+    let val a = s ^ "e"
+        val _ = print_string ("before;")
+        val b = a ^ "f"
+    in b end
+
+
+fun branch (s : string, k : bool) : string =
+    let val a = s ^ "b"
+    in if k then a ^ "T" else "F" end
+
+
+fun boxed (s : string) : int =
+    arena
+        val a = s ^ "abc"
+        val b = a ^ "def"
+    in string_length (borrow b) end
+
+
+fun rep (s : string, n : int) : string =
+    if n = 0 then s
+    else let val t = s ^ "." in rep (t ^ "", n - 1) end
+
+fun main () =
+    let val _ = print_string (chain ("a"))
+        val _ = print_string (";")
+        val _ = print_string (twice ("b"))
+        val _ = print_string (";")
+        val _ = print_string (shadow ("c"))
+        val _ = print_string (";")
+        val _ = print_string (tail_use ("d"))
+        val _ = print_string (";")
+        val _ = print_string (effect ("g"))
+        val _ = print_string (";")
+        val _ = print_string (branch ("h", true))
+        val _ = print_string (branch ("i", false))
+        val _ = print_string (";")
+        val _ = print_int (boxed ("j"))
+        val _ = print_string (";")
+    in print_string (rep ("r", 3)) end

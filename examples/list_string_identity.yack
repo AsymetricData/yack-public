@@ -1,0 +1,10 @@
+import yack/list
+
+fun same_string (s : string) : string = s
+
+fun main () =
+    let val values = Cons (("ab", Cons (("c", Nil))))
+        val same = list.map (same_string, values)
+        val count = list.length (same)
+    in print_int (count)
+    end

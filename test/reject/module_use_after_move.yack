@@ -1,0 +1,4 @@
+import fixtures/Bad.{consume}
+
+fun main () =
+  print_int (consume ("a" ^ "b"))

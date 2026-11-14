@@ -1,0 +1,35 @@
+import net/Net
+
+fun main () =
+    case Net.listen (0) of
+        Error message => print_string (message)
+      | Ok listener =>
+          let val port = Net.local_port (borrow listener)
+              val client = Net.connect_loopback (port)
+          in case client of
+               Error message =>
+                   let val _ = Net.close_listener (listener)
+                   in print_string (message)
+                   end
+             | Ok stream =>
+                 let val accepted = Net.accept (borrow listener)
+                 in case accepted of
+                      Error message =>
+                          let val _ = Net.close (stream)
+                              val _ = Net.close_listener (listener)
+                          in print_string (message)
+                          end
+                    | Ok peer =>
+                        let val hello = "hello"
+                            val payload = bytes_from_string (borrow hello)
+                            val sent = send_from (Net.stream_fd (borrow stream), payload, 0, 5)
+                            val buffer : int8 array = array_make (0, 5)
+                            val received = recv_into (Net.stream_fd (borrow peer), buffer, 0, 5)
+                            val text = bytes_to_string (buffer)
+                            val _ = Net.close (peer)
+                            val _ = Net.close (stream)
+                            val _ = Net.close_listener (listener)
+                        in print_string (text)
+                        end
+                 end
+          end

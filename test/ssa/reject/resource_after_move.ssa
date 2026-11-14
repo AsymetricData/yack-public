@@ -1,0 +1,9 @@
+# expect: reads `r` (%0) after it was consumed
+# A `resource` is Affine: once moved it is gone, even though it has no
+# runtime storage.
+fun yack_f {
+  b0(%0.r : resource):
+    %1 : unit = call yack_close move %0.r
+    %2 : int = call yack_peek %0.r
+    return %2
+}

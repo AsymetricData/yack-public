@@ -1,0 +1,184 @@
+import web/Cookie
+
+(* yack/web/Response : réponse HTTP possédée.
+
+`Response.t` n'est pas un writer : chaque helper consomme la réponse et en
+rend une nouvelle. Cela colle au modèle Affine de Yack et permet le pipe :
+
+Response.text ("ok")
+|> Response.status (201)
+|> Response.header ("X-Trace", "abc")
+*)
+datatype session_change =
+    No_change
+  | Set_session of (string, string) list
+  | Clear_session
+
+type t : Affine = {
+    status : int,
+    headers : (string, string) list,
+    body : string,
+    session : session_change
+}
+
+fun status_text (code : int) : string =
+    if code = 200 then
+        "OK"
+    else if code = 201 then
+        "Created"
+    else if code = 204 then
+        "No Content"
+    else if code = 301 then
+        "Moved Permanently"
+    else if code = 302 then
+        "Found"
+    else if code = 304 then
+        "Not Modified"
+    else if code = 400 then
+        "Bad Request"
+    else if code = 401 then
+        "Unauthorized"
+    else if code = 403 then
+        "Forbidden"
+    else if code = 404 then
+        "Not Found"
+    else if code = 405 then
+        "Method Not Allowed"
+    else if code = 409 then
+        "Conflict"
+    else if code = 422 then
+        "Unprocessable Entity"
+    else if code = 429 then
+        "Too Many Requests"
+    else if code = 500 then
+        "Internal Server Error"
+    else if code = 501 then
+        "Not Implemented"
+    else if code = 503 then "Service Unavailable" else "OK"
+
+fun make (status : int, content_type : string, body : string) : t =
+    {
+        status = status,
+        headers = Cons ((("Content-Type", content_type), Nil)),
+        body = body,
+        session = No_change
+    }
+
+(* Réponse texte UTF-8. *)
+fun text (body : string) : t = make (200, "text/plain; charset=utf-8", body)
+
+(* Réponse HTML UTF-8. *)
+fun html (body : string) : t = make (200, "text/html; charset=utf-8", body)
+
+(* Réponse JSON. Le corps doit déjà être sérialisé. *)
+fun json (body : string) : t = make (200, "application/json; charset=utf-8", body)
+
+(* Réponse vide avec un statut explicite. *)
+fun empty_status (status : int) : t =
+    {
+        status = status,
+        headers = Cons ((("Content-Length", "0"), Nil)),
+        body = "",
+        session = No_change
+    }
+
+fun empty () : t = empty_status (204)
+
+fun bad_request (message : string) : t =
+    make (400, "text/plain; charset=utf-8", message)
+
+fun unauthorized () : t = make (401, "text/plain; charset=utf-8", "unauthorized")
+
+fun forbidden () : t = make (403, "text/plain; charset=utf-8", "forbidden")
+
+fun not_found () : t = make (404, "text/plain; charset=utf-8", "not found")
+
+fun method_not_allowed () : t =
+    make (405, "text/plain; charset=utf-8", "method not allowed")
+
+fun server_error () : t =
+    make (500, "text/plain; charset=utf-8", "internal server error")
+
+fun status_code (response : borrow t) : int = response.status
+
+fun with_status (response : t, status : int) : t =
+    case response of
+        { status = _old, headers = headers, body = body, session = session } =>
+            { status = status, headers = headers, body = body, session = session }
+
+fun with_header (response : t, name : borrow string, value : borrow string) : t =
+    case response of
+        { status = status, headers = headers, body = body, session = session } =>
+            {
+                status = status,
+                headers = Cons (((string_copy (name), string_copy (value)), headers)),
+                body = body,
+                session = session
+            }
+
+fun with_cookie (response : t, cookie : Cookie.t) : t =
+    let val rendered = Cookie.render (cookie)
+        val name = "Set-Cookie"
+    in
+        with_header (response, borrow name, borrow rendered)
+    end
+
+fun session_add (session : session_change, name : string, value : string) : session_change =
+    case session of
+        No_change => Set_session (Cons (((name, value), Nil)))
+      | Set_session values => Set_session (Cons (((name, value), values)))
+      | Clear_session => Set_session (Cons (((name, value), Nil)))
+
+fun session_set (response : t, name : string, value : string) : t =
+    case response of
+        { status = status, headers = headers, body = body, session = session } =>
+            {
+                status = status,
+                headers = headers,
+                body = body,
+                session = session_add (session, name, value)
+            }
+
+fun session_clear (response : t) : t =
+    case response of
+        { status = status, headers = headers, body = body, session = _old } =>
+            { status = status, headers = headers, body = body, session = Clear_session }
+
+fun redirect (response : t, location : string) : t =
+    let val moved = with_status (response, 302)
+        val name = "Location"
+        val target = borrow location
+    in
+        with_header (moved, borrow name, target)
+    end
+
+fun render_headers (headers : (string, string) list) : string =
+    case headers of
+        Nil => ""
+      | pair :: rest =>
+          let val name = pair.0
+              val value = pair.1
+          in
+              name ^ ": " ^ value ^ "\r\n" ^ render_headers (rest)
+          end
+
+fun render_with (response : t, connection : borrow string) : string =
+    case response of
+        { status = status, headers = headers, body = body, session = _change } =>
+            "HTTP/1.1 " ^ int_to_string (status) ^ " " ^ status_text (status) ^ "\r\n" ^
+                render_headers (headers) ^
+                "Content-Length: " ^
+                int_to_string (string_length (borrow body)) ^
+                "\r\n" ^
+                "Connection: " ^ string_copy (connection) ^ "\r\n\r\n" ^
+                body
+
+fun render (response : t) : string =
+    let val connection = "close"
+    in render_with (response, borrow connection)
+    end
+
+fun render_keepalive (response : t) : string =
+    let val connection = "keep-alive"
+    in render_with (response, borrow connection)
+    end

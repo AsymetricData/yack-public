@@ -1,0 +1,9 @@
+fun add (x : int32, y : int64) : int64 =
+    x + y
+
+fun main () =
+    let val a : int32 = 40
+        val b : int64 = 2
+        val c = add (a, b)
+    in ()
+    end

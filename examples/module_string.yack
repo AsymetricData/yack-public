@@ -1,0 +1,7 @@
+import modules/Text.{join, length}
+
+fun main () =
+  let val text = "hello" ^ " " ^ "world"
+      val joined = join (text, " !")
+  in print_int (length (joined))
+  end

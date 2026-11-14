@@ -1,0 +1,6 @@
+fun worker (value : string) : unit = ()
+
+fun main () =
+    let val _ = sys.thread_spawn (worker, 1)
+    in ()
+    end

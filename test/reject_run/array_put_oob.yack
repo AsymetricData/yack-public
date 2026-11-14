@@ -1,0 +1,7 @@
+
+fun main () =
+    let val xs = array_new ()
+        val _ = array_push (xs, "a" ^ "b")
+        val _ = array_put (xs, 1, "c" ^ "d")
+    in print_int (array_length (xs))
+    end

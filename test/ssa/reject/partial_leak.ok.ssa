@@ -1,0 +1,12 @@
+# The same graph, accepted: the skipped part is moved out first.
+fun yack_main {
+  b0:
+    %0.a : string = view const "a"
+    %1.b : string = view const "b"
+    %2.p : string * string = tuple move %0.a, move %1.b
+    %3.y : string = bind 1 move.1 %2.p
+    drop %2.p : string * string skip 1
+    drop %3.y! : string
+    %4 : unit = const ()
+    return %4!
+}

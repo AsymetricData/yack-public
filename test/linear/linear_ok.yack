@@ -1,0 +1,33 @@
+
+
+datatype door : Linear = Door of token
+
+fun open_door (n : int) : door = Door (new_token ())
+
+fun close (d : door) : unit =
+    case d of Door t => consume_token (t)
+
+fun id (x : 'a) : 'a = x
+
+fun pass_pair (p : token * int) : int =
+    case p of (t, n) => let val _ = consume_token (t) in n end
+
+fun peek (p : borrow (token * int)) : int =
+    case p of (_, n) => n
+
+fun maybe (o : token option) : int =
+    case o of
+        Some t => let val _ = consume_token (t) in 1 end
+      | None => 0
+
+fun main () =
+    let val _ = close (open_door (1))
+        val _ = consume_token (id (new_token ()))
+        val a = pass_pair ((new_token (), 2))
+        val b = maybe (Some (new_token ()))
+        val c = maybe (None)
+        val pair = (new_token (), 5)
+        val k = peek (borrow pair)
+        val (t, _) = pair
+        val _ = consume_token (t)
+    in print_int (a + b + c + k) end

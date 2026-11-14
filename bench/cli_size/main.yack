@@ -1,0 +1,18 @@
+import yack/args
+import yack/io
+import yack/option
+import yack/os
+
+(* A CLI: `app --name Ada` prints a greeting. *)
+fun main () =
+    case args.parse (
+        [args.Opt (("name", None, "who to greet", Some ("Yack")))],
+        os.command_args ()
+    ) of
+        Error message => io.eprint_line (borrow message)
+      | Ok parsed =>
+          let val name = args.get_option (parsed, "name") |> option.unwrap_or ("Yack")
+              val line = "Hello from " ^ name ^ " !"
+          in
+              io.print_line (borrow line)
+          end

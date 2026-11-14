@@ -1,0 +1,9 @@
+type user : Affine = { name : int }
+
+fun main () =
+    let val escaped =
+          (let val user : user = { name = 1 }
+           in borrow user
+           end)
+    in ()
+    end

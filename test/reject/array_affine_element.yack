@@ -1,0 +1,4 @@
+fun main () =
+  let val values = array_make ("x", 2)
+  in ()
+  end

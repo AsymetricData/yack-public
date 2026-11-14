@@ -1,0 +1,110 @@
+import yack/args
+import yack/cli
+import yack/io
+import yack/os
+import yack/sort
+import yack/string
+
+(* ls: a tiny `ls` built on the standard library.
+
+   The kernel exposes no `readdir`/`stat` yet, so this variant lists the paths
+   named on the command line instead of walking a directory.  `-l` reports the
+   size it gets by reading the file, and `-a` is accepted for `ls`
+   compatibility. *)
+
+fun specs () : args.spec list =
+    [
+        args.Flag (("all", Some ("a"), "show hidden entries (no effect yet)")),
+        args.Flag (("long", Some ("l"), "long format: size and name")),
+        args.Flag (("help", Some ("h"), "show this help")),
+        args.Positional (("path", "file or directory", false))
+    ]
+
+(* Formate une ligne de sortie.
+   - `long` : vrai pour préfixer la taille.
+   - `name` : nom emprunté pour la ligne.
+   - `contents` : contenu emprunté, source de la taille. *)
+fun line_of (long : bool, name : borrow string, contents : borrow string) : string =
+    if long then
+        let val size = int_to_string (string.length (contents))
+        in string.pad_left (borrow size, 8, 32) ^ "  " ^ string.copy (name)
+        end
+    else
+        string.copy (name)
+
+(* Écrit la ligne d'un chemin. Retourne faux si la lecture échoue.
+   - `long` : format long demandé.
+   - `path` : chemin consommé par la lecture. *)
+fun print_one (long : bool, path : string) : bool =
+    let val name = string.copy (borrow path)
+    in
+        case io.read_file (path) of
+            Ok (contents) =>
+                let val line = line_of (long, borrow name, borrow contents)
+                    val _ = io.print_line (borrow line)
+                in true
+                end
+          | Error (message) =>
+                let val line = "ls: " ^ name ^ ": " ^ message
+                    val _ = io.eprint_line (borrow line)
+                in false
+                end
+    end
+
+(* Écrit chaque chemin et compte les échecs.
+   - `long` : format long demandé.
+   - `paths` : liste Affine consommée dans l'ordre. *)
+fun print_paths (long : bool, paths : string list) : int =
+    case paths of
+        Nil => 0
+      | Cons (path, rest) =>
+            let val ok = print_one (long, path)
+                val failures = print_paths (long, rest)
+            in if ok then failures else failures + 1
+            end
+
+(* Termine avec le code d'échec s'il y a eu au moins une erreur.
+   - `failures` : nombre de chemins illisibles. *)
+fun finish (failures : int) : unit =
+    if failures = 0 then () else os.exit (cli.exit_failure ())
+
+(* Affiche l'aide puis termine avec le code 0. *)
+fun print_help () : unit =
+    let val _ = cli.print_help ("ls", "List file information.", specs ())
+    in os.exit (cli.exit_ok ())
+    end
+
+(* Signale l'absence de chemin puis termine avec le code d'usage. *)
+fun no_path () : unit =
+    let val _ = cli.print_error ("no path given: readdir is not available yet")
+    in os.exit (cli.exit_usage ())
+    end
+
+(* Trie les chemins avant de les lister.
+   - `long` : format long demandé.
+   - `paths` : positionnels consommés. *)
+fun list_paths (long : bool, paths : string list) : unit =
+    case paths of
+        Nil => no_path ()
+      | Cons (path, rest) =>
+            finish
+                (print_paths
+                     (long, sort.sort_string_list (Cons ((path, rest)))))
+
+(* Consomme les options puis transmet les chemins au rendu.
+   - `value` : `parsed` consommé par les accesseurs. *)
+fun dispatch (value : args.parsed) : unit =
+    let val helpPair = args.take_flag (value, "help")
+        val longPair = args.take_flag (helpPair.1, "long")
+    in
+        if helpPair.0 then print_help ()
+        else list_paths (longPair.0, args.positionals (longPair.1))
+    end
+
+fun main () =
+    case args.parse (specs (), os.command_args ()) of
+        Error (message) =>
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_usage ())
+            end
+      | Ok (value) => dispatch (value)

@@ -1,0 +1,7 @@
+
+fun bad (value : bool option) : int =
+    case value of
+        None => 0
+      | Some true => 1
+
+fun main () = ()

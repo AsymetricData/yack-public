@@ -1,0 +1,3 @@
+datatype bad = A | A
+
+fun main () = ()

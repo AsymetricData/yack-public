@@ -1,0 +1,7 @@
+type user : Affine = { name : int, age : int }
+
+fun main () =
+    let val user : user = { name = 42, age = 32 }
+        val name = user.name
+    in print_int (name)
+    end

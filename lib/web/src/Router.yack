@@ -1,0 +1,282 @@
+import web/Handler
+import web/Middleware
+import web/Request
+import web/Response
+import yack/array
+import yack/list
+import yack/string
+
+type t : Affine =
+    { methods : string array
+    , paths : string array
+    , handlers : Handler.t array
+    , layers : Middleware.entry array
+    }
+
+fun new () : t =
+    { methods = array.new ()
+    , paths = array.new ()
+    , handlers = array.new ()
+    , layers = array.new ()
+    }
+
+fun drop_empty_parts_acc
+    (values : string list, acc : string list) : string list =
+    case values of
+        Nil => list.reverse (acc)
+      | part :: rest =>
+          let val empty =
+                  let val text = borrow part
+                  in string.is_empty (text)
+                  end
+          in
+              if empty then drop_empty_parts_acc (rest, acc)
+              else drop_empty_parts_acc (rest, Cons ((part, acc)))
+          end
+
+fun drop_empty_parts (values : string list) : string list =
+    drop_empty_parts_acc (values, Nil)
+
+fun segments (text : borrow string) : string list =
+    drop_empty_parts (string.split (47, text))
+
+fun match_segments
+    (pattern : string list, path : string list, params : (string * string) list)
+    : (string * string) list option =
+    case pattern of
+        Nil =>
+            (case path of
+                 Nil => Some (params)
+               | _ => None)
+      | segment :: rest =>
+            let val colon = ":"
+                val star = "*"
+                val is_param = string.starts_with (borrow segment, borrow colon)
+                val is_wildcard = string.starts_with (borrow segment, borrow star)
+            in
+                if is_wildcard then
+                    let val name = string_slice (borrow segment, 1, string_length (borrow segment))
+                        val value = string.join ("/", path)
+                    in Some (Cons (((name, value), params)))
+                    end
+                else
+                    case path of
+                        Nil => None
+                      | value :: tail =>
+                            if is_param then
+                                let val name =
+                                        string_slice
+                                            (borrow segment, 1, string_length (borrow segment))
+                                in match_segments (rest, tail, Cons (((name, value), params)))
+                                end
+                            else if string_eq (borrow segment, borrow value) then
+                                match_segments (rest, tail, params)
+                            else None
+            end
+
+fun match_path (pattern : borrow string, path : borrow string) : (string * string) list option =
+    match_segments (segments (pattern), segments (path), Nil)
+
+fun add
+    (app : t
+    , method : string
+    , path : string
+    , handler : (consume Request.t, consume (string * string) list) -> Response.t
+    ) : t =
+    case app of
+        { methods = methods, paths = paths, handlers = handlers, layers = layers } =>
+            let val methods = array.push (methods, method)
+                val paths = array.push (paths, path)
+                val handlers = array.push (handlers, { run = handler })
+            in { methods = methods, paths = paths, handlers = handlers, layers = layers }
+            end
+
+fun get (app : t, path : string, handler : (consume Request.t, consume (string * string) list) -> Response.t) : t =
+    add (app, "GET", path, handler)
+
+fun post (app : t, path : string, handler : (consume Request.t, consume (string * string) list) -> Response.t) : t =
+    add (app, "POST", path, handler)
+
+fun put (app : t, path : string, handler : (consume Request.t, consume (string * string) list) -> Response.t) : t =
+    add (app, "PUT", path, handler)
+
+fun delete (app : t, path : string, handler : (consume Request.t, consume (string * string) list) -> Response.t) : t =
+    add (app, "DELETE", path, handler)
+
+fun with (app : t, layer : Middleware.t) : t =
+    case app of
+        { methods = methods, paths = paths, handlers = handlers, layers = layers } =>
+            let val layers = array.push (layers, Middleware.compile (layer))
+            in { methods = methods
+               , paths = paths
+               , handlers = handlers
+               , layers = layers
+               }
+            end
+
+fun mount_loop
+    ( methods : string array
+    , paths : string array
+    , handlers : Handler.t array
+    , prefix : borrow string
+    , nested_methods : string array
+    , nested_paths : string array
+    , nested_handlers : Handler.t array
+    , count : int
+    , index : int
+    ) : string array * string array * Handler.t array =
+    if index >= count then (methods, paths, handlers)
+    else
+        let val extracted =
+                let val method = array.get_borrow (borrow nested_methods, index)
+                    val path = array.get_borrow (borrow nested_paths, index)
+                    val borrowed_handler =
+                        array.get_borrow (borrow nested_handlers, index)
+                    val handler = { run = borrowed_handler.run }
+                    val method_copy = string_copy (method)
+                    val path_copy = string_copy (path)
+                in (method_copy, path_copy, handler)
+                end
+            val methods = array.push (methods, extracted.0)
+            val paths = array.push (paths, string_copy (prefix) ^ extracted.1)
+            val handlers = array.push (handlers, extracted.2)
+        in mount_loop
+             ( methods
+             , paths
+             , handlers
+             , prefix
+             , nested_methods
+             , nested_paths
+             , nested_handlers
+             , count
+             , index + 1
+             )
+        end
+
+fun mount (app : t, prefix : string, nested : t) : t =
+    case app of
+        { methods = methods, paths = paths, handlers = handlers, layers = layers } =>
+            case nested of
+                { methods = nested_methods
+                , paths = nested_paths
+                , handlers = nested_handlers
+                , layers = _nested_layers
+                } =>
+                    let val count = array.length (borrow nested_paths)
+                        val updated =
+                            mount_loop
+                                ( methods
+                                , paths
+                                , handlers
+                                , borrow prefix
+                                , nested_methods
+                                , nested_paths
+                                , nested_handlers
+                                , count
+                                , 0
+                                )
+                    in
+                        { methods = updated.0
+                        , paths = updated.1
+                        , handlers = updated.2
+                        , layers = layers
+                        }
+                    end
+
+fun param_from (name : borrow string, params : (string * string) list) : string option =
+    case params of
+        Nil => None
+      | pair :: rest =>
+          let val key = pair.0
+              val value = pair.1
+          in
+              if string_eq (name, borrow key) then Some (value)
+              else param_from (name, rest)
+          end
+
+fun param (params : (string * string) list, name : string) : string option =
+    let val key = borrow name
+    in param_from (key, params)
+    end
+
+fun find_route_from
+    ( methods : string array
+    , paths : string array
+    , handlers : Handler.t array
+    , method : borrow string
+    , path : borrow string
+    , count : int
+    , index : int
+    , path_seen : bool
+    ) : Handler.t option * (string * string) list * bool
+      * string array * string array * Handler.t array =
+    if index >= count then (None, Nil, path_seen, methods, paths, handlers)
+    else
+        let val inspected =
+                let val route_method = array.get_borrow (borrow methods, index)
+                    val route_path = array.get_borrow (borrow paths, index)
+                    val matched = match_path (route_path, path)
+                    val same = string_eq (route_method, method)
+                    val borrowed_handler =
+                        array.get_borrow (borrow handlers, index)
+                    val handler = { run = borrowed_handler.run }
+                in (matched, same, handler)
+                end
+        in
+            case inspected.0 of
+                None => find_route_from
+                          (methods, paths, handlers, method, path, count,
+                           index + 1, path_seen)
+              | Some params =>
+                    if inspected.1 then
+                        (Some (inspected.2), params, true, methods, paths, handlers)
+                    else find_route_from
+                           (methods, paths, handlers, method, path, count,
+                            index + 1, true)
+        end
+
+fun find_route
+    (methods : string array
+    , paths : string array
+    , handlers : Handler.t array
+    , method : borrow string
+    , path : borrow string
+    ) : Handler.t option * (string * string) list * bool
+      * string array * string array * Handler.t array =
+    let val count = array.length (borrow paths)
+    in find_route_from (methods, paths, handlers, method, path, count, 0, false)
+    end
+
+fun dispatch (app : t, request : Request.t) : Response.t * t =
+    case app of
+        { methods = methods, paths = paths, handlers = handlers, layers = layers } =>
+            let val req = borrow request
+                val method = Request.method (req)
+                val path = Request.path (req)
+                val found =
+                    let val request_method = borrow method
+                        val request_path = borrow path
+                    in find_route (methods, paths, handlers, request_method, request_path)
+                    end
+                val handler = found.0
+                val params = found.1
+                val path_matched = found.2
+                val methods = found.3
+                val paths = found.4
+                val handlers = found.5
+                val response =
+                    case handler of
+                        Some value =>
+                            Middleware.run (borrow layers, value, request, params)
+                      | None =>
+                            if path_matched then Response.method_not_allowed ()
+                            else Response.not_found ()
+            in
+                ( response
+                , { methods = methods
+                  , paths = paths
+                  , handlers = handlers
+                  , layers = layers
+                  }
+                )
+            end

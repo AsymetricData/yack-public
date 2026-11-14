@@ -1,0 +1,27 @@
+fun label (n : int) : string =
+    "n=" ^ int_to_string (n)
+
+fun report (names : borrow string array) : string =
+    arena
+        val total = array_length_borrow (names)
+        val head = "total: " ^ int_to_string (total)
+        val tags = array_new ()
+        val _ = array_push (tags, label (total) ^ "!")
+        val inner =
+            arena
+                val x = "a" ^ "b"
+            in
+                int_to_string (string_length (borrow x))
+            end
+    in
+        head ^ " " ^ label (total) ^ inner
+    end
+
+fun unused () : int =
+    arena val s = "x" ^ "y" in string_length (borrow s) end
+
+fun main () =
+    let val names = array_new ()
+        val _ = array_push (names, "a")
+        val _ = print_string (report (borrow names))
+    in () end

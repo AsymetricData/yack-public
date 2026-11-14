@@ -1,0 +1,35 @@
+fun main () =
+    let val n8 : int8 = 5
+        val z8 : int8 = 0
+        val v8 = int8_to_string (z8 - n8)
+        val v64 = int64_to_string (1234567890123)
+        val v32 = int32_to_string (0 - 7)
+        val s32 = "-999"
+        val aliasOk = if option_is_some (string_to_int32 (borrow s32)) then 1 else 0
+        val s8 = "127"
+        val s8bad = "128"
+        val s1 = "-1"
+        val s1bad = "1"
+        val s64 = "9223372036854775807"
+        val p8 = string_to_int8 (borrow s8)
+        val badAccepted = option_is_some (string_to_int8 (borrow s8bad))
+        val p1 = string_to_int1 (borrow s1)
+        val oneAccepted = option_is_some (string_to_int1 (borrow s1bad))
+        val bigOk = option_is_some (string_to_int64 (borrow s64))
+    in
+        case p8 of
+            None => print_int (0)
+          | Some (x) =>
+              (case p1 of
+                   None => print_int (0)
+                 | Some (y) =>
+                     let val badPenalty = if badAccepted then 1000000 else 0
+                         val onePenalty = if oneAccepted then 10 else 0
+                         val bigBonus = if bigOk then 1 else 0
+                     in print_int (string_length (borrow v8) * 100000000
+                                   + string_length (borrow v64) * 10000000
+                                   + x * 100000 + (0 - y) * 1000
+                                   + string_length (borrow v32) + aliasOk
+                                   + badPenalty + onePenalty + bigBonus)
+                     end)
+    end

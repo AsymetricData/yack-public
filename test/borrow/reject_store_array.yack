@@ -1,0 +1,9 @@
+type user : Affine = { name : int }
+
+fun bad (values : (borrow user) array, user : user) : unit =
+    let val borrowed = borrow user
+        val _ = array_push (values, borrowed)
+    in ()
+    end
+
+fun main () = ()

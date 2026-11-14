@@ -1,0 +1,10 @@
+type record : Affine = { fd : int }
+
+fun record_fd (value : borrow record) : int =
+    value.fd
+
+fun main () =
+    let val record : record = { fd = 42 }
+        val fd = record_fd (borrow record)
+    in print_int (fd)
+    end

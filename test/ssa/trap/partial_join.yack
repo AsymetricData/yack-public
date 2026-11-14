@@ -1,0 +1,21 @@
+
+
+
+fun build (flag : bool) : { a : string list, b : int } =
+    let val t = (flag, "x" ^ string_of_int (42))
+    in
+        { a = if t.0 then Nil else Cons ((t.1, Nil))
+        , b = if t.0 then 1 else 2
+        }
+    end
+
+fun size (values : borrow (string list)) : int =
+    case values of
+        Nil => 0
+      | Cons ((_, rest)) => 1 + size (rest)
+
+fun main () =
+    let val kept = build (false)
+        val dropped = build (true)
+        val _ = print_int (kept.b + size (borrow kept.a))
+    in print_int (dropped.b + size (borrow dropped.a)) end

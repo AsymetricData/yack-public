@@ -1,0 +1,5 @@
+fun main () =
+    let val point = { x = 40, y = 2 }
+        val x = point.x
+    in print_int (x)
+    end

@@ -1,0 +1,6 @@
+# The same graph, accepted: one close.
+fun yack_f {
+  b0(%0.h : linear { fd : int }):
+    %1 : unit = call yack_close move %0.h
+    return %1
+}

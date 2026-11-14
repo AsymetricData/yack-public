@@ -1,0 +1,88 @@
+(* Indique si un résultat représente une réussite.
+   - `value` : résultat examiné ; il est reçu par valeur et consommé par ce test.
+
+   Retourne `true` pour `Ok _` et `false` pour `Error _`. Ne modifie aucune donnée en
+   place. *)
+fun is_ok (value : 'a result) : bool =
+    case value of
+        Ok _ => true
+      | Error _ => false
+
+(* Indique si un résultat représente une erreur.
+   - `value` : résultat examiné ; il est reçu par valeur et consommé par ce test.
+
+   Retourne `true` pour `Error _` et `false` pour `Ok _`. Ne modifie aucune donnée en
+   place. *)
+fun is_error (value : 'a result) : bool =
+    case value of
+        Ok _ => false
+      | Error _ => true
+
+(* Extrait la valeur d'un résultat réussi ou utilise une valeur de repli.
+   - `value` : résultat consommé ; le contenu de `Ok` est transféré au résultat de
+     cette fonction.
+   - `default` : valeur consommée et retournée uniquement pour `Error`.
+
+   Retourne le contenu de `Ok` ou `default` si le résultat est une erreur. N'emprunte
+   ni ne modifie les arguments en place. *)
+fun unwrap_or (value : 'a result, default : 'a) : 'a =
+    case value of
+        Ok inner => inner
+      | Error _ => default
+
+(* Extrait le message d'erreur ou utilise une chaîne de repli.
+   - `value` : résultat consommé ; le message de `Error` est transféré au résultat.
+   - `default` : chaîne consommée et retournée uniquement pour `Ok`.
+
+   Retourne le message d'erreur ou `default` si le résultat est une réussite.
+   N'emprunte ni ne modifie les arguments en place. *)
+fun error_or (value : 'a result, default : string) : string =
+    case value of
+        Ok _ => default
+      | Error message => message
+
+(* Convertit un résultat en option en écartant son erreur éventuelle.
+   - `value` : résultat consommé ; le contenu de `Ok` est transféré à l'option.
+
+   Retourne `Some` pour `Ok` et `None` pour `Error`, dont le message est abandonné.
+   Aucune mutation en place. *)
+fun to_option (value : 'a result) : 'a option =
+    case value of
+        Ok inner => Some (inner)
+      | Error _ => None
+
+(* Convertit une option en résultat en associant un message à l'absence de valeur.
+   - `value` : option consommée ; la valeur de `Some` est transférée au résultat.
+   - `message` : chaîne transférée à `Error` si l'option vaut `None` ; elle n'est pas
+     utilisée dans le cas `Some`.
+
+   Retourne `Ok` avec le contenu ou `Error` avec le message. Aucun argument n'est
+   emprunté ni modifié en place. *)
+fun from_option (value : 'a option, message : string) : 'a result =
+    case value of
+        None => Error (message)
+      | Some inner => Ok (inner)
+
+(* Applique `f` à la valeur de `Ok` et propage `Error`.
+   - `f` : fonction appliquée à la valeur réussie.
+   - `value` : résultat consommé. *)
+fun map (f : consume 'a -> 'b, value : 'a result) : 'b result =
+    case value of
+        Ok inner => Ok (f (inner))
+      | Error message => Error (message)
+
+(* Transforme le message d'erreur et laisse `Ok` inchangé.
+   - `f` : fonction appliquée au message d'erreur.
+   - `value` : résultat consommé. *)
+fun map_error (f : consume string -> string, value : 'a result) : 'a result =
+    case value of
+        Ok inner => Ok (inner)
+      | Error message => Error (f (message))
+
+(* Enchaîne une fonction qui rend elle-même un résultat.
+   - `f` : fonction appliquée à la valeur réussie.
+   - `value` : résultat consommé. *)
+fun and_then (f : consume 'a -> 'b result, value : 'a result) : 'b result =
+    case value of
+        Ok inner => f (inner)
+      | Error message => Error (message)

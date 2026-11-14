@@ -1,0 +1,18 @@
+fun sum (values : borrow (int list), acc : int) : int =
+    case values of
+        Nil => acc
+      | Cons (head, rest) => sum (rest, acc + head)
+
+fun sum0 (values : borrow (int list)) : int =
+    sum (values, 0)
+
+fun apply (f : (borrow (int list)) -> int, values : borrow (int list)) : int =
+    f (values)
+
+fun main () =
+    let val values = Cons ((1, Cons ((2, Cons ((3, Nil))))))
+        val total = apply (sum0, borrow values)
+        val length = list_length (values)
+    in
+        print_int (total + length)
+    end

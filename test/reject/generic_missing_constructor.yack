@@ -1,0 +1,6 @@
+
+fun bad (value : int option) : int =
+    case value of
+        Some x => x
+
+fun main () = ()

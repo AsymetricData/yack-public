@@ -1,0 +1,3 @@
+type Missing = Nope
+
+fun main () = print_int (0)

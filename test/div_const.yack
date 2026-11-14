@@ -1,0 +1,5 @@
+
+fun divide (x : int) : int = x / 2
+
+fun main () =
+    print_int (divide (8))

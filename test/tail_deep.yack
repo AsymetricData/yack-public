@@ -1,0 +1,7 @@
+
+
+fun loop (n : int, acc : int) : int =
+    if n <= 0 then acc else loop (n - 1, acc + 1)
+
+fun main () =
+    print_int (loop (10000000, 0))

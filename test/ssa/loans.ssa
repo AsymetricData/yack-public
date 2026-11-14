@@ -1,0 +1,153 @@
+fun yack_main {
+  # loan %34 = &%33.s
+  b0:
+    %0 : string = view const "a"
+    %1 : string = view const "b"
+    %2 : string = concat move %0!, move %1!
+    %3 : int = call yack_first move %2!
+    %4 : string = view const "x"
+    %5 : string = view const ""
+    %6 : string = concat move %4!, move %5!
+    %7 : string = view const "yy"
+    %8 : string = view const ""
+    %9 : string = concat move %7!, move %8!
+    %10 : int = call yack_keep_left move %6!, move %9!
+    %11 : int = + %3!, %10!
+    %12 : string = view const "x"
+    %13 : string = view const ""
+    %14 : string = concat move %12!, move %13!
+    %15 : string = view const "yy"
+    %16 : string = view const ""
+    %17 : string = concat move %15!, move %16!
+    %18 : bool = const false
+    %19 : int = call yack_pick move %14!, move %17!, %18!
+    %20 : int = + %11!, %19!
+    %21 : int = const 3
+    %22 : string = view const "z"
+    %23 : string = view const "z"
+    %24 : string = concat move %22!, move %23!
+    %25 : { age : int, name : string } = record %21!, move %24!
+    %26 : int = call yack_name_len move %25!
+    %27 : int = + %20!, %26!
+    %28 : string = view const "abc"
+    %29 : string = view const ""
+    %30 : string = concat move %28!, move %29!
+    %31 : int = call yack_exclusive move %30!
+    %32.total : int = + %27!, %31!
+    %33.s : string = string.int_to_string %32.total!  # at 43:32
+    %34 : &string = borrow &%33.s  # at 44:30
+    # live: %34
+    %35 : unit = call yack__yack_io_print_line %34!  # at 44:30
+    # live: none
+    drop %33.s! : string  # at 43:9
+    return %35!
+}
+fun yack__yack_io_print_line {
+  # loan %4 = &%3.line
+  # loan %6 = &%3.line
+  b0(%0.value : &string):
+    %1 : string = call yack__yack_string_copy %0.value!  # at 41:33
+    %2 : string = view const "\n"
+    %3.line : string = concat move %1!, move %2!
+    %4 : &string = borrow &%3.line  # at 42:27
+    # live: %4
+    %5 : int = const 0
+    %6 : &string = borrow &%3.line  # at 42:58
+    # live: %4, %6
+    %7 : int = string.string_length %6!  # at 42:58
+    # live: %4
+    %8 : unit = string.print_span %4!, move %5!, move %7!  # at 42:58
+    # live: none
+    drop %3.line! : string  # at 41:9
+    return %8!
+}
+fun yack__yack_string_copy {
+  b0(%0.text : &string):
+    %1 : int = const 0
+    %2 : int = string.string_length %0.text  # at 13:82
+    %3 : string = string.string_slice %0.text!, move %1!, move %2!  # at 13:82
+    return move %3!
+}
+fun yack_exclusive {
+  # loan %1.shared = &%0.value
+  # loan %3.unique = &mut %0.value
+  b0(%0.value : string):
+    %1.shared : &string = borrow &%0.value  # at 34:29
+    # live: %1.shared
+    %2.n : int = call yack_len %1.shared!  # at 35:22
+    # live: none
+    %3.unique : &mut string = borrow mut &%0.value  # at 36:33
+    drop %0.value! : string  # at 33:16
+    return %2.n!
+}
+fun yack_len {
+  b0(%0.s : &string):
+    %1 : int = string.string_length %0.s!  # at 12:52
+    return %1!
+}
+fun yack_name_len {
+  # loan %1 = &%0.p/1
+  # loan %2 = &%0.p/1
+  b0(%0.p : { age : int, name : string }):
+    %1 : string = view field 1 %0.p  # at 30:39
+    # live: %1
+    %2 : &string = borrow &%1!  # at 30:39
+    # live: %1, %2
+    %3.n : int = string.string_length %2!  # at 30:39
+    # live: none
+    drop %0.p! : { age : int, name : string }  # at 29:15
+    return %3.n!
+}
+fun yack_pick {
+  # loan %4 = &%0.x
+  # loan %5 = &%1.y
+  b0(%0.x : string, %1.y : string, %2.left : bool):
+    branch %2.left b1 b2
+  b1:
+    %4 : &string = borrow &%0.x  # at 26:37
+    # live: %4
+    jump b3(%4!)
+    # out: none
+  b2:
+    %5 : &string = borrow &%1.y  # at 26:51
+    # live: %5
+    jump b3(%5!)
+    # out: none
+  b3(%3.r : &string):
+    # in: %4, %5
+    %6 : int = call yack_len %3.r!  # at 27:13
+    # live: none
+    drop %0.x! : string  # at 25:11
+    drop %1.y! : string  # at 25:23
+    return %6!
+}
+fun yack_keep_left {
+  # loan %2 = &%0.x
+  # loan %3 = &%1.y
+  b0(%0.x : string, %1.y : string):
+    %2 : &string = borrow &%0.x  # at 22:32
+    # live: %2
+    %3 : &string = borrow &%1.y  # at 22:42
+    # live: %2, %3
+    %4.r : &string = call yack_choose %2!, %3!  # at 22:42
+    # live: %2
+    %5 : int = call yack_len %4.r!  # at 23:13
+    # live: none
+    drop %0.x! : string  # at 21:16
+    drop %1.y! : string  # at 21:28
+    return %5!
+}
+fun yack_choose {
+  b0(%0.a : &string, %1.b : &string):
+    return %0.a!
+}
+fun yack_first {
+  # loan %1.b = &%0.s
+  b0(%0.s : string):
+    %1.b : &string = borrow &%0.s  # at 15:24
+    # live: %1.b
+    %2.n : int = call yack_len %1.b!  # at 16:22
+    # live: none
+    drop %0.s! : string  # at 14:12
+    return %2.n!
+}

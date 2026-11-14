@@ -1,0 +1,15 @@
+fun head (values : borrow (string list)) : (borrow string) option =
+    case values of
+        Nil => None
+      | Cons (head, _) => Some (head)
+
+fun main () =
+    let val values = Cons (("abcd", Nil))
+        val result =
+            case head (borrow values) of
+                None => 0
+              | Some text => string_length (text)
+        val length = list_length (values)
+    in
+        print_int (result + length)
+    end

@@ -1,0 +1,6 @@
+type point : Copy = { x : int, y : int }
+type buffer : Affine = { size : int }
+type handle : Linear = { id : int }
+type default_affine = { value : int }
+
+fun main () = ()

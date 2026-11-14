@@ -1,0 +1,11 @@
+
+fun loop (n : int, acc : int) : int =
+    if n <= 0 then acc
+    else
+        let val text = "a" ^ "b"
+            val length = string_length (borrow text)
+        in loop (n - 1, acc + length)
+        end
+
+fun main () =
+    print_int (loop (1000, 0))

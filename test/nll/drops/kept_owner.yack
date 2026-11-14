@@ -1,0 +1,9 @@
+import yack/string
+
+
+
+fun main () : unit =
+    let val s = string_copy (borrow "abc")
+        val n = string_length (borrow s)
+    in print_int (n)
+    end

@@ -1,0 +1,4 @@
+import modules/Math as _
+import modules/Quad.{quad}
+
+fun main () = print_int (quad (5))

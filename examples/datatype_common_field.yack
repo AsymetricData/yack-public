@@ -1,0 +1,23 @@
+type LanguageProp = { desc : string, note : string }
+
+datatype Language =
+    Yack of LanguageProp
+  | Ocaml of LanguageProp
+  | Alpaca of LanguageProp
+
+fun print_descs (langs : Language list) =
+    case langs of
+        Nil => ()
+      | lang :: rest =>
+          let val _ = print_string (lang.desc)
+          in print_descs (rest)
+          end
+
+fun main () =
+    let val langs =
+            Yack ({ desc = "yack", note = "compiler" }) ::
+            Ocaml ({ desc = "ocaml", note = "ml" }) ::
+            Alpaca ({ desc = "alpaca", note = "ml" }) ::
+            Nil
+    in print_descs (langs)
+    end

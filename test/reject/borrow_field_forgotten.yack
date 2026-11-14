@@ -1,0 +1,5 @@
+type handle : Linear = { fd : int }
+
+fun bad (value : handle) : unit = ()
+
+fun main () = ()

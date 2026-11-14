@@ -1,0 +1,85 @@
+import yack/args
+import yack/ansi
+import yack/cli
+import yack/io
+import yack/os
+import yack/string
+import yack/tui
+
+fun flag_help () : args.spec =
+    args.Flag (("help", Some ("h"), "show this help"))
+
+fun flag_verbose () : args.spec =
+    args.Flag (("verbose", Some ("v"), "verbose output"))
+
+fun opt_output () : args.spec =
+    args.Opt (("output", Some ("o"), "output file", None))
+
+fun pos_file () : args.spec =
+    args.Positional (("file", "input file", true))
+
+fun specs () : args.spec list =
+    [
+        flag_help (),
+        flag_verbose (),
+        opt_output (),
+        pos_file ()
+    ]
+
+fun main () =
+    let val argv = os.command_args ()
+        val parsed = args.parse (specs (), argv)
+    in
+        case parsed of
+            Error (message) =>
+                let val _ = cli.print_error (message)
+                in os.exit_usage ()
+                end
+          | Ok (value0) =>
+                let val helpPair = args.take_flag (value0, "help")
+                    val help = helpPair.0
+                    val value1 = helpPair.1
+                in
+                    if help then
+                        let val _ =
+                                cli.print_help
+                                    ("cli-demo", "A tiny Yack CLI.", specs ())
+                        in os.exit_ok ()
+                        end
+                    else
+                        let val verbosePair = args.take_flag (value1, "verbose")
+                            val verboseFlag = verbosePair.0
+                            val value2 = verbosePair.1
+                            val outputPair =
+                                args.take_option_or (value2, "output", "stdout")
+                            val output = outputPair.0
+                            val value3 = outputPair.1
+                            val files = args.positionals (value3)
+                            val verbose = if verboseFlag then "yes" else "no"
+                            val fileList = string.join (", ", files)
+                            val body =
+                                tui.kv ("verbose", verbose) ^ "\n" ^
+                                tui.kv ("output", output) ^ "\n" ^
+                                tui.kv ("files", fileList)
+                            val menuItems =
+                                Cons (("one", Cons (("two", Cons (("three", Nil))))))
+                            val header =
+                                ansi.bold () ^ "cli-demo" ^ ansi.reset () ^
+                                ansi.dim () ^ "  tiny yack cli" ^ ansi.reset () ^
+                                "\n\n"
+                            val _ = io.print_raw (borrow header)
+                            val boxed = tui.box ("run", body, 60) ^ "\n\n"
+                            val _ = io.print_raw (borrow boxed)
+                            val progress =
+                                ansi.fg_cyan () ^
+                                tui.progress (2, 5, 32) ^
+                                ansi.reset () ^ "\n\n"
+                            val _ = io.print_raw (borrow progress)
+                            val menu = tui.menu (menuItems, 1, 24) ^ "\n"
+                            val _ = io.print_raw (borrow menu)
+                            val status = tui.status_bar ("✓ done  ·  0.1.0", 60) ^ "\n"
+                            val _ = io.print_raw (borrow status)
+                        in os.exit_ok ()
+                        end
+                end
+    end

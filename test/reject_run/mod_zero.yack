@@ -1,0 +1,4 @@
+fun remainder (x : int, y : int) : int = x % y
+
+fun main () =
+    print_int (remainder (42, 0))

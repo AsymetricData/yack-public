@@ -1,0 +1,10 @@
+# expect: moves `p` (%0) while its borrow `x` (%1) of `p` (%0)/1 is live
+# A field view is an implicit shared loan on its root: moving the root
+# away leaves the view dangling.
+fun yack_f {
+  b0(%0.p : string * string):
+    %1.x : string = view field 1 %0.p
+    %2 : unit = call yack_sink move %0.p
+    %3 : int = string.string_length %1.x
+    return %3
+}

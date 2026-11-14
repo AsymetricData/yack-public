@@ -1,0 +1,13 @@
+
+fun unwrapInt (value : int option) : int =
+    case value of None => 0 | Some x => x
+
+fun unwrapBool (value : bool option) : bool =
+    case value of None => false | Some x => x
+
+fun main () =
+    let val number = unwrapInt (Some (42))
+        val flag = unwrapBool (Some (true))
+        val printed = print_int (number)
+    in print_bool (flag)
+    end

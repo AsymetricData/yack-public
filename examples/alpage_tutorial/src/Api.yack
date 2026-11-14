@@ -1,0 +1,98 @@
+import alpage/Alpage
+import alpage/AppError
+import alpage/Ctx
+import alpage/Decode
+import alpage/Extract
+import alpage/Middleware
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+import yack/json
+import yack/list
+import yack/option
+import yack/string
+
+(* Step 2: a handler takes the context and consumes the request. *)
+fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text ("hello from alpage"))
+
+(* Step 3: query string, `?name=Ada`. Reading borrows the request. *)
+fun hello (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val name = Request.query (&request, "name") |> option.unwrap_or ("stranger")
+    in Reply.ok (Response.text ("hello, " ^ name)) end
+
+(* Step 3b: two lookups. One borrow, reused; the request stays owned. *)
+fun greet (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val req = &request
+        val first = Request.query (req, "first") |> option.unwrap_or ("")
+        val last = Request.query (req, "last") |> option.unwrap_or ("")
+    in
+        Reply.ok (Response.text ("hello, " ^ first ^ " " ^ last))
+    end
+
+(* Step 4: a typed path parameter, `/square/:n`. *)
+fun square_of (ctx : Ctx.t, n : int) : Reply.t =
+    Reply.ok (Response.json ("{\"square\":" ^ int_to_string (n * n) ^ "}"))
+
+fun square (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Extract.path_int (ctx, request, "n", square_of)
+
+(* Step 5: a JSON body, `{"items":[1,2,3]}`. *)
+fun decode_items (body : &string) : int list result =
+    case Decode.parse (body) of
+        Error message => Error (message)
+      | Ok value =>
+            (case json.as_object (value) of
+                 Error message => Error (message)
+               | Ok fields =>
+                     json.field_decode (&"items", Decode.int_list, fields))
+
+fun add (pair : int * int) : int = pair.0 + pair.1
+
+fun sum_items (ctx : Ctx.t, items : consume int list) : Reply.t =
+    case items of
+        Nil => Reply.fail (AppError.unprocessable ("items must not be empty"))
+      | Cons (first, rest) =>
+            let val total = list.foldl (add, first, rest)
+            in Reply.ok (Response.json ("{\"sum\":" ^ int_to_string (total) ^ "}"))
+            end
+
+fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Extract.json (ctx, request, decode_items, sum_items)
+
+(* Step 7: a middleware that guards `/admin` with a token header. *)
+fun denied () : Reply.t =
+    Reply.ok (Response.with_status (Response.text ("unauthorized"), 401))
+
+fun token_ok (token : string option) : bool =
+    case token of
+        Some value => string_eq (&value, &"secret")
+      | None => false
+
+fun require_token (ctx : Ctx.t, request : Request.t) : Request.t * Reply.t option =
+    let val path = Request.path (&request)
+    in
+        if string.starts_with (&path, &"/admin") then
+            let val token = Request.header (&request, "X-Token")
+            in
+                if token_ok (token) then (request, None)
+                else (request, Some (denied ()))
+            end
+        else (request, None)
+    end
+
+fun admin (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text ("welcome, admin"))
+
+(* Step 6: the whole application is a value built by a pipeline. *)
+fun application () : Alpage.t =
+    Alpage.new ()
+    |> Alpage.get ("/", home)
+    |> Alpage.get ("/hello", hello)
+    |> Alpage.get ("/greet", greet)
+    |> Alpage.get ("/square/:n", square)
+    |> Alpage.post ("/sum", sum)
+    |> Alpage.get ("/admin", admin)
+    |> Alpage.with (Alpage.log ())
+    |> Alpage.with (Middleware.before (require_token))
+    |> Alpage.with (Middleware.security_headers ())

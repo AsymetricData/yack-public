@@ -1,0 +1,6 @@
+
+fun bad (value : option) : int =
+    case value of
+        None => 0
+
+fun main () = ()

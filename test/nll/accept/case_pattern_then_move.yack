@@ -1,0 +1,27 @@
+import yack/string
+
+
+
+
+fun head (values : borrow (string list)) : (borrow string) option =
+    case values of
+        Nil => None
+      | Cons (head, _) => Some (head)
+
+fun good (values : string list) : int =
+    let val result =
+            case head (borrow values) of
+                None => 0
+              | Some text =>
+                    let val size = string_length (text)
+                    in size
+                    end
+        val length = list_length (values)
+    in result + length
+    end
+
+fun main () : unit =
+    let val values = Cons ((string_copy (borrow "abcd"), Nil))
+        val n = good (values)
+    in print_int (n)
+    end

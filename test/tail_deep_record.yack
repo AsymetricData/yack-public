@@ -1,0 +1,12 @@
+
+
+type state = { remaining : int, total : int }
+
+fun loop (state : state) : state =
+    if state.remaining <= 0 then state
+    else loop ({ remaining = state.remaining - 1, total = state.total + 1 })
+
+fun main () =
+    let val result = loop ({ remaining = 10000000, total = 0 })
+    in print_int (result.total)
+    end

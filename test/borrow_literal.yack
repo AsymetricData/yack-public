@@ -1,0 +1,12 @@
+import yack/string
+import yack/option
+
+fun length_of (value : borrow string) : int =
+    string_length (value)
+
+fun main () =
+    let val shared = &"yack"
+        val explicit = borrow "yack"
+        val parsed = string_to_int (&"42") |> option.unwrap_or (0)
+    in print_int (length_of (shared) + length_of (explicit) + parsed)
+    end

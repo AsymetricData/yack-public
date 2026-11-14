@@ -1,0 +1,4 @@
+fun main () =
+    let val p = { x = 1, x = 2 }
+    in print_int (p.x)
+    end

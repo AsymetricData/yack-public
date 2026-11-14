@@ -1,0 +1,6 @@
+fun take (s : string) : unit = print_string (s)
+
+fun main () =
+    let val s = "a" ^ "b"
+        val _ = take (s)
+    in print_int (string_length (borrow s)) end

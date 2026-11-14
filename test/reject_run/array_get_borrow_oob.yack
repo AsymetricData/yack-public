@@ -1,0 +1,7 @@
+
+fun main () =
+    let val xs = array_new ()
+        val _ = array_push (xs, "a" ^ "b")
+        val s = array_get_borrow (xs, 2)
+    in print_int (string_length (s))
+    end

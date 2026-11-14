@@ -1,0 +1,12 @@
+type user : Affine = { name : int }
+
+fun length_of (value : &string) : int =
+    string_length (value)
+
+fun main () =
+    let val user : user = { name = 42 }
+        val borrowed = &user
+        val pair = ("yack", 41)
+        val tag = &pair.0
+    in print_int (user.name + length_of (tag))
+    end

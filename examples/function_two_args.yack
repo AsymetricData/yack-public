@@ -1,0 +1,6 @@
+fun add (x : int, y : int) : int = x + y
+
+fun thing (f : (int, int) -> int, x : int) : int = f (x, 1)
+
+fun main () =
+    print_int (thing (add, 41))

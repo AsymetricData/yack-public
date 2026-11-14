@@ -1,0 +1,6 @@
+fun main () =
+  let val values : string array = array_new ()
+      val text = "a" ^ "b"
+      val _ = array_push (values, text)
+  in print_string (text)
+  end

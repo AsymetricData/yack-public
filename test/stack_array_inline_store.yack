@@ -1,0 +1,8 @@
+datatype cell : Copy = Cell of int
+
+fun main () =
+    let val xs : cell array = array_new ()
+        val _ = array_push (xs, Cell (42))
+    in case array_get (xs, 0) of
+         Cell n => print_int (n)
+    end

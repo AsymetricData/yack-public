@@ -1,0 +1,8 @@
+import sql/Sqlite
+
+fun main () =
+    case Sqlite.open ("/no/such/dir/yack-sql-open-failure/db.sqlite") of
+        Error _ => print_string ("open failed")
+      | Ok db =>
+          let val _ = Sqlite.close (db)
+          in print_string ("open succeeded") end

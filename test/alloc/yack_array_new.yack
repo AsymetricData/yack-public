@@ -1,0 +1,8 @@
+import yack/array
+
+fun main () =
+    let val values : string array = array.new ()
+        val empty = array.length (borrow values)
+        val room = array.capacity (borrow values)
+    in print_int (empty + room)
+    end

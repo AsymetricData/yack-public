@@ -1,0 +1,17 @@
+import yack/string
+
+
+
+fun alias_then_move (line : string) : string =
+    let val borrowed = borrow line
+        val alias = borrowed
+        val size = string_length (alias)
+    in
+        if size >= 0 then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "hello")
+        val out = alias_then_move (s)
+    in print_string (out)
+    end

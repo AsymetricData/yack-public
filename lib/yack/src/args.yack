@@ -1,0 +1,941 @@
+import yack/list
+import yack/string
+
+(* Décrit un argument accepté par le parseur. `Flag (long, short, help)` représente
+   un booléen sans valeur ; `long` est son nom long, `short` son alias optionnel et
+   `help` son aide. `Opt` ajoute une valeur par défaut optionnelle ; `Positional`
+   décrit un argument nommé positionnel avec son aide et l'indicateur `required`. Les
+   chaînes sont détenues par la valeur affine et peuvent être consommées par le
+   parseur. *)
+datatype spec =
+    Flag of string * string option * string
+  | Opt of string * string option * string * string option
+  | Positional of string * string * bool
+
+(* Contient les indicateurs, options et arguments positionnels analysés. Les champs
+   sont trois listes possédées : paires (nom, booléen), paires (nom, valeur) et
+   valeurs positionnelles. `parse` produit cette valeur affine ; les accesseurs
+   `take_*` la consomment et rendent le résultat restant avec l'élément demandé. *)
+datatype parsed =
+    Parsed of (string * bool) list * (string * string) list * string list
+
+(* Copie une chaîne éventuellement présente dans une option.
+   - `value` : option dont le contenu est emprunté pour copie.
+
+   Retourne une option indépendante, sans consommer l'option d'entrée. *)
+fun copy_optional (value : string option) : string option =
+    case value of
+        None => None
+      | Some (text) => Some (string.copy (borrow text))
+
+(* Copie les chaînes contenues dans une spécification.
+   - `spec` : spécification empruntée via ses motifs.
+
+   Retourne une spécification indépendante ; l'entrée n'est pas modifiée. *)
+fun copy_spec (spec : spec) : spec =
+    case spec of
+        Flag (long, short, help) =>
+            Flag (( string.copy (borrow long)
+                  , copy_optional (short)
+                  , string.copy (borrow help)
+                  ))
+      | Opt (long, short, help, default) =>
+            Opt (( string.copy (borrow long)
+                 , copy_optional (short)
+                 , string.copy (borrow help)
+                 , copy_optional (default)
+                 ))
+      | Positional (name, help, required) =>
+            Positional (( string.copy (borrow name)
+                        , string.copy (borrow help)
+                        , required
+                        ))
+
+(* Copie récursivement une liste de spécifications.
+   - `specs` : liste parcourue et consommée récursivement.
+
+   Retourne une nouvelle liste avec des chaînes indépendantes. *)
+fun copy_specs (specs : spec list) : spec list =
+    case specs of
+        Nil => Nil
+      | Cons (spec, rest) => Cons ((copy_spec (spec), copy_specs (rest)))
+
+(* Produit deux copies indépendantes d'une chaîne.
+   - `value` : chaîne empruntée pour les deux copies.
+
+   Retourne deux chaînes possédées distinctes ; l'entrée reste intacte. *)
+fun copy_string_twice (value : string) : string * string =
+    let val first = string.copy (borrow value)
+        val second = string.copy (borrow value)
+    in (first, second)
+    end
+
+(* Copie deux fois le contenu optionnel.
+   - `value` : option empruntée, éventuellement vide.
+
+   Retourne deux options indépendantes contenant chacune une copie. *)
+fun copy_optional_twice (value : string option) : string option * string option =
+    case value of
+        None => (None, None)
+      | Some (text) =>
+            let val pair = copy_string_twice (text)
+            in (Some (pair.0), Some (pair.1))
+            end
+
+(* Crée deux copies indépendantes d'une spécification.
+   - `spec` : spécification source, lue sans modification.
+
+   Retourne deux spécifications possédées distinctes. *)
+fun copy_spec_twice (spec : spec) : spec * spec =
+    case spec of
+        Flag (long, short, help) =>
+            let val longPair = copy_string_twice (long)
+                val shortPair = copy_optional_twice (short)
+                val helpPair = copy_string_twice (help)
+            in
+                (Flag ((longPair.0, shortPair.0, helpPair.0)),
+                 Flag ((longPair.1, shortPair.1, helpPair.1)))
+            end
+      | Opt (long, short, help, default) =>
+            let val longPair = copy_string_twice (long)
+                val shortPair = copy_optional_twice (short)
+                val helpPair = copy_string_twice (help)
+                val defaultPair = copy_optional_twice (default)
+            in
+                (Opt ((longPair.0, shortPair.0, helpPair.0, defaultPair.0)),
+                 Opt ((longPair.1, shortPair.1, helpPair.1, defaultPair.1)))
+            end
+      | Positional (name, help, required) =>
+            let val namePair = copy_string_twice (name)
+                val helpPair = copy_string_twice (help)
+            in
+                (Positional ((namePair.0, helpPair.0, required)),
+                 Positional ((namePair.1, helpPair.1, required)))
+            end
+
+(* Crée deux copies complètes d'une liste de spécifications.
+   - `specs` : liste consommée lors du parcours récursif.
+
+   Retourne deux listes possédées et indépendantes. *)
+fun copy_specs_twice (specs : spec list) : spec list * spec list =
+    case specs of
+        Nil => (Nil, Nil)
+      | Cons (spec, rest) =>
+            let val specPair = copy_spec_twice (spec)
+                val restPair = copy_specs_twice (rest)
+            in
+                (Cons ((specPair.0, restPair.0)),
+                 Cons ((specPair.1, restPair.1)))
+            end
+
+(* Compte les chaînes tout en reconstruisant la liste.
+   - `values` : liste consommée puis reconstruite avec ses chaînes.
+
+   Retourne le nombre d'éléments et la liste possédée conservée. *)
+fun length_keep (values : string list) : int * string list =
+    case values of
+        Nil => (0, Nil)
+      | Cons (value, rest) =>
+            let val pair = length_keep (rest)
+                val count = pair.0
+                val kept = pair.1
+            in (count + 1, Cons ((value, kept)))
+            end
+
+(* Parcours de `required_count` avec un accumulateur.
+   - `specs` : liste parcourue récursivement.
+   - `count` : spécifications obligatoires déjà comptées.
+
+   Retourne le nombre requis sans modifier les spécifications. *)
+fun required_count_from (specs : spec list, count : int) : int =
+    case specs of
+        Nil => count
+      | Cons (spec, rest) =>
+            case spec of
+                Positional (_, _, true) => required_count_from (rest, count + 1)
+              | _ => required_count_from (rest, count)
+
+(* Compte les spécifications positionnelles obligatoires.
+   - `specs` : liste parcourue récursivement.
+
+   Retourne le nombre requis sans modifier les spécifications. *)
+fun required_count (specs : spec list) : int =
+    required_count_from (specs, 0)
+
+(* Indique si `name` est un indicateur vrai dans `flags`.
+   - `name` : nom recherché, emprunté.
+   - `flags` : paires nom/valeur empruntées, non consommées. *)
+fun flag_present
+        (name : borrow string,
+         flags : borrow ((string * bool) list)) : bool =
+    case flags of
+        Nil => false
+      | Cons ((key, value), rest) =>
+            if string.equals (name, key) then value
+            else flag_present (name, rest)
+
+(* Parcours de `any_flag` avec un accumulateur de listes.
+   - `names` : noms à examiner, consommés par le parcours.
+   - `flags` : paires nom/valeur consommées et rendues telles quelles. *)
+fun any_flag_from
+        (names : string list,
+         flags : (string * bool) list) : bool * (string * bool) list =
+    case names of
+        Nil => (false, flags)
+      | Cons (name, rest) =>
+            if flag_present (borrow name, borrow flags) then (true, flags)
+            else any_flag_from (rest, flags)
+
+(* Cherche si l'un des noms correspond à un indicateur vrai.
+   - `names` : noms à examiner, consommés par le parcours.
+   - `flags` : paires nom/valeur consommées et rendues.
+
+   Retourne le résultat et la liste d'indicateurs possédée conservée. *)
+fun any_flag
+        (names : string list,
+         flags : (string * bool) list) : bool * (string * bool) list =
+    any_flag_from (names, flags)
+
+(* Vérifie les arguments positionnels puis assemble le résultat du parsing.
+   - `specs` : spécifications consommées pour compter les requis.
+   - `flags` : indicateurs analysés, consommés puis inversés dans le résultat.
+   - `options` : options analysées, consommées puis inversées dans le résultat.
+   - `positionals` : valeurs consommées puis inversées dans le résultat.
+
+   Retourne une erreur si un positionnel requis manque (sauf aide/version), sinon un
+   `parsed` possédé. *)
+fun finish
+        (specs : spec list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    let val names = Cons (("help", Cons (("version", Nil))))
+        val metaPair = any_flag (names, flags)
+        val bypass = metaPair.0
+        val keptFlags = metaPair.1
+        val pair = length_keep (positionals)
+        val actual = pair.0
+        val kept = pair.1
+    in
+        if actual < required_count (specs) then
+            (if bypass then
+                 Ok (Parsed ((list.reverse (keptFlags),
+                              list.reverse (options),
+                              list.reverse (kept))))
+             else Error ("missing required argument"))
+        else
+            Ok (Parsed ((list.reverse (keptFlags),
+                         list.reverse (options),
+                         list.reverse (kept))))
+    end
+
+(* Assemble le résultat en ajoutant tous les arguments après `--`.
+   - `specs` : spécifications consommées pour compter les requis.
+   - `flags` : indicateurs consommés et conservés dans le résultat.
+   - `options` : options consommées et conservées dans le résultat.
+   - `positionals` : positionnels consommés puis réunis aux arguments restants.
+   - `rest` : arguments après `--`, consommés et ajoutés en fin de liste.
+
+   Retourne une erreur si un positionnel requis manque, sauf aide/version ; sinon
+   rend le résultat analysé possédé. *)
+fun finish_with_rest
+        (specs : spec list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list,
+         rest : string list) : parsed result =
+    let val names = Cons (("help", Cons (("version", Nil))))
+        val metaPair = any_flag (names, flags)
+        val bypass = metaPair.0
+        val keptFlags = metaPair.1
+        val positionalsPair = length_keep (positionals)
+        val restPair = length_keep (rest)
+        val actual = positionalsPair.0 + restPair.0
+        val all = list.append (list.reverse (positionalsPair.1), restPair.1)
+    in
+        if actual < required_count (specs) then
+            (if bypass then
+                 Ok (Parsed ((list.reverse (keptFlags),
+                              list.reverse (options),
+                              all)))
+             else Error ("missing required argument"))
+        else
+            Ok (Parsed ((list.reverse (keptFlags),
+                         list.reverse (options),
+                         all)))
+    end
+
+(* Indique si `name` est l'alias court d'un `Flag` déclaré.
+   - `specs` : liste consommée lors du parcours.
+   - `name` : alias court emprunté pour la comparaison.
+
+   Retourne vrai si un `Flag` déclare exactement cet alias court. *)
+fun is_flag_short (specs : spec list, name : borrow string) : bool =
+    case specs of
+        Nil => false
+      | Cons (spec, rest) =>
+            let val found =
+                    case spec of
+                        Flag (_, short, _) =>
+                            (case short of
+                                 None => false
+                               | Some (alias) =>
+                                     string.equals (borrow alias, name))
+                      | Opt (_, _, _, _) => false
+                      | Positional (_, _, _) => false
+            in
+                if found then true else is_flag_short (rest, name)
+            end
+
+(* Découpe un cluster court en arguments d'un caractère.
+   - `specs` : liste consommée à chaque vérification par `is_flag_short`.
+   - `body` : lettres du cluster, empruntées pendant le découpage.
+   - `index` : position courante dans `body`.
+
+   Retourne `Some` avec un argument `-x` par lettre, ou `None` dès qu'une lettre
+   n'est pas l'alias court d'un `Flag`. *)
+fun cluster_parts
+        (specs : spec list, body : borrow string, index : int) : string list option =
+    if index >= string.length (body) then
+        Some (Nil)
+    else
+        let val pair = copy_specs_twice (specs)
+            val part = string.slice (body, index, index + 1)
+        in
+            if is_flag_short (pair.0, borrow part) then
+                case cluster_parts (pair.1, body, index + 1) of
+                    None => None
+                  | Some (rest) => Some (Cons (("-" ^ part, rest)))
+            else
+                None
+        end
+
+(* Parcourt argv et accumule les options, indicateurs et positionnels.
+   - `specs` : spécifications consommées par le parcours.
+   - `argv` : arguments consommés dans l'ordre.
+   - `flags` : accumulateur d'indicateurs consommé et rendu au résultat.
+   - `options` : accumulateur d'options consommé et rendu au résultat.
+   - `positionals` : accumulateur positionnel consommé et rendu au résultat.
+
+   Retourne le résultat analysé ou une erreur de syntaxe/argument requis. *)
+fun parse_args
+        (specs : spec list,
+         argv : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    case argv of
+        Nil => finish (specs, flags, options, positionals)
+      | Cons (argument, rest) =>
+            let val doubleDash = "--"
+                val singleDash = "-"
+            in
+                if string.equals (borrow argument, borrow doubleDash) then
+                    finish_with_rest (specs, flags, options, positionals, rest)
+                else if string.starts_with (borrow argument, borrow doubleDash) then
+                    let val body =
+                            string.slice
+                                (borrow argument, 2,
+                                 string.length (borrow argument))
+                    in parse_long (specs, body, rest, flags, options, positionals)
+                    end
+                else if string.starts_with (borrow argument, borrow singleDash) then
+                    parse_dash_argument
+                        (specs, argument, rest, flags, options, positionals)
+                else
+                    parse_args
+                        (specs, rest, flags, options,
+                         Cons ((argument, positionals)))
+            end
+
+(* Analyse un argument qui commence par un seul tiret.
+   - `specs` : spécifications consommées par le parsing.
+   - `argument` : argument complet, consommé.
+   - `rest` : arguments suivants, consommés.
+   - `flags`, `options`, `positionals` : accumulateurs consommés et transmis.
+
+   Un tiret seul reste un positionnel. `-s=v` va à `parse_short`, `-abc` à
+   `parse_short_cluster`. Retourne le résultat du parsing. *)
+fun parse_dash_argument
+        (specs : spec list,
+         argument : string,
+         rest : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    if string.length (borrow argument) <= 1 then
+        parse_args
+            (specs, rest, flags, options,
+             Cons ((string.copy (borrow argument), positionals)))
+    else
+        let val body =
+                string.slice
+                    (borrow argument, 1, string.length (borrow argument))
+        in
+            if string.length (borrow body) <= 1 then
+                parse_short (specs, body, rest, flags, options, positionals)
+            else if string.index_of (borrow body, borrow "=") >= 0 then
+                parse_short (specs, body, rest, flags, options, positionals)
+            else
+                parse_short_cluster
+                    (specs, body, rest, flags, options, positionals)
+        end
+
+(* Traite `-abc` comme `-a -b -c` quand chaque lettre est un `Flag`.
+   - `specs` : spécifications consommées par le parsing.
+   - `body` : lettres du cluster, sans le tiret, consommées.
+   - `rest`, `flags`, `options`, `positionals` : consommés et transmis.
+
+   Une lettre qui n'est pas un alias de `Flag` laisse `parse_short` rendre
+   l'erreur habituelle. Retourne le résultat du parsing. *)
+fun parse_short_cluster
+        (specs : spec list,
+         body : string,
+         rest : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    let val pair = copy_specs_twice (specs)
+    in
+        case cluster_parts (pair.0, borrow body, 0) of
+            None =>
+                parse_short
+                    (pair.1, body, rest, flags, options, positionals)
+          | Some (parts) =>
+                parse_args
+                    (pair.1, list.append (parts, rest), flags, options,
+                     positionals)
+    end
+
+(* Sépare le nom et la valeur éventuelle d'une option longue.
+   - `specs` : spécifications consommées lors de la résolution.
+   - `body` : nom suivi éventuellement de `=valeur`, chaîne consommée.
+   - `rest` : arguments restants consommés par le parseur.
+   - `flags` : accumulateur consommé puis transmis.
+   - `options` : accumulateur consommé puis transmis.
+   - `positionals` : accumulateur consommé puis transmis.
+
+   Retourne le résultat du parsing ; aucune entrée n'est mutée en place. *)
+fun parse_long
+        (specs : spec list,
+         body : string,
+         rest : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    let val split = split_first (borrow body, 61)
+    in
+        case split of
+            Some ((name, value)) =>
+                apply_long (specs, name, Some (value), rest, flags, options,
+                            positionals)
+          | None =>
+                apply_long (specs, string.copy (borrow body), None, rest,
+                            flags, options, positionals)
+    end
+
+(* Applique une option longue à sa spécification correspondante.
+   - `specs` : spécifications consommées et parcourues.
+   - `name` : nom long consommé pour la recherche.
+   - `value` : valeur inline éventuelle, consommée si présente.
+   - `rest` : arguments restants consommés pour une valeur séparée.
+   - `flags` : indicateurs accumulés, consommés et transmis.
+   - `options` : options accumulées, consommées et transmises.
+   - `positionals` : positionnels accumulés, consommés et transmis.
+
+   Retourne une erreur si l'option est inconnue ou sa valeur invalide ; sinon
+   poursuit le parsing. Les accumulateurs sont reconstruits, jamais mutés. *)
+fun apply_long
+        (specs : spec list,
+         name : string,
+         value : string option,
+         rest : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    let val specsPair = copy_specs_twice (specs)
+        val specsForCase = specsPair.0
+        val specsForRest = specsPair.1
+    in
+        case specsForCase of
+            Nil => Error ("unknown option `--" ^ string.copy (borrow name) ^ "`")
+          | Cons (spec, others) =>
+                case spec of
+                    Flag (long, short, help) =>
+                        if string.equals (borrow name, borrow long) then
+                            (case value of
+                                 Some (_) =>
+                                     Error ("`--" ^ string.copy (borrow name) ^
+                                            "` takes no value")
+                               | None =>
+                                     parse_args
+                                         (specsForRest, rest,
+                                          Cons (((string.copy (borrow long), true),
+                                                 flags)),
+                                          options, positionals))
+                        else
+                            apply_long
+                                (others, name, value, rest,
+                                 flags, options, positionals)
+                  | Opt (long, short, help, default) =>
+                        if string.equals (borrow name, borrow long) then
+                            (case value of
+                                 Some (given) =>
+                                     parse_args
+                                         (specsForRest, rest, flags,
+                                          Cons (((string.copy (borrow long),
+                                                  given), options)),
+                                          positionals)
+                               | None =>
+                                     (case rest of
+                                          Nil =>
+                                              Error ("`--" ^
+                                                     string.copy (borrow name) ^
+                                                     "` requires a value")
+                                        | Cons (next, tail) =>
+                                              parse_args
+                                                  (specsForRest, tail, flags,
+                                                   Cons (((string.copy (borrow long),
+                                                           next), options)),
+                                                   positionals)))
+                        else
+                            apply_long
+                                (others, name, value, rest,
+                                 flags, options, positionals)
+                  | Positional (_, _, _) =>
+                        apply_long
+                            (others, name, value, rest,
+                             flags, options, positionals)
+    end
+
+(* Sépare l'alias court et sa valeur éventuelle, puis poursuit le parsing.
+   - `specs` : spécifications consommées lors de la résolution.
+   - `body` : alias suivi éventuellement de `=valeur`, chaîne consommée.
+   - `rest` : arguments restants consommés par le parseur.
+   - `flags` : accumulateur consommé puis transmis.
+   - `options` : accumulateur consommé puis transmis.
+   - `positionals` : accumulateur consommé puis transmis.
+
+   Retourne le résultat analysé ou une erreur. *)
+fun parse_short
+        (specs : spec list,
+         body : string,
+         rest : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    let val split = split_first (borrow body, 61)
+    in
+        case split of
+            Some ((name, value)) =>
+                apply_short (specs, name, Some (value), rest, flags, options,
+                             positionals)
+          | None =>
+                apply_short (specs, string.copy (borrow body), None, rest,
+                             flags, options, positionals)
+    end
+
+(* Applique un alias court à sa spécification correspondante.
+   - `specs` : spécifications consommées et parcourues.
+   - `name` : alias court consommé pour la recherche.
+   - `value` : valeur inline éventuelle, consommée si présente.
+   - `rest` : arguments restants consommés pour une valeur séparée.
+   - `flags` : indicateurs accumulés, consommés et transmis.
+   - `options` : options accumulées, consommées et transmises.
+   - `positionals` : positionnels accumulés, consommés et transmis.
+
+   Retourne une erreur si l'alias est inconnu ou sa valeur invalide ; sinon poursuit
+   le parsing en reconstruisant les accumulateurs. *)
+fun apply_short
+        (specs : spec list,
+         name : string,
+         value : string option,
+         rest : string list,
+         flags : (string * bool) list,
+         options : (string * string) list,
+         positionals : string list) : parsed result =
+    let val specsPair = copy_specs_twice (specs)
+        val specsForCase = specsPair.0
+        val specsForRest = specsPair.1
+    in
+        case specsForCase of
+            Nil => Error ("unknown option `-" ^ string.copy (borrow name) ^ "`")
+          | Cons (spec, others) =>
+                case spec of
+                    Flag (long, short, help) =>
+                        (case short of
+                             None =>
+                                 apply_short
+                                     (others, name, value,
+                                      rest, flags, options, positionals)
+                           | Some (shortName) =>
+                                 if string.equals (borrow name, borrow shortName) then
+                                     (case value of
+                                          Some (_) =>
+                                              Error ("`-" ^
+                                                     string.copy (borrow name) ^
+                                                     "` takes no value")
+                                        | None =>
+                                              parse_args
+                                                  (specsForRest, rest,
+                                                   Cons (((string.copy (borrow long),
+                                                           true), flags)),
+                                                   options, positionals))
+                                 else
+                                     apply_short
+                                         (others, name,
+                                          value, rest, flags, options, positionals))
+                  | Opt (long, short, help, default) =>
+                        (case short of
+                             None =>
+                                 apply_short
+                                     (others, name, value,
+                                      rest, flags, options, positionals)
+                           | Some (shortName) =>
+                                 if string.equals (borrow name, borrow shortName) then
+                                     (case value of
+                                          Some (given) =>
+                                              parse_args
+                                                  (specsForRest, rest, flags,
+                                                   Cons (((string.copy (borrow long),
+                                                           given), options)),
+                                                   positionals)
+                                        | None =>
+                                              (case rest of
+                                                   Nil =>
+                                                       Error ("`-" ^
+                                                              string.copy (borrow name) ^
+                                                              "` requires a value")
+                                                 | Cons (next, tail) =>
+                                                       parse_args
+                                                           (specsForRest, tail, flags,
+                                                            Cons (((string.copy (borrow long),
+                                                                    next), options)),
+                                                            positionals)))
+                                 else
+                                     apply_short
+                                         (others, name,
+                                          value, rest, flags, options, positionals))
+                  | Positional (_, _, _) =>
+                        apply_short
+                            (others, name, value, rest,
+                             flags, options, positionals)
+    end
+
+(* Coupe un texte au premier séparateur dont le code est donné.
+   - `text` : chaîne empruntée pendant la recherche.
+   - `separator` : code entier du caractère séparateur.
+
+   Retourne les deux chaînes possédées avant/après le séparateur, ou `None` s'il est
+   absent. *)
+fun split_first
+        (text : borrow string, separator : int) : (string * string) option =
+    let val index = string_find_char (text, separator)
+        val size = string.length (text)
+    in
+        if index < 0 then None
+        else
+            Some
+                (( string.slice (text, 0, index)
+                 , string.slice (text, index + 1, size)
+                 ))
+    end
+
+(* Analyse une liste d'arguments selon les spécifications fournies.
+   - `specs` : descriptions des options et positionnels, consommées par le parseur.
+   - `argv` : arguments consommés dans l'ordre ; ne pas inclure le nom du programme.
+
+   Reconnaît les formes longues/courtes, les valeurs séparées ou avec `=`, et `--`
+   pour traiter le reste comme positionnel. Retourne `parsed result`. *)
+fun parse (specs : spec list, argv : string list) : parsed result =
+    parse_args (specs, argv, Nil, Nil, Nil)
+
+(* Cherche un indicateur nommé en préservant la liste restante.
+   - `name` : nom emprunté pour la comparaison.
+   - `flags` : liste consommée puis reconstruite ; les noms copiés restent possédés.
+
+   Retourne sa valeur (fausse s'il est absent) et la liste conservée. *)
+fun find_flag
+        (name : borrow string, flags : (string * bool) list)
+        : bool * (string * bool) list =
+    case flags of
+        Nil => (false, Nil)
+      | Cons ((key, value), rest) =>
+            if string.equals (name, borrow key) then
+                (value, Cons (((string.copy (borrow key), value), rest)))
+            else
+                let val pair = find_flag (name, rest)
+                    val found = pair.0
+                    val kept = pair.1
+                in (found, Cons (((string.copy (borrow key), value), kept)))
+                end
+
+(* Cherche une option nommée en préservant les autres valeurs.
+   - `name` : nom emprunté pour la comparaison.
+   - `options` : liste consommée puis reconstruite avec des chaînes copiées.
+
+   Retourne une copie de la valeur si elle existe et la liste possédée conservée. *)
+fun find_option
+        (name : borrow string, options : (string * string) list)
+        : string option * (string * string) list =
+    case options of
+        Nil => (None, Nil)
+      | Cons ((key, value), rest) =>
+            if string.equals (name, borrow key) then
+                let val result = string.copy (borrow value)
+                    val kept = string.copy (borrow value)
+                in (Some (result), Cons (((string.copy (borrow key), kept), rest)))
+                end
+            else
+                let val pair = find_option (name, rest)
+                    val found = pair.0
+                    val kept = pair.1
+                in
+                    (found,
+                     Cons (((string.copy (borrow key),
+                             string.copy (borrow value)), kept)))
+                end
+
+(* Extrait la valeur d'un indicateur et rend le résultat restant.
+   - `value` : résultat affine consommé, puis reconstruit sans l'indicateur demandé.
+   - `name` : clé de l'indicateur, copiée pour la recherche.
+
+   Retourne la valeur booléenne (fausse si absente) et le `parsed` restant. *)
+fun take_flag (value : parsed, name : string) : bool * parsed =
+    let val key = string.copy (borrow name)
+    in
+        case value of
+            Parsed (flags, options, positionals) =>
+                let val pair = find_flag (borrow key, flags)
+                in (pair.0, Parsed ((pair.1, options, positionals)))
+                end
+    end
+
+(* Extrait la valeur d'une option et rend le résultat restant.
+   - `value` : résultat affine consommé, puis reconstruit sans cette option.
+   - `name` : clé recherchée, copiée pour la recherche.
+
+   Retourne une copie possédée de la valeur éventuelle et le `parsed` restant. *)
+fun take_option (value : parsed, name : string) : string option * parsed =
+    let val key = string.copy (borrow name)
+    in
+        case value of
+            Parsed (flags, options, positionals) =>
+                let val pair = find_option (borrow key, options)
+                in (pair.0, Parsed ((flags, pair.1, positionals)))
+                end
+    end
+
+(* Extrait une option ou fournit sa valeur par défaut.
+   - `value` : résultat affine consommé par `take_option`.
+   - `name` : clé recherchée, copiée pour la recherche.
+   - `default` : chaîne rendue telle quelle si la clé est absente.
+
+   Retourne la valeur et le résultat `parsed` restant. *)
+fun take_option_or
+        (value : parsed, name : string, default : string) : string * parsed =
+    let val pair = take_option (value, name)
+    in
+        case pair.0 of
+            None => (default, pair.1)
+          | Some (found) => (found, pair.1)
+    end
+
+(* Indique si un indicateur est vrai dans le résultat analysé.
+   - `value` : résultat affine consommé par l'accesseur interne.
+   - `name` : clé recherchée, copiée pour la recherche.
+
+   Retourne le booléen correspondant ; le reste du résultat est abandonné. *)
+fun has_flag (value : parsed, name : string) : bool =
+    let val pair = take_flag (value, name)
+    in pair.0
+    end
+
+(* Lit la valeur optionnelle d'une clé dans le résultat analysé.
+   - `value` : résultat affine consommé par l'accesseur interne.
+   - `name` : clé recherchée, copiée pour la recherche.
+
+   Retourne une copie possédée de la valeur, ou `None`. *)
+fun get_option (value : parsed, name : string) : string option =
+    let val pair = take_option (value, name)
+    in pair.0
+    end
+
+(* Lit une option en remplaçant son absence par une valeur par défaut.
+   - `value` : résultat affine consommé par l'accesseur interne.
+   - `name` : clé recherchée, copiée pour la recherche.
+   - `default` : chaîne rendue si la clé n'existe pas.
+
+   Retourne la valeur possédée correspondante. *)
+fun get_option_or (value : parsed, name : string, default : string) : string =
+    let val pair = take_option_or (value, name, default)
+    in pair.0
+    end
+
+(* Rend les arguments positionnels du résultat.
+   - `value` : résultat affine consommé pour en extraire le champ.
+
+   Retourne la liste positionnelle possédée. *)
+fun positionals (value : parsed) : string list =
+    case value of
+        Parsed (_, _, items) => items
+
+(* Rend les indicateurs du résultat.
+   - `value` : résultat affine consommé pour en extraire le champ.
+
+   Retourne la liste possédée des paires nom/valeur. *)
+fun flags (value : parsed) : (string * bool) list =
+    case value of
+        Parsed (items, _, _) => items
+
+(* Rend les options du résultat.
+   - `value` : résultat affine consommé pour en extraire le champ.
+
+   Retourne la liste possédée des paires nom/valeur. *)
+fun options (value : parsed) : (string * string) list =
+    case value of
+        Parsed (_, items, _) => items
+
+(* Formate les noms long et court d'un indicateur.
+   - `long` : nom long consommé dans la chaîne produite.
+   - `short` : alias court optionnel, consommé s'il est présent.
+
+   Retourne par exemple `--verbose / -v`. *)
+fun flag_usage (long : string, short : string option) : string =
+    case short of
+        None => "--" ^ long
+      | Some (shortName) => "--" ^ long ^ " / -" ^ shortName
+
+(* Formate les noms d'une option et marque sa valeur attendue.
+   - `long` : nom long consommé dans la chaîne produite.
+   - `short` : alias court optionnel, consommé s'il est présent.
+
+   Retourne le texte d'usage suivi de `<value>`. *)
+fun option_usage (long : string, short : string option) : string =
+    case short of
+        None => "--" ^ long ^ " <value>"
+      | Some (shortName) => "--" ^ long ^ " / -" ^ shortName ^ " <value>"
+
+(* Rend la notation d'usage correspondant à une spécification.
+   - `spec` : spécification consommée lors de son inspection.
+
+   Retourne la forme d'un indicateur, d'une option ou d'un positionnel. *)
+fun spec_usage (spec : spec) : string =
+    case spec of
+        Flag (long, short, help) => flag_usage (long, short)
+      | Opt (long, short, help, default) => option_usage (long, short)
+      | Positional (name, help, required) =>
+            if required then "<" ^ name ^ ">" else "[" ^ name ^ "]"
+
+(* Convertit les spécifications en éléments de ligne d'usage.
+   - `specs` : liste consommée récursivement.
+
+   Retourne une liste possédée de notations d'usage. *)
+fun usage_list (specs : spec list) : string list =
+    case specs of
+        Nil => Nil
+      | Cons (spec, rest) => Cons ((spec_usage (spec), usage_list (rest)))
+
+(* Construit la ligne d'usage d'un programme.
+   - `program` : nom consommé dans le texte.
+   - `specs` : spécifications consommées pour générer les notations.
+
+   Retourne une chaîne de la forme `programme arguments...`. *)
+fun usage (program : string, specs : spec list) : string =
+    program ^ " " ^ string.join (" ", usage_list (specs))
+
+(* Formate une spécification avec son texte d'aide.
+   - `spec` : spécification consommée lors de son inspection.
+
+   Retourne une ligne décrivant nom, valeur éventuelle et aide. *)
+fun spec_line (spec : spec) : string =
+    case spec of
+        Flag (long, short, help) =>
+            "  " ^ flag_usage (long, short) ^ "  " ^ help
+      | Opt (long, short, help, default) =>
+            let val suffix =
+                    case default of
+                        None => ""
+                      | Some (value) => " (default: " ^ value ^ ")"
+            in "  " ^ option_usage (long, short) ^ "  " ^ help ^ suffix
+            end
+      | Positional (name, help, required) =>
+            "  " ^
+            (if required then "<" ^ name ^ ">" else "[" ^ name ^ "]") ^
+            "  " ^ help
+
+(* Formate toutes les spécifications en lignes d'aide.
+   - `specs` : liste consommée récursivement.
+
+   Retourne une liste possédée de lignes dans l'ordre fourni. *)
+fun spec_lines (specs : spec list) : string list =
+    case specs of
+        Nil => Nil
+      | Cons (spec, rest) => Cons ((spec_line (spec), spec_lines (rest)))
+
+(* Produit l'usage et la ligne d'aide d'une spécification.
+   - `spec` : spécification inspectée et consommée par motif.
+
+   Retourne deux chaînes possédées : notation d'usage et ligne descriptive. *)
+fun spec_pair (spec : spec) : string * string =
+    case spec of
+        Flag (long, short, help) =>
+            let val usage = flag_usage (long, short)
+                val returned = string.copy (borrow usage)
+                val line = "  " ^ string.copy (borrow usage) ^ "  " ^ help
+            in (returned, line)
+            end
+      | Opt (long, short, help, default) =>
+            let val usage = option_usage (long, short)
+                val suffix =
+                    case default of
+                        None => ""
+                      | Some (value) => " (default: " ^ value ^ ")"
+                val returned = string.copy (borrow usage)
+                val line =
+                    "  " ^ string.copy (borrow usage) ^ "  " ^ help ^ suffix
+            in (returned, line)
+            end
+      | Positional (name, help, required) =>
+            let val usage =
+                    if required then "<" ^ name ^ ">" else "[" ^ name ^ "]"
+                val returned = string.copy (borrow usage)
+                val line = "  " ^ string.copy (borrow usage) ^ "  " ^ help
+            in (returned, line)
+            end
+
+(* Produit en parallèle les notations d'usage et leurs lignes d'aide.
+   - `specs` : liste consommée récursivement.
+
+   Retourne deux listes possédées, alignées et conservant l'ordre d'entrée. *)
+fun spec_docs (specs : spec list) : string list * string list =
+    case specs of
+        Nil => (Nil, Nil)
+      | Cons (spec, rest) =>
+            let val pair = spec_pair (spec)
+                val usage = pair.0
+                val line = pair.1
+                val restDocs = spec_docs (rest)
+            in
+                (Cons ((usage, restDocs.0)),
+                 Cons ((line, restDocs.1)))
+            end
+
+(* Construit le texte complet d'aide d'un programme.
+   - `program` : nom du programme consommé dans la section Usage.
+   - `summary` : résumé consommé et placé en tête.
+   - `specs` : spécifications consommées pour construire usage et options.
+
+   Retourne une chaîne d'aide terminée par un saut de ligne. *)
+fun help
+        (program : string,
+         summary : string,
+         specs : spec list) : string =
+    let val docs = spec_docs (specs)
+        val usages = docs.0
+        val lines = docs.1
+    in
+        summary ^ "\n\n" ^
+        "Usage: " ^ program ^ " " ^ string.join (" ", usages) ^ "\n\n" ^
+        "Options:\n" ^ string.join ("\n", lines) ^ "\n"
+    end

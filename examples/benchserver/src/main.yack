@@ -1,0 +1,23 @@
+import web/Request
+import web/Response
+import web/Router
+import web/Server
+
+fun hello
+    (request : consume Request.t
+    , params : consume (string * string) list
+    ) : Response.t =
+    case Request.query (borrow request, "name") of
+        None => Response.text ("hello world")
+      | Some (name) => Response.text ("hello " ^ name)
+
+fun main () =
+    let val result =
+            Router.new ()
+            |> Router.get ("/", hello)
+            |> Server.run (Server.config (18080))
+    in
+        case result of
+            Ok (_) => ()
+          | Error (message) => print_string (message)
+    end

@@ -1,0 +1,10 @@
+fun inner_length (item : borrow int array) : int =
+    array_length_borrow (item)
+fun main () =
+    let val rows : int array array = array_new ()
+        val inner : int array = array_new ()
+        val _ = array_push (inner, 40)
+        val _ = array_push (inner, 2)
+        val _ = array_push (rows, inner)
+    in print_int (inner_length (array_get_borrow_view (borrow rows, 0)))
+    end

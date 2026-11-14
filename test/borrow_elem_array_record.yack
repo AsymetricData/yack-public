@@ -1,0 +1,7 @@
+fun first_field (item : borrow { a : int, b : string }) : int =
+    item.a
+fun main () =
+    let val rows : { a : int, b : string } array = array_new ()
+        val _ = array_push (rows, { a = 42, b = "xx" })
+    in print_int (first_field (array_get_borrow_view (borrow rows, 0)))
+    end

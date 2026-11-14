@@ -1,0 +1,17 @@
+
+
+fun bad (flag : bool, values : int list) : int =
+    let val n =
+            if flag then
+                let val borrowed = borrow values
+                in list_length (values)
+                end
+            else 0
+    in n
+    end
+
+fun main () : unit =
+    let val values = Cons ((1, Nil))
+        val n = bad (true, values)
+    in print_int (n)
+    end

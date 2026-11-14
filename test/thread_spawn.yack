@@ -1,0 +1,9 @@
+fun worker (value : int64) : unit =
+    print_string ("thread " ^ int_to_string (int64_to_int (value)))
+
+fun main () =
+    let val thread = sys.thread_spawn (worker, int_to_int64 (7))
+        val _ = sys.thread_join (thread)
+    in
+        ()
+    end

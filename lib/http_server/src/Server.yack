@@ -1,0 +1,895 @@
+import net/Http
+import yack/array
+
+type 'state dispatcher = {
+    run : (consume string, consume 'state) -> string * 'state
+}
+
+type 'state server = {
+    epfd : int,
+    listener_fd : int,
+    fds : int32 array,
+    events : int32 array,
+    data : int8 array,
+    lengths : int32 array,
+    outputs : int8 array,
+    output_lengths : int32 array,
+    output_offsets : int32 array,
+    conn_fds : int32 array,
+    dispatch : 'state dispatcher,
+    state : 'state
+}
+
+fun max_connections () : int = 1024
+fun buffer_size () : int = 4096
+fun event_batch () : int = 64
+
+(* Interest masks: EPOLLIN = 1, EPOLLOUT = 4.  A connection is registered
+   for exactly one direction at a time, so the slot token in the event is
+   enough to know whether the next step is a read or a write flush. *)
+fun set_interest (epfd : int, fd : int, slot : int, mask : int) : unit =
+    let val _ = sys.epoll_mod_token (epfd, fd, mask, slot)
+    in ()
+    end
+
+fun server_listen
+    (port : int, dispatch : 'state dispatcher, state : 'state)
+    : 'state server result =
+    let val epfd = sys.epoll_create ()
+    in
+        if epfd < 0 then Error ("epoll failed")
+        else
+            let val fd = sys.socket_tcp ()
+            in
+                if fd < 0 then
+                    let val _ = sys.close (epfd)
+                    in Error ("socket failed")
+                    end
+                else
+                    let val _ = sys.reuseaddr (fd)
+                        val _ = sys.reuseport (fd)
+                        val bound = sys.bind_any (fd, port)
+                    in
+                        if bound < 0 then
+                            let val _ = sys.close (fd)
+                                val _ = sys.close (epfd)
+                            in Error ("bind failed")
+                            end
+                        else
+                            let val listening = sys.listen (fd, 512)
+                            in
+                                if listening < 0 then
+                                    let val _ = sys.close (fd)
+                                        val _ = sys.close (epfd)
+                                    in Error ("listen failed")
+                                    end
+                                else
+                                    let val _ = sys.set_nonblocking (fd)
+                                        val max = max_connections ()
+                                        val fds : int32 array = array.make (0, event_batch ())
+                                        val events : int32 array = array.make (0, event_batch ())
+                                        (* Slot buffers are never read before
+                                           their length is written, so reserve
+                                           them without touching every page.
+                                           This keeps RSS proportional to the
+                                           number of live connections. *)
+                                        val data : int8 array = array.make_uninit (max * buffer_size ())
+                                        val lengths : int32 array = array.make (0, max)
+                                        val outputs : int8 array = array.make_uninit (max * buffer_size ())
+                                        val output_lengths : int32 array = array.make (0, max)
+                                        val output_offsets : int32 array = array.make (0, max)
+                                        val conn_fds : int32 array = array.make (-1, max)
+                                        val _ = sys.epoll_add_token (epfd, fd, 1, -1)
+                                        val value : 'state server =
+                                            { epfd = epfd
+                                            , listener_fd = fd
+                                            , fds = fds
+                                            , events = events
+                                            , data = data
+                                            , lengths = lengths
+                                            , outputs = outputs
+                                            , output_lengths = output_lengths
+                                            , output_offsets = output_offsets
+                                            , conn_fds = conn_fds
+                                            , dispatch = dispatch
+                                            , state = state
+                                            }
+                                    in Ok (value)
+                                    end
+                            end
+                    end
+            end
+    end
+
+fun find_free_from (conn_fds : int32 array, index : int, limit : int) : int * int32 array =
+    if index >= limit then (-1, conn_fds)
+    else if array.get_int (borrow conn_fds, index) < 0 then (index, conn_fds)
+    else find_free_from (conn_fds, index + 1, limit)
+
+fun close_slot (value : 'state server, slot : int) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+                , dispatch = dispatch
+                , state = state
+        } =>
+            let val fd = array.get_int (borrow conn_fds, slot)
+                val _ = sys.close (fd)
+                val _ = sys.epoll_del (epfd, fd)
+                val conn_fds = array.set_int (conn_fds, slot, -1)
+                val lengths = array.set_int (lengths, slot, 0)
+                val output_lengths = array.set_int (output_lengths, slot, 0)
+                val output_offsets = array.set_int (output_offsets, slot, 0)
+            in
+                { epfd = epfd
+                , listener_fd = listener_fd
+                , fds = fds
+                , events = events
+                , data = data
+                , lengths = lengths
+                , outputs = outputs
+                , output_lengths = output_lengths
+                , output_offsets = output_offsets
+                , conn_fds = conn_fds
+                , dispatch = dispatch
+                , state = state
+                }
+            end
+
+fun accept_loop (value : 'state server) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , dispatch = dispatch
+        , state = state
+        } =>
+            let val client = sys.accept (listener_fd)
+            in
+                if client < 0 then
+                    let val error = sys.errno ()
+                        (* EMFILE/ENFILE: the listener stays readable, so
+                           sleeping here caps the retry rate instead of
+                           spinning at 100% CPU. *)
+                        val _ =
+                            if error = 24 then sys.sleep_ms (10)
+                            else if error = 23 then sys.sleep_ms (10)
+                            else ()
+                    in
+                        { epfd = epfd
+                        , listener_fd = listener_fd
+                        , fds = fds
+                        , events = events
+                        , data = data
+                        , lengths = lengths
+                        , outputs = outputs
+                        , output_lengths = output_lengths
+                        , output_offsets = output_offsets
+                        , conn_fds = conn_fds
+                        , dispatch = dispatch
+                        , state = state
+                        }
+                    end
+                else
+                    let val found = find_free_from (conn_fds, 0, max_connections ())
+                        val slot = found.0
+                        val next_conn_fds = found.1
+                    in
+                        if slot < 0 then
+                            let val _ = sys.close (client)
+                            in
+                                { epfd = epfd
+                                , listener_fd = listener_fd
+                                , fds = fds
+                                , events = events
+                                , data = data
+                                , lengths = lengths
+                                , outputs = outputs
+                                , output_lengths = output_lengths
+                                , output_offsets = output_offsets
+                                , conn_fds = next_conn_fds
+                                , dispatch = dispatch
+                                , state = state
+                                }
+                            end
+                        else
+                            let val _ = sys.nodelay (client)
+                                val conn_fds = array.set_int (next_conn_fds, slot, client)
+                                val lengths = array.set_int (lengths, slot, 0)
+                                val output_lengths = array.set_int (output_lengths, slot, 0)
+                                val output_offsets = array.set_int (output_offsets, slot, 0)
+                                val _ = sys.epoll_add_token (epfd, client, 1, slot)
+                            in
+                                accept_loop
+                                    ({ epfd = epfd
+                                     , listener_fd = listener_fd
+                                     , fds = fds
+                                     , events = events
+                                     , data = data
+                                     , lengths = lengths
+                                     , outputs = outputs
+                                     , output_lengths = output_lengths
+                                     , output_offsets = output_offsets
+                                     , conn_fds = conn_fds
+                                     , dispatch = dispatch
+                                     , state = state
+                                     })
+                            end
+                    end
+            end
+
+(* Render a complete keep-alive response into the connection output slot.
+   The writer is bounded by `base + buffer_size ()`, so a response that does
+   not fit is reported as a negative length instead of spilling into the next
+   connection's slot. *)
+fun render_response_into (output : int8 array, base : int, name : borrow string) : int8 array * int =
+    let val name_length = string_length (name)
+        val content_length = if name_length = 0 then 11 else 6 + name_length
+        val prefix = "HTTP/1.1 200 OK\r\nContent-Length: "
+        val separator = "\r\nConnection: keep-alive\r\n\r\n"
+        val hello_world = "hello world"
+        val hello_prefix = "hello "
+        val limit = base + buffer_size ()
+        val p0 = bytes_write_string (output, base, limit, borrow prefix)
+        val p1 = bytes_write_int (output, p0, limit, content_length)
+        val p2 = bytes_write_string (output, p1, limit, borrow separator)
+        val p3 =
+            if name_length = 0 then
+                bytes_write_string (output, p2, limit, borrow hello_world)
+            else
+                let val p = bytes_write_string (output, p2, limit, borrow hello_prefix)
+                in bytes_write_string (output, p, limit, name)
+                end
+    in
+        if p3 < 0 then (output, p3) else (output, p3 - base)
+    end
+
+(* Try to drain the response slot.  `resuming` is true when the connection
+   was woken by EPOLLOUT, so completion must switch the interest back to
+   EPOLLIN.  On EAGAIN the slot keeps its offset and waits for EPOLLOUT. *)
+fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , dispatch = dispatch
+        , state = state
+        } =>
+            let val fd = array.get_int (borrow conn_fds, slot)
+                val total = array.get_int (borrow output_lengths, slot)
+                val offset = array.get_int (borrow output_offsets, slot)
+                val base = slot * buffer_size ()
+            in
+                if offset >= total then
+                    let val output_lengths = array.set_int (output_lengths, slot, 0)
+                        val output_offsets = array.set_int (output_offsets, slot, 0)
+                        val _ =
+                            if resuming then set_interest (epfd, fd, slot, 1)
+                            else ()
+                    in
+                        make_server
+                            ( epfd
+                            , listener_fd
+                            , fds
+                            , events
+                            , data
+                            , lengths
+                            , outputs
+                            , output_lengths
+                            , output_offsets
+                            , conn_fds
+                            , dispatch
+                            , state
+                            )
+                    end
+                else
+                    let val sent = sys.send_from_raw (fd, outputs, base + offset, total - offset)
+                    in
+                        if sent < 0 then
+                            let val error = sys.errno ()
+                            in
+                                if error = 11 then
+                                    let val _ = set_interest (epfd, fd, slot, 4)
+                                    in
+                                        make_server
+                                            ( epfd
+                                            , listener_fd
+                                            , fds
+                                            , events
+                                            , data
+                                            , lengths
+                                            , outputs
+                                            , output_lengths
+                                            , output_offsets
+                                            , conn_fds
+                                            , dispatch
+                                            , state
+                                            )
+                                    end
+                                else
+                                    close_slot
+                                        (make_server
+                                             ( epfd
+                                             , listener_fd
+                                             , fds
+                                             , events
+                                             , data
+                                             , lengths
+                                             , outputs
+                                             , output_lengths
+                                             , output_offsets
+                                             , conn_fds
+                                             , dispatch
+                                             , state
+                                             ),
+                                         slot)
+                            end
+                        else if sent = 0 then
+                            let val _ = set_interest (epfd, fd, slot, 4)
+                            in
+                                make_server
+                                    ( epfd
+                                    , listener_fd
+                                    , fds
+                                    , events
+                                    , data
+                                    , lengths
+                                    , outputs
+                                    , output_lengths
+                                    , output_offsets
+                                    , conn_fds
+                                    , dispatch
+                                    , state
+                                    )
+                            end
+                        else
+                            let val next_offset = offset + sent
+                                val output_offsets = array.set_int (output_offsets, slot, next_offset)
+                            in
+                                if next_offset >= total then
+                                    let val output_lengths = array.set_int (output_lengths, slot, 0)
+                                        val output_offsets = array.set_int (output_offsets, slot, 0)
+                                        val _ =
+                                            if resuming then set_interest (epfd, fd, slot, 1)
+                                            else ()
+                                    in
+                                        make_server
+                                            ( epfd
+                                            , listener_fd
+                                            , fds
+                                            , events
+                                            , data
+                                            , lengths
+                                            , outputs
+                                            , output_lengths
+                                            , output_offsets
+                                            , conn_fds
+                                            , dispatch
+                                            , state
+                                            )
+                                    end
+                                else
+                                    let val _ = set_interest (epfd, fd, slot, 4)
+                                    in
+                                        make_server
+                                            ( epfd
+                                            , listener_fd
+                                            , fds
+                                            , events
+                                            , data
+                                            , lengths
+                                            , outputs
+                                            , output_lengths
+                                            , output_offsets
+                                            , conn_fds
+                                            , dispatch
+                                            , state
+                                            )
+                                    end
+                            end
+                    end
+            end
+
+fun send_all_loop (fd : int, text : borrow string, offset : int, total : int) : unit =
+    if offset >= total then ()
+    else
+        let val sent = sys.send_string_raw (fd, text, offset, total - offset)
+        in
+            if sent < 0 then
+                let val error = sys.errno ()
+                in
+                    if error = 11 then send_all_loop (fd, text, offset, total)
+                    else ()
+                end
+            else if sent = 0 then ()
+            else send_all_loop (fd, text, offset + sent, total)
+        end
+
+fun send_all (fd : int, text : borrow string) : unit =
+    let val total = string_length (text)
+    in send_all_loop (fd, text, 0, total)
+    end
+
+fun send_hello (fd : int, body : borrow string) : unit =
+    let val length = string_length (body)
+        val length_text = string_of_int (length)
+        val prefix = "HTTP/1.1 200 OK\r\nContent-Length: "
+        val suffix = "\r\nConnection: keep-alive\r\n\r\n"
+        val _ = send_all (fd, borrow prefix)
+        val _ = send_all (fd, borrow length_text)
+        val _ = send_all (fd, borrow suffix)
+    in send_all (fd, body)
+    end
+
+fun make_server
+    ( epfd : int
+    , listener_fd : int
+    , fds : int32 array
+    , events : int32 array
+    , data : int8 array
+    , lengths : int32 array
+    , outputs : int8 array
+    , output_lengths : int32 array
+    , output_offsets : int32 array
+    , conn_fds : int32 array
+    , dispatch : 'state dispatcher
+    , state : 'state
+    ) : 'state server =
+    { epfd = epfd
+    , listener_fd = listener_fd
+    , fds = fds
+    , events = events
+    , data = data
+    , lengths = lengths
+    , outputs = outputs
+    , output_lengths = output_lengths
+    , output_offsets = output_offsets
+    , conn_fds = conn_fds
+    , dispatch = dispatch
+                , state = state
+    }
+
+(* Les méthodes sans corps n'ont pas besoin de lire Content-Length.
+   La détection se fait sur les octets déjà lus : aucune chaîne temporaire
+   n'est allouée avant l'entrée dans l'arène de la requête. *)
+fun method_is_get (b0 : int8, b1 : int8, b2 : int8, b3 : int8) : bool =
+    if b0 = 71 then
+        if b1 = 69 then
+            if b2 = 84 then b3 = 32
+            else false
+        else false
+    else false
+
+fun method_is_head
+    (b0 : int8, b1 : int8, b2 : int8, b3 : int8, b4 : int8) : bool =
+    if b0 = 72 then
+        if b1 = 69 then
+            if b2 = 65 then
+                if b3 = 68 then b4 = 32
+                else false
+            else false
+        else false
+    else false
+
+(* Longueur du corps annoncée par l'en-tête, à partir du bloc d'en-têtes
+   brut (ligne de requête comprise). *)
+fun content_length_of_headers (headers : string) : int =
+    let val size = string_length (borrow headers)
+        val first_cr = string_find_char_from (borrow headers, 0, 13)
+        val header_start = first_cr + 2
+        val header_stop = if size >= 4 then size - 4 else 0
+        val name = "content-length"
+        val found =
+            Http.find_header_in_range
+                (borrow headers, header_start, header_stop, borrow name)
+    in
+        case found of
+            None => 0
+          | Some value =>
+                (case string_to_int (borrow value) of
+                     Some parsed => parsed
+                   | None => 0)
+    end
+
+fun handle_read (value : 'state server, slot : int) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , dispatch = dispatch
+        , state = state
+        } =>
+            let val fd = array.get_int (borrow conn_fds, slot)
+                val length = array.get_int (borrow lengths, slot)
+                val start = slot * buffer_size ()
+                val available = buffer_size () - length
+            in
+                if available <= 0 then
+                    close_slot
+                        (make_server
+                             ( epfd
+                             , listener_fd
+                             , fds
+                             , events
+                             , data
+                             , lengths
+                             , outputs
+                             , output_lengths
+                             , output_offsets
+                             , conn_fds
+                             , dispatch
+                             , state
+                             ),
+                         slot)
+                else
+                    let val received = sys.recv_into_raw (fd, data, start + length, available)
+                    in
+                        if received < 0 then
+                            let val error = sys.errno ()
+                            in
+                                if error = 11 then
+                                    make_server
+                                        ( epfd
+                                        , listener_fd
+                                        , fds
+                                        , events
+                                        , data
+                                        , lengths
+                                        , outputs
+                                        , output_lengths
+                                        , output_offsets
+                                        , conn_fds
+                                        , dispatch
+                                        , state
+                                        )
+                                else
+                                    close_slot
+                                        (make_server
+                                             ( epfd
+                                             , listener_fd
+                                             , fds
+                                             , events
+                                             , data
+                                             , lengths
+                                             , outputs
+                                             , output_lengths
+                                             , output_offsets
+                                             , conn_fds
+                                             , dispatch
+                                             , state
+                                             ),
+                                         slot)
+                            end
+                        else if received = 0 then
+                            close_slot
+                                (make_server
+                                     ( epfd
+                                     , listener_fd
+                                     , fds
+                                     , events
+                                     , data
+                                     , lengths
+                                     , outputs
+                                     , output_lengths
+                                     , output_offsets
+                                     , conn_fds
+                                     , dispatch
+                                     , state
+                                     ),
+                                 slot)
+                        else
+                            let val next_length = length + received
+                                val lengths = array.set_int (lengths, slot, next_length)
+                                val end_index = bytes_header_end (data, start, start + next_length)
+                            in
+                                if end_index < 0 then
+                                    make_server
+                                        ( epfd
+                                        , listener_fd
+                                        , fds
+                                        , events
+                                        , data
+                                        , lengths
+                                        , outputs
+                                        , output_lengths
+                                        , output_offsets
+                                        , conn_fds
+                                        , dispatch
+                                        , state
+                                        )
+                                else
+                                    let val bodyless =
+                                            if next_length < 4 then false
+                                            else
+                                                let val b0 = array.get (borrow data, start)
+                                                    val b1 = array.get (borrow data, start + 1)
+                                                    val b2 = array.get (borrow data, start + 2)
+                                                    val b3 = array.get (borrow data, start + 3)
+                                                in
+                                                    if method_is_get (b0, b1, b2, b3) then true
+                                                    else if next_length < 5 then false
+                                                    else
+                                                        method_is_head
+                                                            ( b0
+                                                            , b1
+                                                            , b2
+                                                            , b3
+                                                            , array.get (borrow data, start + 4)
+                                                            )
+                                                end
+                                        val header_length = end_index - start
+                                        val expected =
+                                            if bodyless then header_length
+                                            else
+                                                arena
+                                                    val headers =
+                                                        bytes_to_string_range
+                                                            (data, start, header_length)
+                                                    val content_length =
+                                                        content_length_of_headers (headers)
+                                                in
+                                                    header_length + content_length
+                                                end
+                                    in
+                                        if next_length < expected then
+                                            make_server
+                                                ( epfd
+                                                , listener_fd
+                                                , fds
+                                                , events
+                                                , data
+                                                , lengths
+                                                , outputs
+                                                , output_lengths
+                                                , output_offsets
+                                                , conn_fds
+                                                , dispatch
+                                                , state
+                                                )
+                                        else
+                                            let val run = dispatch.run
+                                                val result =
+                                                    arena
+                                                        val request_text =
+                                                            bytes_to_string_range
+                                                                (data, start, next_length)
+                                                        val dispatched =
+                                                            run (request_text, state)
+                                                    in
+                                                        case dispatched of
+                                                            (response, next_state) =>
+                                                                let val limit = start + buffer_size ()
+                                                                    val rendered_end =
+                                                                        bytes_write_string
+                                                                            (outputs, start, limit, borrow response)
+                                                                    val response_length =
+                                                                        if rendered_end < 0 then -1
+                                                                        else rendered_end - start
+                                                                in
+                                                                    (next_state, response_length)
+                                                                end
+                                                    end
+                                            in
+                                                case result of
+                                                    (next_state, response_length) =>
+                                                        if response_length < 0 then
+                                                            close_slot
+                                                                (make_server
+                                                                     ( epfd
+                                                                     , listener_fd
+                                                                     , fds
+                                                                     , events
+                                                                     , data
+                                                                     , lengths
+                                                                     , outputs
+                                                                     , output_lengths
+                                                                     , output_offsets
+                                                                     , conn_fds
+                                                                     , dispatch
+                                                                     , next_state
+                                                                     ),
+                                                                 slot)
+                                                        else
+                                                            let val lengths = array.set_int (lengths, slot, 0)
+                                                                val output_lengths = array.set_int (output_lengths, slot, response_length)
+                                                                val output_offsets = array.set_int (output_offsets, slot, 0)
+                                                            in
+                                                                flush_slot
+                                                                    (make_server
+                                                                         ( epfd
+                                                                         , listener_fd
+                                                                         , fds
+                                                                         , events
+                                                                         , data
+                                                                         , lengths
+                                                                         , outputs
+                                                                         , output_lengths
+                                                                         , output_offsets
+                                                                         , conn_fds
+                                                                         , dispatch
+                                                                         , next_state
+                                                                         ),
+                                                                     slot,
+                                                                     false)
+                                                            end
+                                            end
+                                    end
+                            end
+                    end
+            end
+
+fun handle_events (value : 'state server, count : int, index : int) : 'state server =
+    if index >= count then value
+    else
+        case value of
+            { epfd = epfd
+            , listener_fd = listener_fd
+            , fds = fds
+            , events = events
+            , data = data
+            , lengths = lengths
+            , outputs = outputs
+            , output_lengths = output_lengths
+            , output_offsets = output_offsets
+            , conn_fds = conn_fds
+                , dispatch = dispatch
+                , state = state
+            } =>
+                let val token = array.get_int (borrow fds, index)
+                    val pending =
+                        if token < 0 then false
+                        else
+                            array.get_int (borrow output_offsets, token) <
+                            array.get_int (borrow output_lengths, token)
+                    val rebuilt : 'state server =
+                        { epfd = epfd
+                        , listener_fd = listener_fd
+                        , fds = fds
+                        , events = events
+                        , data = data
+                        , lengths = lengths
+                        , outputs = outputs
+                        , output_lengths = output_lengths
+                        , output_offsets = output_offsets
+                        , conn_fds = conn_fds
+                , dispatch = dispatch
+                , state = state
+                        }
+                    val next_value =
+                        if token < 0 then accept_loop (rebuilt)
+                        else if pending then flush_slot (rebuilt, token, true)
+                        else handle_read (rebuilt, token)
+                in handle_events (next_value, count, index + 1)
+                end
+
+fun close_slots_from (conn_fds : int32 array, index : int) : unit =
+    if index >= max_connections () then
+        ()
+    else
+        let val fd = array.get_int (borrow conn_fds, index)
+            val _ = if fd >= 0 then (let val _ = sys.close (fd) in () end) else ()
+        in
+            close_slots_from (conn_fds, index + 1)
+        end
+
+fun close_all (value : 'state server) : unit =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , dispatch = dispatch
+        , state = state
+        } =>
+            let val _ = close_slots_from (conn_fds, 0)
+                val _ = sys.close (listener_fd)
+                val _ = sys.close (epfd)
+            in
+                ()
+            end
+
+fun serve (value : 'state server) : unit result =
+    if sys.stop_requested () then
+        let val _ = close_all (value)
+        in Ok (())
+        end
+    else
+        case value of
+            { epfd = epfd
+            , listener_fd = listener_fd
+            , fds = fds
+            , events = events
+            , data = data
+            , lengths = lengths
+            , outputs = outputs
+            , output_lengths = output_lengths
+            , output_offsets = output_offsets
+            , conn_fds = conn_fds
+            , dispatch = dispatch
+            , state = state
+            } =>
+                let val ready = sys.epoll_wait (epfd, fds, events, event_batch (), 200)
+                    val rebuilt : 'state server =
+                        { epfd = epfd
+                        , listener_fd = listener_fd
+                        , fds = fds
+                        , events = events
+                        , data = data
+                        , lengths = lengths
+                        , outputs = outputs
+                        , output_lengths = output_lengths
+                        , output_offsets = output_offsets
+                        , conn_fds = conn_fds
+                        , dispatch = dispatch
+                        , state = state
+                        }
+                in
+                    if sys.stop_requested () then
+                        let val _ = close_all (rebuilt)
+                        in Ok (())
+                        end
+                    else if ready < 0 then
+                        let val error = sys.errno ()
+                        in
+                            if error = 4 then serve (rebuilt)
+                            else if error = 11 then serve (rebuilt)
+                            else
+                                let val _ = close_all (rebuilt)
+                                in Error ("epoll_wait failed")
+                                end
+                        end
+                    else if ready = 0 then serve (rebuilt)
+                    else serve (handle_events (rebuilt, ready, 0))
+                end
+
+type config : Affine =
+    { port : int
+    }
+
+fun config (port : int) : config =
+    { port = port }
+
+fun run
+    (dispatch : 'state dispatcher, state : 'state, settings : config)
+    : unit result =
+    case server_listen (settings.port, dispatch, state) of
+        Error (message) => Error (message)
+      | Ok (value) =>
+            let val _ = sys.install_stop_signals ()
+            in serve (value)
+            end

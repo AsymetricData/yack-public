@@ -1,0 +1,11 @@
+import yack/string
+
+
+fun bad (values : string map) : int =
+    let val first = map_get_borrow (values, "k")
+        val _ = map_remove (values, "k")
+        val size = string_length (first)
+    in size
+    end
+
+fun main () : unit = ()

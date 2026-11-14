@@ -1,0 +1,6 @@
+fun dup (x : 'a) : 'a * 'a = (x, x)
+
+fun main () =
+    let val (a, b) = dup (new_token ())
+        val _ = consume_token (a)
+    in consume_token (b) end

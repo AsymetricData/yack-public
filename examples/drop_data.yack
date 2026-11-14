@@ -1,0 +1,5 @@
+
+fun main () =
+    let val unused = Some (42)
+    in ()
+    end

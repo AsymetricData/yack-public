@@ -1,0 +1,17 @@
+import yack/string
+
+
+
+type user : Affine = { name : string }
+
+fun moved_after_unused_borrow (user : user) : string =
+    let val borrowed = borrow user
+        val moved = user
+    in moved.name
+    end
+
+fun main () : unit =
+    let val user : user = { name = string_copy (borrow "abc") }
+        val name = moved_after_unused_borrow (user)
+    in print_string (name)
+    end

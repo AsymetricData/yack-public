@@ -1,0 +1,6 @@
+fun main () =
+  let val names : int map = map_new ()
+      val key = "k" ^ "1"
+      val _ = map_set (names, key, 1)
+  in print_string (key)
+  end

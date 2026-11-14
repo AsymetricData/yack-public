@@ -1,0 +1,8 @@
+fun make_map () : int map =
+    let val values = map_new ()
+        val _ = map_set (values, "x", 7)
+    in values
+    end
+
+fun main () =
+    print_int (map_get (make_map (), "x"))

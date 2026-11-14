@@ -1,0 +1,10 @@
+fun make_map () : string map =
+    let val values = map_new ()
+        val _ = map_set (values, "k", "a" ^ "b")
+    in values
+    end
+
+fun main () =
+    let val text = map_get_borrow (make_map (), "k")
+    in print_int (string_length (text))
+    end

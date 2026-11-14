@@ -1,0 +1,8 @@
+
+fun value (input : int option result) : int =
+    case input of
+        Ok (Some x) => x
+      | Ok None => 0
+      | Error _ => -1
+
+fun main () = print_int (value (Ok (Some (42))))

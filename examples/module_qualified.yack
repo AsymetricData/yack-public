@@ -1,0 +1,7 @@
+import modules/Shapes
+
+fun main () =
+    let val p : Shapes.point = { x = 2, y = 3 }
+        val s : Shapes.shape = Shapes.Rect (p)
+    in print_int (Shapes.area (s))
+    end

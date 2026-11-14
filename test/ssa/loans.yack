@@ -1,0 +1,44 @@
+
+
+
+
+
+
+
+import yack/io
+
+type person = { name : string, age : int }
+
+fun len (s : borrow string) : int = string_length (s)
+
+fun first (s : string) : int =
+    let val b = borrow s
+        val n = len (b)
+    in n end
+
+fun choose (a : borrow string, b : borrow string) : borrow string from 1 = a
+
+fun keep_left (x : string, y : string) : int =
+    let val r = choose (borrow x, borrow y)
+    in len (r) end
+
+fun pick (x : string, y : string, left : bool) : int =
+    let val r = if left then borrow x else borrow y
+    in len (r) end
+
+fun name_len (p : person) : int =
+    let val n = string_length (borrow p.name)
+    in n end
+
+fun exclusive (value : string) : int =
+    let val shared = borrow value
+        val n = len (shared)
+        val unique = borrow mut value
+    in n end
+
+fun main () : unit =
+    let val total = first ("a" ^ "b") + keep_left ("x" ^ "", "yy" ^ "")
+            + pick ("x" ^ "", "yy" ^ "", false)
+            + name_len ({ name = "z" ^ "z", age = 3 }) + exclusive ("abc" ^ "")
+        val s = int_to_string (total)
+    in io.print_line (borrow s) end

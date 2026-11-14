@@ -1,0 +1,8 @@
+
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), 1)
+        val values = array.set_int (values, 3, 9)
+    in print_int (array.length (borrow values))
+    end

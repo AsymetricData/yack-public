@@ -1,0 +1,16 @@
+import yack/string
+
+
+
+fun bad (values : int array) : int =
+    let val borrowed = borrow values
+        val n = array_length_borrow (borrowed)
+        val _ = array_set (values, 0, 1)
+    in n
+    end
+
+fun main () : unit =
+    let val values : int array = array_make (7, 3)
+        val n = bad (values)
+    in print_int (n)
+    end

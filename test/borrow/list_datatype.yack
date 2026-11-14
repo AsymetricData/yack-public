@@ -1,0 +1,22 @@
+datatype layer : Copy =
+    Before of (int) -> int
+  | After of (int) -> int
+
+fun inc (x : int) : int = x + 1
+fun twice (x : int) : int = x * 2
+
+fun apply (layers : borrow (layer list), x : int) : int =
+    case layers of
+        Nil => x
+      | Cons (layer, rest) =>
+            case layer of
+                Before f => apply (rest, f (x))
+              | After f => f (apply (rest, x))
+
+fun main () =
+    let val layers = Cons ((Before (inc), Cons ((After (twice), Nil))))
+        val result = apply (borrow layers, 3)
+        val length = list_length (layers)
+    in
+        print_int (result + length)
+    end

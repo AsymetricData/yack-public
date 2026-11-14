@@ -1,0 +1,5 @@
+fun main () : int =
+    let guard true else "not an int"
+    in
+        1
+    end

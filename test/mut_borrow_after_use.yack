@@ -1,0 +1,10 @@
+type cell : Affine = { value : int, name : string }
+
+fun touch (c : borrow mut cell) : unit = ()
+
+fun main () =
+    let val c : cell = { value = 1, name = "a" ^ "b" }
+        val m = borrow mut c
+        val _ = touch (m)
+        val x = c.value
+    in print_int (x) end

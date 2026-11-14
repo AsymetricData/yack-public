@@ -1,0 +1,21 @@
+import yack/string
+
+
+
+fun head (values : borrow (string list)) : (borrow string) option =
+    case values of
+        Nil => None
+      | Cons (head, _) => Some (head)
+
+fun bad (values : string list) : int =
+    let val result =
+            case head (borrow values) of
+                None => 0
+              | Some text =>
+                    let val n = list_length (values)
+                    in string_length (text) + n
+                    end
+    in result
+    end
+
+fun main () : unit = ()

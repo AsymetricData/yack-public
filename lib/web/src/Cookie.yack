@@ -1,0 +1,246 @@
+import yack/list
+import yack/string
+
+(* yack/web/Cookie : cookies HTTP/1.1.
+
+Le parseur ne décode pas les valeurs : les cookies ne sont pas des query
+params. Le rendu produit un en-tête `Set-Cookie` complet. *)
+datatype same_site =
+    Lax
+  | Strict
+  | Same_site_none
+
+type t : Affine = {
+    name : string,
+    value : string,
+    path : string option,
+    domain : string option,
+    max_age : int option,
+    http_only : bool,
+    secure : bool,
+    same_site : same_site
+}
+
+(* Construit un cookie minimal, sans attribut optionnel. *)
+fun make (name : string, value : string) : t =
+    {
+        name = name,
+        value = value,
+        path = None,
+        domain = None,
+        max_age = None,
+        http_only = false,
+        secure = false,
+        same_site = Lax
+    }
+
+fun parse_part (part : string) : string * string =
+    let val trimmed = string.trim (borrow part)
+        val equal =
+            let val text = borrow trimmed
+                val equal_sign = "="
+            in
+                string.index_of_from (text, borrow equal_sign, 0)
+            end
+    in
+        if equal < 0 then
+            (trimmed, "")
+        else
+            (
+                string_slice (borrow trimmed, 0, equal),
+                string_slice (borrow trimmed, equal + 1, string_length (borrow trimmed))
+            )
+    end
+
+fun parse_parts_from
+        (parts : string list, acc : (string, string) list)
+        : (string, string) list =
+    case parts of
+        Nil => list.reverse (acc)
+      | part :: rest =>
+          let val pair = parse_part (part)
+              val name = pair.0
+              val value = pair.1
+              val empty =
+                  let val text = borrow name
+                  in
+                      string.is_empty (text)
+                  end
+          in
+              if empty then
+                  parse_parts_from (rest, acc)
+              else
+                  parse_parts_from (rest, Cons (((name, value), acc)))
+          end
+
+fun parse_parts (parts : string list) : (string, string) list =
+    parse_parts_from (parts, Nil)
+
+(* Analyse l'en-tête `Cookie` : `a=1; b=2`. Les espaces autour des noms et
+des valeurs sont retirés. Les doublons sont conservés dans l'ordre. *)
+fun parse_header (value : borrow string) : (string, string) list =
+    parse_parts (string.split (59, value))
+
+fun skip_spaces_at (text : borrow string, index : int, stop : int) : int =
+    if index >= stop then index
+    else if string_char_at_unchecked (text, index) = 32 then
+        skip_spaces_at (text, index + 1, stop)
+    else index
+
+fun trim_right_index (text : borrow string, start : int, stop : int) : int =
+    if stop <= start then start
+    else if string_char_at_unchecked (text, stop - 1) = 32 then
+        trim_right_index (text, start, stop - 1)
+    else stop
+
+fun slice_eq_from
+    ( value : borrow string
+    , text : borrow string
+    , start : int
+    , stop : int
+    , index : int
+    ) : bool =
+    if index >= stop - start then true
+    else if string_char_at_unchecked (value, index) =
+            string_char_at_unchecked (text, start + index)
+    then slice_eq_from (value, text, start, stop, index + 1)
+    else false
+
+fun slice_eq (value : borrow string, text : borrow string, start : int, stop : int) : bool =
+    if stop - start <> string_length (value) then false
+    else slice_eq_from (value, text, start, stop, 0)
+
+(* Cherche un cookie directement dans la valeur de l'en-tête `Cookie`, sans
+   construire la liste complète des paires. *)
+fun find_in_header_from
+    (name : borrow string, header : borrow string, length : int, start : int)
+    : string option =
+    if start >= length then None
+    else
+        let val semi = string_find_char_from (header, start, 59)
+            val stop = if semi < 0 then length else semi
+            val key_start = skip_spaces_at (header, start, stop)
+            val equal = string_find_char_from (header, key_start, 61)
+            val key_stop0 =
+                if equal < 0 then stop
+                else if equal > stop then stop
+                else equal
+            val key_stop = trim_right_index (header, key_start, key_stop0)
+            val has_equal =
+                if equal < 0 then false
+                else equal <= stop
+        in
+            if slice_eq (name, header, key_start, key_stop) then
+                if has_equal then
+                    let val value = string_slice (header, equal + 1, stop)
+                    in Some (string.trim (borrow value))
+                    end
+                else Some ("")
+            else if semi < 0 then None
+            else find_in_header_from (name, header, length, semi + 1)
+        end
+
+fun find_in_header (name : borrow string, header : borrow string) : string option =
+    find_in_header_from (name, header, string_length (header), 0)
+
+(* Cherche un cookie par nom. *)
+fun discard_pairs (pairs : (string, string) list) : unit =
+    case pairs of
+        Nil => ()
+      | pair :: rest =>
+          let val _key = pair.0
+              val _value = pair.1
+          in discard_pairs (rest)
+          end
+
+fun find_from (name : borrow string, pairs : (string, string) list) : string option =
+    case pairs of
+        Nil => None
+      | pair :: rest =>
+          let val key = pair.0
+              val value = pair.1
+              val same = string_eq (name, borrow key)
+          in
+              if same then
+                  let val _ = discard_pairs (rest)
+                  in Some (value)
+                  end
+              else find_from (name, rest)
+          end
+
+(* Cherche un cookie par nom dans une liste déjà analysée. *)
+fun find (name : borrow string, pairs : (string, string) list) : string option =
+    find_from (name, pairs)
+
+(* Variante qui rend aussi la liste, afin de conserver les cookies dans une
+requête possédée. *)
+fun find_keep (name : borrow string, pairs : (string, string) list) : string option * (string, string) list =
+    case pairs of
+        Nil => (None, Nil)
+      | pair :: rest =>
+          let val key = pair.0
+              val value = pair.1
+              val same =
+                  let val k = borrow key
+                  in
+                      string_eq (name, k)
+                  end
+          in
+              if same then
+                  let
+                      val copied =
+                          let val v = borrow value
+                          in
+                              string_copy (v)
+                          end
+                  in
+                      (Some (copied), Cons (((key, value), rest)))
+                  end
+              else
+                  let val tail = find_keep (name, rest)
+                  in
+                      (tail.0, Cons (((key, value), tail.1)))
+                  end
+          end
+
+fun render_path (path : string option) : string =
+    case path of
+        None => ""
+      | Some value => "; Path=" ^ value
+
+fun render_domain (domain : string option) : string =
+    case domain of
+        None => ""
+      | Some value => "; Domain=" ^ value
+
+fun render_max_age (max_age : int option) : string =
+    case max_age of
+        None => ""
+      | Some value => "; Max-Age=" ^ int_to_string (value)
+
+fun render_same_site (same_site : same_site) : string =
+    case same_site of
+        Lax => "; SameSite=Lax"
+      | Strict => "; SameSite=Strict"
+      | Same_site_none => "; SameSite=None"
+
+fun render_flags (http_only : bool, secure : bool) : string =
+    (if http_only then "; HttpOnly" else "") ^ (if secure then "; Secure" else "")
+
+(* Rend un en-tête `Set-Cookie` complet. *)
+fun render (cookie : t) : string =
+    case cookie of
+        {
+            name = name,
+            value = value,
+            path = path,
+            domain = domain,
+            max_age = max_age,
+            http_only = http_only,
+            secure = secure,
+            same_site = same_site
+        } =>
+            name ^ "=" ^ value ^ render_path (path) ^ render_domain (domain) ^
+                render_max_age (max_age) ^
+                render_same_site (same_site) ^
+                render_flags (http_only, secure)

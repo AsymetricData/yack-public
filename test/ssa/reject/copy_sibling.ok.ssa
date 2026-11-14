@@ -1,0 +1,15 @@
+# Accepted control, not a trap: guards the `Partial (union)` fix.
+# Moving a Copy field (an `int` at path .0) consumes nothing, so the owned
+# field at path .1 can still be moved afterwards.
+fun yack_main {
+  b0:
+    %0.n : int = const 1
+    %1.s : string = view const "x"
+    %2.p : int * string = tuple %0.n, move %1.s
+    %3.k : int = bind 0 move.0 %2.p
+    %4.owned : string = bind 1 move.1 %2.p
+    %5 : string = concat move %4.owned!, %1.s
+    %6 : unit = print_int %3.k!
+    drop %5! : string
+    return %6!
+}

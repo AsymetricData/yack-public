@@ -1,0 +1,12 @@
+type pair : Affine = { a : string, b : string }
+
+fun loop (n : int) : unit =
+    if n = 0 then ()
+    else
+        let val p : pair = { a = "a" ^ "aa", b = "b" ^ "bb" }
+            val chosen = if n > 0 then p.a else p.b
+            val _ = print_string (chosen)
+        in loop (n - 1)
+        end
+
+fun main () = loop (500)

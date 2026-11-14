@@ -1,0 +1,4 @@
+import fixtures/Alpha.{shared}
+import fixtures/Beta.{shared}
+
+fun main () = print_int (shared ())

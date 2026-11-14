@@ -1,0 +1,23 @@
+
+
+
+import yack/list
+
+fun build (n : int, acc : int list) : int list =
+    if n <= 0 then acc
+    else build (n - 1, Cons ((n, acc)))
+
+fun is_even (value : int) : bool = value % 2 = 0
+
+fun keep_even (value : int) : int option =
+    if value % 2 = 0 then Some (value) else None
+
+fun count (values : int list) : int =
+    list.foldl (pair => case pair of (acc, _) => acc + 1, 0, values)
+
+fun main () =
+    let val values = build (1000000, Nil)
+        val kept = list.filter (is_even, values)
+        val mapped = list.filter_map (keep_even, build (1000000, Nil))
+    in print_int (count (kept) + count (mapped))
+    end

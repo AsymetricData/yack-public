@@ -1,0 +1,15 @@
+
+
+
+
+fun split (pair : (string, 'a)) : 'a =
+    let val first = pair.0
+        val second = pair.1
+        val _ = print_string (first)
+    in second
+    end
+
+fun main () =
+    let val value = split (("hel" ^ "lo", "wor" ^ "ld"))
+    in print_string (value)
+    end

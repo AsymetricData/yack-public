@@ -1,0 +1,14 @@
+# expect: drops `x` (%3), a view it does not own
+# A view def (`owns = false`) never owns what it reads: dropping it would
+# free a part the root still owns.
+fun yack_main {
+  b0:
+    %0.a : string = view const "a"
+    %1.b : string = view const "b"
+    %2.p : string * string = tuple move %0.a, move %1.b
+    %3.x : string = view bind 0 %2.p
+    drop %3.x! : string
+    drop %2.p! : string * string
+    %4 : unit = const ()
+    return %4!
+}

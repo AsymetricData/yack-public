@@ -1,0 +1,15 @@
+
+
+
+type user : Affine = { name : int }
+
+fun bad (user : user) : unit =
+    let val first = borrow mut user
+        val second = borrow mut user
+    in ()
+    end
+
+fun main () : unit =
+    let val user : user = { name = 1 }
+    in bad (user)
+    end

@@ -1,0 +1,30 @@
+arena in `report`, lines 5–18, heap mode
+
+Freed at `end` (5)
+- 7:20 `^` concatenation
+- 7:32 `int_to_string`
+- 17:9 `^` concatenation ×3
+
+Stored to the root: the container outlives the arena (1)
+- 9:35 `^` concatenation — value of `array_push`
+
+Not arena memory: outlive the block (1)
+- 8:20 `array_new` — heap, freed when its owner is dropped
+
+Strings allocated by `label` while the block runs are freed at `end` too.
+
+Value: `string` — copied out of the arena before it is released.
+
+1 nested arena block, reported separately.
+
+arena in `report`, lines 11–15, heap mode
+
+Freed at `end` (2)
+- 12:25 `^` concatenation
+- 14:17 `int_to_string`
+
+Value: `string` — copied out of the arena before it is released.
+
+arena in `unused`, lines 21–21, heap mode
+
+`unused` is not reached from `main` (or is generic and never instantiated), so no allocation of this block is compiled.

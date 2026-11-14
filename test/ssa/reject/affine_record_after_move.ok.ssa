@@ -1,0 +1,10 @@
+# The same graph, accepted: show, then move.  A declared Copy record is
+# read, never moved.
+fun yack_f {
+  b0(%0.p : { x : int, y : int }, %1.c : copy { x : int }):
+    %2 : unit = call yack_show %0.p
+    %3 : unit = call yack_sink move %0.p
+    %4 : unit = call yack_show %1.c
+    %5 : unit = call yack_show %1.c
+    return %5
+}

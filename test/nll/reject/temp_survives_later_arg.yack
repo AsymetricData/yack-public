@@ -1,0 +1,16 @@
+import yack/string
+
+
+
+fun peek (a : borrow string, b : string) : int = string_length (a)
+
+fun two_args (line : string) : int =
+    let val borrowed = borrow line
+    in peek (borrowed, line)
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "abc")
+        val n = two_args (s)
+    in print_int (n)
+    end

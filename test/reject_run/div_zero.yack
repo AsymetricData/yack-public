@@ -1,0 +1,6 @@
+
+
+fun quotient (x : int, y : int) : int = x / y
+
+fun main () =
+    print_int (quotient (42, 0))

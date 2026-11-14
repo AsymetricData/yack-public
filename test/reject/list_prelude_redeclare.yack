@@ -1,0 +1,6 @@
+datatype list = Nil | Cons of int * list
+
+fun main () =
+  let val values = Nil
+  in ()
+  end

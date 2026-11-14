@@ -1,0 +1,8 @@
+
+fun identityOption (value : 'a option) : 'a option = value
+
+fun main () =
+    let val a = identityOption (Some (42))
+        val b = identityOption (Some (true))
+    in ()
+    end

@@ -1,0 +1,13 @@
+fun main () =
+    let val names : int map = map_new ()
+        val _ = map_set (names, "a" ^ "a", 1)
+        val _ = map_set (names, "b" ^ "bb", 2)
+        val keys = map_keys (names)
+        val _ = map_set (names, "cccc", 3)
+        val count = array_length (keys)
+        val size = map_length (names)
+        val first = array_get_borrow (keys, 0)
+        val second = array_get_borrow (keys, 1)
+        val keyLen = string_length (first) + string_length (second)
+    in print_int (count * 1000 + size * 100 + keyLen)
+    end

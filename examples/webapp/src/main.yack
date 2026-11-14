@@ -1,0 +1,101 @@
+import web/Cookie
+import web/Html
+import web/Middleware
+import web/Request
+import web/Response
+import web/Router
+import web/Server
+import yack/io
+
+fun home (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    let val title = "Yack web"
+        val body =
+            Html.div (
+                Nil,
+                Cons (
+                    (
+                        Html.h1 (Nil, Cons ((Html.text ("Hello from yack/web"), Nil))),
+                        Cons (
+                            (
+                                Html.p (
+                                    Nil,
+                                    Cons (
+                                        (
+                                            Html.text ("Une app servie par la stdlib."),
+                                            Nil
+                                        )
+                                    )
+                                ),
+                                Nil
+                            )
+                        )
+                    )
+                )
+            )
+    in
+        Response.html (Html.render_page (title, body))
+    end
+
+fun greet (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    case Router.param (params, "name") of
+        None => Response.not_found ()
+      | Some name => Response.text ("hello " ^ name)
+
+fun api_ping (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    Response.text ("pong")
+
+fun main () =
+    let val api = Router.new () |> Router.get ("/ping", api_ping)
+        val app =
+            Router.new ()
+            |> Router.get ("/", home)
+            |> Router.get ("/hello/:name", greet)
+            |> Router.get ("/login", login)
+            |> Router.get ("/me", me)
+            |> Router.post ("/echo", echo)
+            |> Router.get ("/set-theme", set_theme)
+            |> Router.get ("/theme", theme)
+            |> Router.mount ("/api", api)
+            |> Router.with (Middleware.Log)
+            |> Router.with (Middleware.Security_headers)
+        val result = Server.run (app, Server.config (18087))
+    in
+        case result of
+            Ok _ => ()
+          | Error message => io.print_line (borrow message)
+    end
+
+fun login (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    case Request.query (borrow request, "user") of
+        None => Response.bad_request ("missing user")
+      | Some user =>
+          let
+              val display =
+                  let val text = borrow user
+                  in
+                      string_copy (text)
+                  end
+          in
+              Response.text ("logged in as " ^ display)
+              |> Response.session_set ("user", user)
+              |> Response.redirect ("/me")
+          end
+
+fun me (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    case Request.session (borrow request, "user") of
+        None => Response.unauthorized ()
+      | Some user => Response.text ("session user: " ^ user)
+
+fun echo (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    Response.text (Request.body (borrow request))
+
+fun set_theme (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    let val cookie = Cookie.make ("theme", "dark")
+    in
+        Response.with_cookie (Response.text ("theme set"), cookie)
+    end
+
+fun theme (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    case Request.cookie (borrow request, "theme") of
+        None => Response.text ("no theme cookie")
+      | Some value => Response.text ("theme: " ^ value)

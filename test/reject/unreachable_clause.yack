@@ -1,0 +1,6 @@
+fun f (true) : int = 1
+fun f (true) : int = 2
+fun f (other) : int = 0
+
+fun main () =
+    print_int (f (true))

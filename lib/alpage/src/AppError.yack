@@ -1,0 +1,62 @@
+import alpage/Response
+import yack/string
+
+datatype kind =
+    Bad_request
+  | Unprocessable
+  | Not_found
+  | Method_not_allowed of string list
+  | Conflict
+  | Unavailable
+  | Internal
+
+type t : Affine = {
+    kind : kind,
+    message : string
+}
+
+fun make (kind : kind, message : string) : t =
+    { kind = kind, message = message }
+
+fun bad_request (message : string) : t =
+    make (Bad_request, message)
+
+fun unprocessable (message : string) : t =
+    make (Unprocessable, message)
+
+fun not_found () : t =
+    make (Not_found, "not found")
+
+fun method_not_allowed (allowed : string list) : t =
+    make (Method_not_allowed (allowed), "method not allowed")
+
+fun conflict (message : string) : t =
+    make (Conflict, message)
+
+fun unavailable (message : string) : t =
+    make (Unavailable, message)
+
+fun internal (message : string) : t =
+    make (Internal, message)
+
+fun text_response (status : int, body : string) : Response.t =
+    Response.make (status, "text/plain; charset=utf-8", body)
+
+fun to_response (error : t) : Response.t =
+    case error of
+        { kind = kind, message = message } =>
+            case kind of
+                Bad_request => text_response (400, message)
+              | Unprocessable => text_response (422, message)
+              | Not_found => text_response (404, message)
+              | Method_not_allowed (allowed) =>
+                    let val separator = ", "
+                        val value = string.join (separator, allowed)
+                        val response = text_response (405, message)
+                        val name = "Allow"
+                    in
+                        Response.with_header (response, name, value)
+                    end
+              | Conflict => text_response (409, message)
+              | Unavailable => text_response (503, message)
+              | Internal => text_response (500, "internal server error")

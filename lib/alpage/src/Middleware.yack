@@ -1,0 +1,141 @@
+import alpage/Ctx
+import alpage/Handler
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+import yack/array
+import yack/io
+
+fun no_before
+    (ctx : Ctx.t, request : Request.t)
+    : Request.t * Reply.t option =
+    (request, None)
+
+fun no_after (ctx : Ctx.t, response : Response.t) : Response.t = response
+
+type t : Copy = {
+    before_hook : (Ctx.t, consume Request.t) -> Request.t * Reply.t option,
+    after_hook : (Ctx.t, consume Response.t) -> Response.t,
+    has_before : bool,
+    has_after : bool
+}
+
+(* Recopie un layer emprunté. Tous ses champs sont Copy. *)
+fun copy (layer : borrow t) : t =
+    { before_hook = layer.before_hook
+    , after_hook = layer.after_hook
+    , has_before = layer.has_before
+    , has_after = layer.has_after
+    }
+
+fun before (hook : (Ctx.t, consume Request.t) -> Request.t * Reply.t option) : t =
+    { before_hook = hook
+    , after_hook = no_after
+    , has_before = true
+    , has_after = false
+    }
+
+fun after (hook : (Ctx.t, consume Response.t) -> Response.t) : t =
+    { before_hook = no_before
+    , after_hook = hook
+    , has_before = false
+    , has_after = true
+    }
+
+fun apply_after_reply
+    (hook : (Ctx.t, consume Response.t) -> Response.t
+    , ctx : Ctx.t
+    , reply : Reply.t
+    ) : Reply.t =
+    case reply of
+        Reply.Respond response =>
+            let val updated = hook (ctx, response)
+            in Reply.Respond (updated)
+            end
+      | Reply.Reject error => Reply.Reject (error)
+
+fun apply_after_from
+    (layers : t array, index : int, ctx : Ctx.t, reply : Reply.t)
+    : Reply.t * t array =
+    if index >= array.length (borrow layers) then (reply, layers)
+    else
+        let val layer = copy (array.get_borrow (borrow layers, index))
+            val has_after = layer.has_after
+            val hook = layer.after_hook
+            val (inner, layers) =
+                apply_after_from (layers, index + 1, ctx, reply)
+        in
+            if has_after then
+                (apply_after_reply (hook, ctx, inner), layers)
+            else
+                (inner, layers)
+        end
+
+fun run_from
+    (layers : t array
+    , index : int
+    , core : Handler.t
+    , ctx : Ctx.t
+    , request : Request.t
+    ) : Reply.t * t array =
+    if index >= array.length (borrow layers) then
+        (Handler.call (core, ctx, request), layers)
+    else
+        let val layer = copy (array.get_borrow (borrow layers, index))
+        in
+            if layer.has_before then
+                let val hook = layer.before_hook
+                    val handled = hook (ctx, request)
+                    val request = handled.0
+                    val reply = handled.1
+                in
+                    case reply of
+                        Some value =>
+                            apply_after_from (layers, index + 1, ctx, value)
+                      | None =>
+                            run_from (layers, index + 1, core, ctx, request)
+                end
+            else if layer.has_after then
+                let val hook = layer.after_hook
+                    val (reply, layers) =
+                        run_from (layers, index + 1, core, ctx, request)
+                in
+                    (apply_after_reply (hook, ctx, reply), layers)
+                end
+            else
+                run_from (layers, index + 1, core, ctx, request)
+        end
+
+fun run
+    (layers : t array
+    , core : Handler.t
+    , ctx : Ctx.t
+    , request : Request.t
+    ) : Reply.t * t array =
+    run_from (layers, 0, core, ctx, request)
+
+fun log_before (ctx : Ctx.t, request : Request.t) : Request.t * Reply.t option =
+    let val req = borrow request
+        val method = Request.method (req)
+        val path = Request.path (req)
+        val line = method ^ " " ^ path
+        val _ = io.print_line (borrow line)
+    in
+        (request, None)
+    end
+
+fun log () : t =
+    before (log_before)
+
+fun security_after (ctx : Ctx.t, response : Response.t) : Response.t =
+    let val frame_name = "X-Frame-Options"
+        val frame_value = "DENY"
+        val type_name = "X-Content-Type-Options"
+        val type_value = "nosniff"
+        val first = Response.with_header (response, frame_name, frame_value)
+    in
+        Response.with_header (first, type_name, type_value)
+    end
+
+fun security_headers () : t =
+    after (security_after)

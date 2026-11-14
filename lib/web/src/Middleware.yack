@@ -1,0 +1,266 @@
+import web/Handler
+import web/Request
+import web/Response
+import yack/array
+import yack/io
+import yack/string
+
+datatype provider : Copy = Provider of unit -> string
+
+datatype t : Copy =
+    Log
+  | Security_headers
+  | Cors of provider
+  | Basic_auth of provider
+  | Static of provider
+  | Before of (consume Request.t) -> Request.t * Response.t option
+  | After of (consume Response.t) -> Response.t
+
+fun custom_before
+    (hook : (consume Request.t) -> Request.t * Response.t option) : t =
+    Before (hook)
+
+fun custom_after (hook : (consume Response.t) -> Response.t) : t =
+    After (hook)
+
+fun ends_with_text (text : borrow string, suffix : string) : bool =
+    string.ends_with (text, borrow suffix)
+
+fun starts_with_text (text : borrow string, prefix : borrow string) : bool =
+    string.starts_with (text, prefix)
+
+fun content_type (path : borrow string) : string =
+    if ends_with_text (path, ".html") then "text/html; charset=utf-8"
+    else if ends_with_text (path, ".css") then "text/css; charset=utf-8"
+    else if ends_with_text (path, ".js") then "application/javascript; charset=utf-8"
+    else if ends_with_text (path, ".json") then "application/json; charset=utf-8"
+    else if ends_with_text (path, ".svg") then "image/svg+xml"
+    else if ends_with_text (path, ".png") then "image/png"
+    else if ends_with_text (path, ".txt") then "text/plain; charset=utf-8"
+    else "application/octet-stream"
+
+fun serve_static (request : Request.t, prefix : string, root : string) : Request.t * Response.t option =
+    let val path = Request.path (borrow request)
+    in
+        if starts_with_text (borrow path, borrow prefix) then
+            let val prefix_length = string_length (borrow prefix)
+                val rest = string_slice (borrow path, prefix_length, string_length (borrow path))
+                val forbidden = ".."
+                val unsafe =
+                    let val text = borrow rest
+                        val needle = borrow forbidden
+                    in string.contains (text, needle)
+                    end
+            in
+                if unsafe then (request, Some (Response.forbidden ()))
+                else
+                    let val media =
+                            let val text = borrow rest
+                            in content_type (text)
+                            end
+                        val file_path = root ^ rest
+                    in
+                        case io.read_file (file_path) of
+                            Error _message => (request, None)
+                          | Ok body =>
+                                (request, Some (Response.make (200, media, body)))
+                    end
+            end
+        else (request, None)
+    end
+
+(* Un layer configuré (`t`) est un datatype Copy, mais un datatype Copy ne
+   peut pas vivre dans un tableau : le conteneur possède son stockage.
+   `compile` le projette donc en record plat Copy, stocké une fois dans le
+   tableau du routeur et partagé par toutes les requêtes. *)
+type entry : Copy =
+    { before_hook : (consume Request.t) -> Request.t * Response.t option
+    , after_hook : (consume Response.t) -> Response.t
+    , provider : unit -> string
+    , has_before : bool
+    , has_after : bool
+    , is_cors : bool
+    , is_basic_auth : bool
+    , is_static : bool
+    }
+
+fun no_provider (_ : unit) : string = ""
+
+fun no_before_hook (request : Request.t) : Request.t * Response.t option =
+    (request, None)
+
+fun no_after_hook (response : Response.t) : Response.t =
+    response
+
+fun entry_before (hook : (consume Request.t) -> Request.t * Response.t option) : entry =
+    { before_hook = hook
+    , after_hook = no_after_hook
+    , provider = no_provider
+    , has_before = true
+    , has_after = false
+    , is_cors = false
+    , is_basic_auth = false
+    , is_static = false
+    }
+
+fun entry_after (hook : (consume Response.t) -> Response.t) : entry =
+    { before_hook = no_before_hook
+    , after_hook = hook
+    , provider = no_provider
+    , has_before = false
+    , has_after = true
+    , is_cors = false
+    , is_basic_auth = false
+    , is_static = false
+    }
+
+fun entry_cors (provider : unit -> string) : entry =
+    { before_hook = no_before_hook
+    , after_hook = no_after_hook
+    , provider = provider
+    , has_before = false
+    , has_after = false
+    , is_cors = true
+    , is_basic_auth = false
+    , is_static = false
+    }
+
+fun entry_basic_auth (provider : unit -> string) : entry =
+    { before_hook = no_before_hook
+    , after_hook = no_after_hook
+    , provider = provider
+    , has_before = false
+    , has_after = false
+    , is_cors = false
+    , is_basic_auth = true
+    , is_static = false
+    }
+
+fun entry_static (provider : unit -> string) : entry =
+    { before_hook = no_before_hook
+    , after_hook = no_after_hook
+    , provider = provider
+    , has_before = false
+    , has_after = false
+    , is_cors = false
+    , is_basic_auth = false
+    , is_static = true
+    }
+
+fun log_before (request : Request.t) : Request.t * Response.t option =
+    let val req = borrow request
+        val method = Request.method (req)
+        val path = Request.path (req)
+        val line = method ^ " " ^ path
+        val _ = io.print_line (borrow line)
+    in (request, None)
+    end
+
+fun security_after (response : Response.t) : Response.t =
+    let val x_frame = "X-Frame-Options"
+        val deny = "DENY"
+        val x_content = "X-Content-Type-Options"
+        val nosniff = "nosniff"
+        val first = Response.with_header (response, borrow x_frame, borrow deny)
+    in Response.with_header (first, borrow x_content, borrow nosniff)
+    end
+
+fun compile (layer : t) : entry =
+    case layer of
+        Log => entry_before (log_before)
+      | Security_headers => entry_after (security_after)
+      | Cors (origin) =>
+            let val hook = case origin of Provider (value) => value
+            in entry_cors (hook)
+            end
+      | Basic_auth (config) =>
+            let val hook = case config of Provider (value) => value
+            in entry_basic_auth (hook)
+            end
+      | Static (config) =>
+            let val hook = case config of Provider (value) => value
+            in entry_static (hook)
+            end
+      | Before (hook) => entry_before (hook)
+      | After (hook) => entry_after (hook)
+
+fun run_from
+    (layers : borrow (entry array)
+    , index : int
+    , core : Handler.t
+    , request : Request.t
+    , params : (string * string) list
+    ) : Response.t =
+    if index >= array.length (layers) then
+        Handler.call (core, request, params)
+    else
+        let val layer = array.get_borrow (layers, index)
+        in
+            if layer.has_before then
+                let val hook = layer.before_hook
+                    val handled = hook (request)
+                    val request = handled.0
+                    val response = handled.1
+                in
+                    case response of
+                        Some value => value
+                      | None => run_from (layers, index + 1, core, request, params)
+                end
+            else if layer.has_after then
+                let val hook = layer.after_hook
+                    val response = run_from (layers, index + 1, core, request, params)
+                in hook (response)
+                end
+            else if layer.is_cors then
+                let val hook = layer.provider
+                    val response = run_from (layers, index + 1, core, request, params)
+                    val value = hook (())
+                    val name = "Access-Control-Allow-Origin"
+                in Response.with_header (response, borrow name, borrow value)
+                end
+            else if layer.is_basic_auth then
+                let val hook = layer.provider
+                    val header_name = "authorization"
+                    val header = Request.header (borrow request, header_name)
+                    val expected = hook (())
+                    val allowed =
+                        case header of
+                            None => false
+                          | Some value => string_eq (borrow value, borrow expected)
+                in
+                    if allowed then
+                        run_from (layers, index + 1, core, request, params)
+                    else
+                        let val challenge = "Basic realm=\"yack\""
+                            val name = "WWW-Authenticate"
+                        in
+                            Response.with_header
+                                (Response.unauthorized (), borrow name, borrow challenge)
+                        end
+                end
+            else if layer.is_static then
+                let val hook = layer.provider
+                    val spec = hook (())
+                    val separator = "|"
+                    val split = string.index_of_from (borrow spec, borrow separator, 0)
+                    val prefix = string_slice (borrow spec, 0, split)
+                    val root = string_slice (borrow spec, split + 1, string_length (borrow spec))
+                    val inspected = serve_static (request, prefix, root)
+                    val request = inspected.0
+                    val handled = inspected.1
+                in
+                    case handled of
+                        Some response => response
+                      | None => run_from (layers, index + 1, core, request, params)
+                end
+            else
+                run_from (layers, index + 1, core, request, params)
+        end
+
+fun run
+    (layers : borrow (entry array)
+    , core : Handler.t
+    , request : Request.t
+    , params : (string * string) list
+    ) : Response.t =
+    run_from (layers, 0, core, request, params)

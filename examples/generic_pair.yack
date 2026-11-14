@@ -1,0 +1,8 @@
+datatype ('a, 'b) pair = Pair of 'a * 'b
+
+fun first (value : (int, bool) pair) : int =
+    case value of
+        Pair (left, _) => left
+
+fun main () =
+    print_int (first (Pair ((42, true))))

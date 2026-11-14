@@ -1,0 +1,20 @@
+import alpage/Ctx
+import alpage/Reply
+import alpage/Request
+
+type t : Copy = {
+    run : (Ctx.t, consume Request.t) -> Reply.t
+}
+
+fun make (run : (Ctx.t, consume Request.t) -> Reply.t) : t =
+    { run = run }
+
+(* Recopie un handler emprunté. Ses champs sont Copy (pointeur de fonction),
+   donc la copie ne duplique aucune ressource. *)
+fun copy (handler : borrow t) : t =
+    { run = handler.run }
+
+fun call (handler : t, ctx : Ctx.t, request : Request.t) : Reply.t =
+    let val run = handler.run
+    in run (ctx, request)
+    end

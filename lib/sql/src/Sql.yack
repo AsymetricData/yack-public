@@ -1,0 +1,11 @@
+(* Valeur de colonne. Les flottants et blobs sont rendus en texte pour rester
+indépendants du format binaire de l'adaptateur. *)
+datatype value =
+    Null
+  | Int of int
+  | Text of string
+
+(* Une ligne conserve l'ordre des colonnes. *)
+type row = (string, value) list
+
+type result = row list

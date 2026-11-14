@@ -1,0 +1,6 @@
+fun length_of (values : borrow (int array)) : int =
+    array_length_borrow (values)
+
+fun main () =
+    let val values : int array = array_make (1, 3)
+    in print_int (length_of (borrow values)) end

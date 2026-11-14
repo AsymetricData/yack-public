@@ -1,0 +1,2 @@
+fun ignore (value : unit) : unit = ()
+fun main () = ignore (())

@@ -1,0 +1,15 @@
+type holder : Affine = { name : string, table : string map }
+
+fun length_of (value : borrow string) : int =
+    string_length (value)
+
+fun main () =
+    let val h : holder = { name = "hello", table = map_new () }
+        val _ = map_set (h.table, "a", "1")
+        val _ = map_set (h.table, "bb", "2")
+        val name_len = length_of (borrow h.name)
+        val size = map_length (h.table)
+        val pair = ("yack", 41)
+        val tag = borrow pair.0
+    in print_int (name_len + size * 100 + string_length (tag))
+    end

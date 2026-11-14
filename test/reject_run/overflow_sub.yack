@@ -1,0 +1,4 @@
+fun subtract (x : int, y : int) : int = x - y
+
+fun main () =
+    print_int (subtract (0 - 2147483647 - 1, 1))

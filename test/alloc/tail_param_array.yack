@@ -1,0 +1,11 @@
+
+
+fun loop (n : int, values : int array) : int =
+    if n = 0 then array_length (values)
+    else
+        let val _ = array_push (values, n)
+        in loop (n - 1, values)
+        end
+
+fun main () =
+    print_int (loop (1000, array_make (0, 0)))

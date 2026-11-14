@@ -1,0 +1,11 @@
+type user : Affine = { name : string }
+
+
+
+fun bad_store (values : (borrow user) map, user : user) : unit =
+    let val borrowed = borrow user
+        val _ = map_set (values, "k", borrowed)
+    in ()
+    end
+
+fun main () = ()

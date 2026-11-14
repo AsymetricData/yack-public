@@ -1,0 +1,11 @@
+datatype cell = Cell of string
+
+fun make () : cell =
+    arena
+        val text = "a" ^ "b"
+    in Cell (text)
+    end
+
+fun main () =
+    case make () of
+        Cell text => print_string (text)

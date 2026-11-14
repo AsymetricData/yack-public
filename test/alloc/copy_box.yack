@@ -1,0 +1,5 @@
+datatype cell : Copy = Cell of int
+datatype box = Box of cell
+
+fun main () =
+    print_int (if option_is_some (Some (Box (Cell (42)))) then 1 else 0)

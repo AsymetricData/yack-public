@@ -1,0 +1,9 @@
+
+
+fun quotient (x : int, y : int) : int = x / y
+
+fun main () =
+    let val min = 0 - 2147483647 - 1
+        val negOne = 0 - 1
+    in print_int (quotient (min, negOne))
+    end

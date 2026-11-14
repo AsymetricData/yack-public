@@ -1,0 +1,5 @@
+fun add (x : int, y : int) : int =
+    x + y
+
+fun main () =
+    print_int (add (40, 2))

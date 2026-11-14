@@ -1,0 +1,16 @@
+# expect: drops `x` (%0) while its borrow %2 of `x` (%0) is live
+# `yack_choose` returns its first argument: the result keeps `x` borrowed.
+fun yack_choose {
+  b0(%0.a : &string, %1.b : &string):
+    return %0.a
+}
+fun yack_f {
+  b0(%0.x : string, %1.y : string):
+    %2 : &string = borrow &%0.x
+    %3 : &string = borrow &%1.y
+    %4.r : &string = call yack_choose %2, %3
+    drop %0.x : string
+    %5 : int = string.string_length %4.r
+    drop %1.y : string
+    return %5
+}

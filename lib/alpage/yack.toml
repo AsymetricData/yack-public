@@ -1,0 +1,9 @@
+[package]
+name = "alpage"
+version = "0.1.0"
+
+[dependencies]
+web = { path = "../web" }
+http_server = { path = "../http_server" }
+net = { path = "../net" }
+yack = { path = "../yack" }

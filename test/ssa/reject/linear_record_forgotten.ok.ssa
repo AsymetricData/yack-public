@@ -1,0 +1,7 @@
+# The same graph, accepted: the handle is passed to its consumer.
+fun yack_f {
+  b0(%0.h : linear { fd : int }):
+    %1.fd : int = view field 0 %0.h
+    %2 : unit = call yack_close move %0.h
+    return %1.fd
+}

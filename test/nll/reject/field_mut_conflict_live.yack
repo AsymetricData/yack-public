@@ -1,0 +1,17 @@
+
+
+type user : Affine = { name : string }
+
+fun touch (value : borrow mut string) : unit = ()
+
+fun bad (user : user) : unit =
+    let val exclusive = borrow mut user.name
+        val shared = borrow user.name
+        val _ = touch (exclusive)
+    in ()
+    end
+
+fun main () : unit =
+    let val user : user = { name = "a" }
+    in bad (user)
+    end

@@ -1,0 +1,44 @@
+
+
+
+
+
+
+
+
+
+
+
+
+type payload = { tags : string array, items : string list, label : string }
+
+fun make () : payload * int =
+    arena
+        val tags : string array = array_new ()
+        val _ = array_push (tags, "al" ^ "pha")
+        val _ = array_push (tags, "be" ^ "ta")
+        val head = "ga" ^ "mma"
+        val items = Cons ((head, Nil))
+        val label = "la" ^ "bel"
+    in ({ tags = tags, items = items, label = label }, 7)
+    end
+
+fun main () =
+    let val dispatched = make ()
+        val response = dispatched.1
+        val payload = dispatched.0
+        val _ = print_int (response)
+        val _ = arena
+                    val junk_a = "ZZZZZZZZZZ" ^ "ZZZZZZZZZZ"
+                    val junk_b = "YYYYYYYYYY" ^ "YYYYYYYYYY"
+                    val junk = (junk_a, junk_b)
+                in ()
+                end
+        val _ = print_string (payload.label)
+        val _ = print_string (string_copy (array_get_borrow (payload.tags, 0)))
+        val _ = print_string (string_copy (array_get_borrow (payload.tags, 1)))
+    in
+        case payload.items of
+            Cons (item, _) => print_string (item)
+        | Nil => print_string ("empty")
+    end

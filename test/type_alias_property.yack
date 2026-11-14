@@ -1,0 +1,7 @@
+type Ticket = token
+
+fun spend (ticket : Ticket) =
+    consume_token (ticket)
+
+fun main () =
+    spend (new_token ())

@@ -1,0 +1,8 @@
+type box = { value : int option, flag : bool }
+
+fun main () =
+    let val boxed = { value = Some (42), flag = true }
+    in case boxed.value of
+         None => print_bool (boxed.flag)
+       | Some x => print_int (x)
+    end

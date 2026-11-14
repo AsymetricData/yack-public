@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Yack: a small functional language with explicit memory</title>
+    <meta name="description" content="Yack is a small functional language inspired by SML: ownership, borrowing and lifetimes checked in the frontend, with native compilation through LLVM.">
+    <meta name="theme-color" content="#f7f5ef">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="site-header">
+        <a class="brand" href="#" aria-label="Yack, home">
+            <img src="favicon.svg" alt="" width="30" height="30">
+            <span>Yack</span>
+        </a>
+        <nav aria-label="Main navigation">
+            <a href="#language">Language</a>
+            <a href="#examples">Examples</a>
+            <a href="#memory">Memory</a>
+            <a href="#tools">Tools</a>
+            <a href="#cli">Commands</a>
+            <a href="#web">Web</a>
+            <a href="#status">Status</a>
+            <a href="ideas.html">Ideas</a>
+            <a href="alpage.html">Tutorial</a>
+            <a href="cli.html">CLI guide</a>
+        </nav>
+        <a class="header-link" href="https://github.com/AsymetricData/yack-public">GitHub <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="content">
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="hero-text">
+                <p class="eyebrow">v0.2.0: an experiment</p>
+                <h1 id="hero-title">A comfortable ML, <span class="accent">without a garbage collector.</span></h1>
+                <p class="lead">
+                    Yack is a small ML-family language, close to SML and OCaml: pleasant and
+                    simple to write, with little ceremony except what the types force.
+                    Affine and linear types, the ownership ideas borrowed from Rust, replace
+                    the garbage collector without Rust's syntactic weight. It compiles through
+                    LLVM to native binaries, with frees placed deterministically and ownership
+                    checked in the frontend.
+                </p>
+                <div class="actions">
+                    <a class="btn" href="#quick-start">Quick start</a>
+                    <a class="btn btn-ghost" href="alpage.html">Build a web API</a>
+                    <a class="btn btn-ghost" href="ideas.html">Why Yack</a>
+                </div>
+                <p class="meta">LLVM backend · Linux / POSIX · License to be determined</p>
+            </div>
+
+            <div class="code-card code-tabs" data-tabs aria-label="Yack source and generated LLVM IR">
+                <div class="code-head">
+                    <div class="tabs" role="tablist" aria-label="Code view">
+                        <button class="tab" id="tab-source" type="button" role="tab" aria-selected="true" aria-controls="panel-source" tabindex="0">fact.yack</button>
+                        <button class="tab" id="tab-ir" type="button" role="tab" aria-selected="false" aria-controls="panel-ir" tabindex="-1">LLVM IR</button>
+                    </div>
+                    <button class="copy" type="button" data-copy>Copy</button>
+                </div>
+
+                <div class="code-panel" id="panel-source" role="tabpanel" aria-labelledby="tab-source">
+                    <pre><code><span class="kw">fun</span> <span class="fn">fact</span> (n) =
+    <span class="kw">if</span> n = <span class="num">0</span> <span class="kw">then</span> <span class="num">1</span> <span class="kw">else</span> n * fact (n - <span class="num">1</span>)
+
+<span class="kw">fun</span> <span class="fn">main</span> () =
+    print_int (fact (<span class="num">5</span>))</code></pre>
+                    <div class="code-run">
+                        <span class="prompt" aria-hidden="true">$</span>
+                        <code>./yack build examples/fact.yack fact &amp;&amp; ./fact</code>
+                    </div>
+                    <div class="code-out"><span aria-hidden="true">→</span> <code>120</code></div>
+                </div>
+
+                <div class="code-panel" id="panel-ir" role="tabpanel" aria-labelledby="tab-ir" hidden>
+                    <pre><code><span class="dim">; excerpt: runtime declarations and branch weights omitted</span>
+<span class="kw">define</span> <span class="ty">void</span> <span class="fn">@yack_main</span>() {
+<span class="lbl">entry:</span>
+%call0 = <span class="kw">call</span> <span class="ty">i32</span> <span class="fn">@yack_fact</span>(<span class="ty">i32</span> <span class="num">5</span>)
+<span class="kw">call</span> <span class="ty">i32</span> (<span class="ty">ptr</span>, ...) <span class="fn">@printf</span>(<span class="ty">ptr</span> <span class="fn">@.fmt_int</span>, <span class="ty">i32</span> %call0)
+<span class="kw">ret</span> <span class="ty">void</span>
+}
+<span class="kw">define</span> <span class="ty">i32</span> <span class="fn">@yack_fact</span>(<span class="ty">i32</span> %arg0) {
+<span class="lbl">entry:</span>
+%slot5 = <span class="kw">alloca</span> <span class="ty">i32</span>
+%bin1 = <span class="kw">icmp</span> eq <span class="ty">i32</span> %arg0, <span class="num">0</span>
+<span class="kw">br</span> <span class="ty">i1</span> %bin1, <span class="kw">label</span> %if.then2, <span class="kw">label</span> %if.else3
+<span class="lbl">if.then2:</span>
+<span class="kw">store</span> <span class="ty">i32</span> <span class="num">1</span>, <span class="ty">ptr</span> %slot5
+<span class="kw">br</span> <span class="kw">label</span> %if.join4
+<span class="lbl">if.else3:</span>
+<span class="dim">; n - 1: overflow is a trap, not a wrap</span>
+%arith.ovf7 = <span class="kw">call</span> { <span class="ty">i32</span>, <span class="ty">i1</span> } <span class="fn">@llvm.ssub.with.overflow.i32</span>(<span class="ty">i32</span> %arg0, <span class="ty">i32</span> <span class="num">1</span>)
+%arith.value8 = <span class="kw">extractvalue</span> { <span class="ty">i32</span>, <span class="ty">i1</span> } %arith.ovf7, <span class="num">0</span>
+%arith.flag9 = <span class="kw">extractvalue</span> { <span class="ty">i32</span>, <span class="ty">i1</span> } %arith.ovf7, <span class="num">1</span>
+<span class="kw">br</span> <span class="ty">i1</span> %arith.flag9, <span class="kw">label</span> %arith.overflow10, <span class="kw">label</span> %arith.ok11
+<span class="lbl">arith.overflow10:</span>
+<span class="kw">call</span> <span class="ty">void</span> <span class="fn">@yack_abort_msg</span>(<span class="ty">ptr</span> <span class="fn">@.yack_msg_overflow</span>)
+<span class="kw">unreachable</span>
+<span class="lbl">arith.ok11:</span>
+%call12 = <span class="kw">call</span> <span class="ty">i32</span> <span class="fn">@yack_fact</span>(<span class="ty">i32</span> %arith.value8)
+%arith.ovf14 = <span class="kw">call</span> { <span class="ty">i32</span>, <span class="ty">i1</span> } <span class="fn">@llvm.smul.with.overflow.i32</span>(<span class="ty">i32</span> %arg0, <span class="ty">i32</span> %call12)
+%arith.value15 = <span class="kw">extractvalue</span> { <span class="ty">i32</span>, <span class="ty">i1</span> } %arith.ovf14, <span class="num">0</span>
+%arith.flag16 = <span class="kw">extractvalue</span> { <span class="ty">i32</span>, <span class="ty">i1</span> } %arith.ovf14, <span class="num">1</span>
+<span class="kw">br</span> <span class="ty">i1</span> %arith.flag16, <span class="kw">label</span> %arith.overflow17, <span class="kw">label</span> %arith.ok18
+<span class="lbl">arith.overflow17:</span>
+<span class="kw">call</span> <span class="ty">void</span> <span class="fn">@yack_abort_msg</span>(<span class="ty">ptr</span> <span class="fn">@.yack_msg_overflow</span>)
+<span class="kw">unreachable</span>
+<span class="lbl">arith.ok18:</span>
+<span class="kw">store</span> <span class="ty">i32</span> %arith.value15, <span class="ty">ptr</span> %slot5
+<span class="kw">br</span> <span class="kw">label</span> %if.join4
+<span class="lbl">if.join4:</span>
+%if19 = <span class="kw">load</span> <span class="ty">i32</span>, <span class="ty">ptr</span> %slot5
+<span class="kw">ret</span> <span class="ty">i32</span> %if19
+}
+
+<span class="kw">define</span> <span class="ty">i32</span> <span class="fn">@main</span>() {
+<span class="lbl">entry:</span>
+  <span class="kw">call</span> <span class="ty">void</span> <span class="fn">@yack_main</span>()
+  <span class="kw">ret</span> <span class="ty">i32</span> <span class="num">0</span>
+}</code></pre>
+                    <p class="code-note code-note-dark">
+                        Generated by <code>yack llvm examples/fact.yack</code>: functions,
+                        control flow, the native entry point, and the overflow trap that
+                        makes <code>+</code> and <code>*</code> abort instead of wrapping.
+                    </p>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="section" id="language" aria-labelledby="language-title">
+            <div class="section-head">
+                <p class="section-label">01. Language</p>
+                <h2 id="language-title">Small, typed, predictable.</h2>
+                <p>
+                    A deliberately narrow core: module-level functions, recursion,
+                    <code>case</code>, records, tuples and generic datatypes. No classes,
+                    no loops, no capturing closures.
+                </p>
+            </div>
+
+            <div class="features">
+                <article class="feature">
+                    <h3>Inferred types</h3>
+                    <p>
+                        Hindley-Milner, <code>'a</code> and <code>''a</code> generics,
+                        numeric constraints and monomorphisation at compile time.
+                    </p>
+                </article>
+                <article class="feature">
+                    <h3>Pattern matching</h3>
+                    <p>
+                        Nested <code>case</code>, guards, exhaustiveness checking, list
+                        and string patterns.
+                    </p>
+                </article>
+                <article class="feature">
+                    <h3>Modules and packages</h3>
+                    <p>
+                        Qualified, selective or aliased imports, with local dependencies
+                        described in a plain <code>yack.toml</code>.
+                    </p>
+                </article>
+                <article class="feature">
+                    <h3>Useful diagnostics</h3>
+                    <p>
+                        Stable codes, notes and suggestions. Errors explain the problem
+                        instead of only pointing at it.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section" id="examples" aria-labelledby="examples-title">
+            <div class="section-head">
+                <p class="section-label">02. Examples</p>
+                <h2 id="examples-title">Four small programs, one consistent model.</h2>
+                <p>
+                    Lists, modules, datatypes and diagnostics. Every example compiles
+                    with the same frontend, the same type checker and the same
+                    ownership rules. Ghost hints show inferred types: hover one, or
+                    the diagnostic underline, to see the language server response.
+                </p>
+            </div>
+
+            <div class="snippets">
+                <div class="snippet">
+                    <div class="code-card">
+                        <div class="code-head">
+                            <div class="code-status">
+                                <span class="file">sum.yack</span>
+                                <span class="lsp-pill">2 hints</span>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code><span class="kw">fun</span> <span class="fn">sum</span> (values : <span class="ty">int list</span>) : <span class="ty">int</span> =
+    <span class="kw">case</span> values <span class="kw">of</span>
+        [] =&gt; <span class="num">0</span>
+      | head<span class="inlay" data-inlay data-tip="Inferred type · int" tabindex="0"> : int</span> :: tail<span class="inlay" data-inlay data-tip="Inferred type · int list" tabindex="0"> : int list</span> =&gt; head + sum (tail)
+
+<span class="kw">fun</span> <span class="fn">main</span> () =
+    print_int (sum ([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]))</code></pre>
+                        <div class="code-out"><span aria-hidden="true">→</span> <code>6</code></div>
+                    </div>
+                    <p class="snippet-caption"><strong>Pattern matching.</strong> Lists, recursion and exhaustiveness.</p>
+                </div>
+
+                <div class="snippet">
+                    <div class="code-card">
+                        <div class="code-head">
+                            <div class="code-status">
+                                <span class="file">map.yack</span>
+                                <span class="lsp-pill">2 hints</span>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code><span class="kw">import</span> yack/list
+
+<span class="kw">fun</span> <span class="fn">double</span> (x : <span class="ty">int</span>) : <span class="ty">int</span> = x * <span class="num">2</span>
+
+<span class="kw">fun</span> <span class="fn">main</span> () =
+    <span class="kw">let</span> <span class="kw">val</span> values<span class="inlay" data-inlay data-tip="Inferred type · int list" tabindex="0"> : int list</span> = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]
+        <span class="kw">val</span> mapped<span class="inlay" data-inlay data-tip="Inferred type · int list" tabindex="0"> : int list</span> = list.map (double, values)
+    <span class="kw">in</span> print_int (list.length (mapped))
+    <span class="kw">end</span></code></pre>
+                        <div class="code-out"><span aria-hidden="true">→</span> <code>3</code></div>
+                    </div>
+                    <p class="snippet-caption"><strong>Modules.</strong> Higher-order functions, no captures.</p>
+                </div>
+
+                <div class="snippet">
+                    <div class="code-card">
+                        <div class="code-head">
+                            <div class="code-status">
+                                <span class="file">shape.yack</span>
+                                <span class="lsp-pill">2 hints</span>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code><span class="kw">datatype</span> shape =
+    Circle <span class="kw">of</span> <span class="ty">int</span>
+  | Square <span class="kw">of</span> <span class="ty">int</span>
+
+<span class="kw">fun</span> <span class="fn">area</span> (shape) =
+    <span class="kw">case</span> shape <span class="kw">of</span>
+        Circle (r<span class="inlay" data-inlay data-tip="Inferred type · int" tabindex="0"> : int</span>) =&gt; <span class="num">3</span> * r * r
+      | Square (side<span class="inlay" data-inlay data-tip="Inferred type · int" tabindex="0"> : int</span>) =&gt; side * side
+
+<span class="kw">fun</span> <span class="fn">main</span> () =
+    print_int (area (Square (<span class="num">4</span>)))</code></pre>
+                        <div class="code-out"><span aria-hidden="true">→</span> <code>16</code></div>
+                    </div>
+                    <p class="snippet-caption"><strong>Datatypes.</strong> Payloads, constructors and case analysis.</p>
+                </div>
+
+                <div class="snippet">
+                    <div class="code-card">
+                        <div class="code-head">
+                            <div class="code-status">
+                                <span class="file">move.yack</span>
+                                <span class="lsp-pill error">1 diagnostic</span>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code><span class="kw">type</span> user : Affine = { name : <span class="ty">string</span> }
+
+<span class="kw">fun</span> <span class="fn">main</span> () =
+    <span class="kw">let</span> <span class="kw">val</span> user : user = { name = <span class="str">"ada"</span> }
+        <span class="kw">val</span> moved = user<span class="inlay" data-inlay data-tip="Inferred type · user" tabindex="0"> : user</span>
+        <span class="kw">val</span> name = <span class="diag-target" data-tip="E0402 · used after move&#10;user.name no longer owns this value: it was moved out earlier.&#10;Hint: move this use before the transfer, or use another field.">user.name</span>
+    <span class="kw">in</span> print_string (name)
+    <span class="kw">end</span></code></pre>
+                        <div class="diagnostic">
+                            <span class="diag-code">E0402</span>
+                            <span class="diag-msg">value <code>user.name</code> is used after being moved</span>
+                            <span class="diag-note">note: move this use before the transfer</span>
+                        </div>
+                    </div>
+                    <p class="snippet-caption"><strong>Diagnostics.</strong> Stable codes, notes and repair hints.</p>
+                </div>
+            </div>
+
+            <p class="section-link">
+                <a class="text-link" href="cli.html">Command-line tools: a small ls, cat and wc <span aria-hidden="true">→</span></a>
+            </p>
+        </section>
+
+        <section class="section memory" id="memory" aria-labelledby="memory-title">
+            <div class="section-head">
+                <p class="section-label">03. Memory</p>
+                <h2 id="memory-title">Memory is part of the type.</h2>
+                <p>
+                    Every value declares <code>Copy</code>, <code>Affine</code> or
+                    <code>Linear</code>. The compiler tracks moves and borrows, then
+                    places <code>free</code> after the last owner.
+                </p>
+            </div>
+
+            <div class="memory-grid">
+                <div class="code-card code-card-light">
+                    <div class="code-head">
+                        <span class="file">render.yack</span>
+                        <button class="copy" type="button" data-copy>Copy</button>
+                    </div>
+                    <pre><code><span class="kw">fun</span> <span class="fn">render</span> (request : string) : string =
+    <span class="kw">arena</span>
+        <span class="kw">val</span> path = string_slice (<span class="kw">borrow</span> request, <span class="num">0</span>, <span class="num">8</span>)
+        <span class="kw">val</span> body = <span class="str">"hello "</span> ^ path
+    <span class="kw">in</span>
+        body
+    <span class="kw">end</span></code></pre>
+                    <p class="code-note">
+                        At <code>end</code>, the block's temporaries are released at once.
+                        A temporary value cannot escape the block.
+                    </p>
+                </div>
+
+                <div class="memory-copy">
+                    <ul class="plain-list">
+                        <li>
+                            <strong>No GC.</strong> Ownership and lifetimes replace the
+                            collector. Frees stay deterministic, and the declarations the model
+                            adds are the ceremony the types force.
+                        </li>
+                        <li>
+                            <strong>Checked borrows.</strong> Shared or mutable, with
+                            explicit provenance and reported conflicts.
+                        </li>
+                        <li>
+                            <strong>Temporary arenas.</strong> For request-scoped memory,
+                            without changing the language model.
+                        </li>
+                        <li>
+                            <strong>Proved twice.</strong> After lowering, every function is
+                            rebuilt as an SSA graph and ownership is checked again on every
+                            path: each owned value is freed exactly once, never used after.
+                        </li>
+                        <li>
+                            <strong>Free pass-through.</strong> The graph knows the last use:
+                            <code>a ^ b ^ c</code> chains fuse, and an accumulator grows in
+                            place instead of being copied.
+                        </li>
+                        <li>
+                            <strong>Failures are loud.</strong> An allocation that cannot be served
+                            aborts with <code>[yack] out of memory</code>, integer overflow aborts
+                            instead of wrapping, and a thread that cannot be created is reported.
+                            No silent null pointer.
+                        </li>
+                    </ul>
+                    <p class="memory-foot">
+                        <code>yack arena</code>, <code>yack alloc-map</code> and
+                        <code>--trace-alloc</code> show what is allocated, freed or kept.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="tools" aria-labelledby="tools-title">
+            <div class="section-head">
+                <p class="section-label">04. Tools</p>
+                <h2 id="tools-title">One binary, from source to native.</h2>
+            </div>
+
+            <div class="tools">
+                <article class="tool">
+                    <code>yack new</code>
+                    <p>Scaffolds a project from a template: hello, cli, web or tui.</p>
+                </article>
+                <article class="tool">
+                    <code>yack check</code>
+                    <p>Lex, parse, resolution, types and ownership. Silent when everything is fine.</p>
+                </article>
+                <article class="tool">
+                    <code>yack fmt</code>
+                    <p>Deterministic, idempotent formatter, usable in your editor or in CI.</p>
+                </article>
+                <article class="tool">
+                    <code>yack build</code>
+                    <p>Typed IR, LLVM, clang. A native executable as output.</p>
+                </article>
+                <article class="tool">
+                    <code>yack run</code>
+                    <p>Builds and runs the project entry, or a single file.</p>
+                </article>
+                <article class="tool">
+                    <code>yack lsp</code>
+                    <p>Diagnostics, inlay hints, completion, hover and quick fixes; go to definition, references and rename across files; semantic tokens, signature help, call hierarchy and formatting. Native, no Node required.</p>
+                </article>
+            </div>
+
+            <p class="section-link">
+                <a class="text-link" href="cli.html">Argument parsing, colours and a tiny TUI in the standard library <span aria-hidden="true">→</span></a>
+            </p>
+        </section>
+
+        <section class="section" id="cli" aria-labelledby="cli-title">
+            <div class="section-head">
+                <p class="section-label">05. Command line</p>
+                <h2 id="cli-title">One command, a project that runs.</h2>
+                <p>
+                    Real output from the binary, not a mockup. Scaffold a project, check
+                    it, format it, build it: no package manager, no hand-written config.
+                </p>
+            </div>
+
+            <div class="code-card code-tabs" data-tabs>
+                <div class="code-head">
+                    <div class="tabs" role="tablist" aria-label="Command-line demo">
+                        <button class="tab" id="tab-new" type="button" role="tab" aria-selected="true" aria-controls="panel-new" tabindex="0">yack new</button>
+                        <button class="tab" id="tab-menu" type="button" role="tab" aria-selected="false" aria-controls="panel-menu" tabindex="-1">template menu</button>
+                        <button class="tab" id="tab-check" type="button" role="tab" aria-selected="false" aria-controls="panel-check" tabindex="-1">yack check</button>
+                        <button class="tab" id="tab-fmt" type="button" role="tab" aria-selected="false" aria-controls="panel-fmt" tabindex="-1">yack fmt</button>
+                        <button class="tab" id="tab-build" type="button" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1">yack build</button>
+                    </div>
+                    <button class="copy" type="button" data-copy>Copy</button>
+                </div>
+
+                <div class="code-panel" id="panel-new" role="tabpanel" aria-labelledby="tab-new">
+                    <pre><code><span class="term-cmd">$ yack new hermes --template cli</span>
+
+  ╭─ yack new ───────────────────────────────────────────╮
+  │ Create a new Yack project.                           │
+  ╰──────────────────────────────────────────────────────╯
+
+<span class="term-ok">  ✔ Created hermes/</span>
+<span class="term-ok">  ✔ Wrote yack.toml</span>
+<span class="term-ok">  ✔ Wrote src/main.yack</span>
+<span class="term-ok">  ✔ Wrote README.md</span>
+<span class="term-ok">  ✔ Wrote .gitignore</span>
+
+  ╭─ hermes  -  cli ─────────────────────────────────────╮
+  │  yack.toml                                           │
+  │  src/main.yack                                       │
+  │  README.md                                           │
+  │  .gitignore                                          │
+  ╰──────────────────────────────────────────────────────╯
+
+  Next steps
+    ❯ cd hermes
+    ❯ yack run
+    ❯ yack build src/main.yack app &amp;&amp; ./app --name Ada
+
+  Happy yacking !</code></pre>
+                    <p class="code-note code-note-dark">
+                        <code>--template</code> (or <code>-t</code>) picks a starting point:
+                        <code>hello</code>, <code>cli</code>, <code>web</code> (an Alpage
+                        server on port 8080) or <code>tui</code>. The manifest points at the
+                        libraries in the source tree, so the project builds from any
+                        directory.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-menu" role="tabpanel" aria-labelledby="tab-menu" hidden>
+                    <pre><code><span class="term-cmd">$ yack new hermes</span>
+
+  ╭─ template ───────────────────────────────────────────╮
+  │  Pick a starting point.                              │
+  │                                                      │
+  │  ❯ 1. hello  minimal program                         │
+  │    2. cli  command-line app                          │
+  │    3. web  Alpage HTTP server                        │
+  │    4. tui  terminal UI                               │
+  ╰──────────────────────────────────────────────────────╯
+
+  Template (1)
+  ❯</code></pre>
+                    <p class="code-note code-note-dark">
+                        On a TTY, the same list appears as a numbered menu when
+                        <code>--template</code> is omitted. The name comes first, then the
+                        template, with <code>hello</code> as the default.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-check" role="tabpanel" aria-labelledby="tab-check" hidden>
+                    <pre><code><span class="term-cmd">$ yack check src/main.yack</span>
+<span class="term-cmd">$ echo $?</span>
+0
+
+<span class="term-cmd">$ yack check broken.yack</span>
+<span class="term-err">error[E0402]: value `user` is used after being moved</span>
+  --&gt; broken.yack:4:22
+  |
+ 4 |     in print_string (user)
+  |                      ^^^^
+   = note: the value was already transferred to another owner
+   = hint: move the use before the transfer, or copy the value if its type is Copy
+<span class="term-cmd">$ echo $?</span>
+1</code></pre>
+                    <p class="code-note code-note-dark">
+                        Silent and exit status <code>0</code> when everything is fine. An
+                        error carries a stable code, the span, a note and a repair hint.
+                        <code>yack lsp</code> publishes the same diagnostics in your editor.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-fmt" role="tabpanel" aria-labelledby="tab-fmt" hidden>
+                    <pre><code><span class="term-cmd">$ cat ugly.yack</span>
+fun main () = let val xs = [1,2,3]
+  in print_int (list_length (xs))
+  end
+
+<span class="term-cmd">$ yack fmt ugly.yack</span>
+fun main () =
+    let val xs = [1, 2, 3]
+    in
+        print_int (list_length (xs))
+    end
+
+<span class="term-cmd">$ yack fmt --check ugly.yack</span>
+ugly.yack: not formatted
+<span class="term-cmd">$ echo $?</span>
+1</code></pre>
+                    <p class="code-note code-note-dark">
+                        <code>yack fmt</code> prints the canonical form of a file or of
+                        standard input. <code>--write</code> rewrites in place and
+                        <code>--check</code> exits <code>1</code> on a stale file, so CI can
+                        gate it. The formatter is idempotent.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
+                    <pre><code><span class="term-cmd">$ yack build src/main.yack app</span>
+<span class="term-ok">  ✔ Checked src/main.yack                 14ms</span>
+<span class="term-ok">  ✔ Lowered to typed IR                   11ms</span>
+<span class="term-ok">  ✔ Wrote app.ll                          5ms</span>
+<span class="term-ok">  ✔ Binary                                127.5 KiB (130,584 bytes) at app</span>
+
+<span class="term-cmd">$ ./app --name Ada</span>
+Hello from Ada !</code></pre>
+                    <p class="code-note code-note-dark">
+                        <code>yack build</code> checks, lowers to typed IR, writes LLVM IR and
+                        calls <code>clang</code>; timings vary by machine. On a TTY the steps
+                        animate, and <code>YACK_PROGRESS=0</code> keeps them quiet. This
+                        project is the scaffold with its usage and exit handling; the
+                        smaller binary in the table below is the bare comparison program.
+                    </p>
+                </div>
+            </div>
+
+            <div class="sub-head">
+                <h3>Same program, four languages</h3>
+                <p>
+                    Same contract in each: an optional <code>--name</code> value, default
+                    <code>Yack</code>, one greeting, and a usage error on an unknown flag.
+                    Each uses its language's idiomatic parser. <code>flag</code> and
+                    <code>clap</code> print that error and exit inside the parser; Yack
+                    hands it back as a value, so its branch is visible in the source.
+                </p>
+            </div>
+
+            <div class="code-card code-tabs" data-tabs>
+                <div class="code-head">
+                    <div class="tabs" role="tablist" aria-label="Same program in four languages">
+                        <button class="tab" id="tab-cli-yack" type="button" role="tab" aria-selected="true" aria-controls="panel-cli-yack" tabindex="0">Yack</button>
+                        <button class="tab" id="tab-cli-go" type="button" role="tab" aria-selected="false" aria-controls="panel-cli-go" tabindex="-1">Go</button>
+                        <button class="tab" id="tab-cli-ts" type="button" role="tab" aria-selected="false" aria-controls="panel-cli-ts" tabindex="-1">TypeScript</button>
+                        <button class="tab" id="tab-cli-rust" type="button" role="tab" aria-selected="false" aria-controls="panel-cli-rust" tabindex="-1">Rust</button>
+                    </div>
+                    <button class="copy" type="button" data-copy>Copy</button>
+                </div>
+
+                <div class="code-panel" id="panel-cli-yack" role="tabpanel" aria-labelledby="tab-cli-yack">
+                    <pre><code data-lang="yack" data-from="bench/cli_size/main.yack">import yack/args
+import yack/io
+import yack/option
+import yack/os
+
+(* A CLI: `app --name Ada` prints a greeting. *)
+fun main () =
+    case args.parse (
+        [args.Opt ((&quot;name&quot;, None, &quot;who to greet&quot;, Some (&quot;Yack&quot;)))],
+        os.command_args ()
+    ) of
+        Error message =&gt; io.eprint_line (borrow message)
+      | Ok parsed =&gt;
+          let val name = args.get_option (parsed, &quot;name&quot;) |&gt; option.unwrap_or (&quot;Yack&quot;)
+              val line = &quot;Hello from &quot; ^ name ^ &quot; !&quot;
+          in
+              io.print_line (borrow line)
+          end</code></pre>
+                    <p class="code-note code-note-dark">
+                        The option is a declared <code>args.spec</code>: the flag name,
+                        its help text and its default live in one value, and usage is
+                        generated from it. A bad flag is an <code>Error</code> value, not
+                        an exception, and <code>option.unwrap_or</code> owns the default.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-cli-go" role="tabpanel" aria-labelledby="tab-cli-go" hidden>
+                    <pre><code data-lang="go" data-from="bench/cli_size/main.go">package main
+
+import (
+	&quot;flag&quot;
+	&quot;fmt&quot;
+)
+
+func main() {
+	name := flag.String(&quot;name&quot;, &quot;Yack&quot;, &quot;who to greet&quot;)
+	flag.Parse()
+	fmt.Println(&quot;Hello from &quot; + *name + &quot; !&quot;)
+}</code></pre>
+                    <p class="code-note code-note-dark">
+                        Go's <code>flag</code> does the same job with the standard
+                        library; memory is a garbage collector's problem rather than part
+                        of the type.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-cli-ts" role="tabpanel" aria-labelledby="tab-cli-ts" hidden>
+                    <pre><code data-lang="ts" data-from="bench/cli_size/main.ts">const args: string[] = process.argv.slice(2)
+const index: number = args.indexOf(&quot;--name&quot;)
+const name: string = index === -1 ? &quot;Yack&quot; : args[index + 1]
+console.log(`Hello from ${name} !`)</code></pre>
+                    <p class="code-note code-note-dark">
+                        Shortest to write, but the program is a script: it needs a runtime
+                        (Node or Bun) on the machine that runs it.
+                    </p>
+                </div>
+
+                <div class="code-panel" id="panel-cli-rust" role="tabpanel" aria-labelledby="tab-cli-rust" hidden>
+                    <pre><code data-lang="rust" data-from="bench/cli_size/main.rs">use clap::Parser;
+
+/// A CLI: `app --name Ada` prints a greeting.
+#[derive(Parser)]
+#[command(name = &quot;app&quot;)]
+struct Args {
+    /// who to greet
+    #[arg(long, default_value = &quot;Yack&quot;)]
+    name: String,
+}
+
+fn main() {
+    let args = Args::parse();
+    println!(&quot;Hello from {} !&quot;, args.name);
+}</code></pre>
+                    <p class="code-note code-note-dark">
+                        <code>clap</code> with derive: the struct is the spec, the same
+                        shape as <code>args.spec</code>. Ownership is checked like in Yack;
+                        the binary carries <code>clap</code> with it.
+                    </p>
+                </div>
+            </div>
+
+            <div class="sub-head">
+                <h3>What it costs on disk</h3>
+                <p>
+                    The same program built by each toolchain, on Linux x86-64.
+                    <code>bench/cli_size/run.sh</code> reproduces the table and runs every
+                    binary to check it prints the same greeting.
+                </p>
+            </div>
+
+            <div class="table-scroll">
+            <table class="compare">
+                <thead>
+                    <tr>
+                        <th>Build</th>
+                        <th class="size-number">Bytes</th>
+                        <th class="size-number">vs Yack</th>
+                        <th>Needs at run time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>yack build</code></td>
+                        <td class="size-number">130,280 <span class="unit">127.2 KiB</span></td>
+                        <td class="size-number">1.0×</td>
+                        <td>libc, libm, libsqlite3</td>
+                    </tr>
+                    <tr>
+                        <td><code>yack build --trim</code></td>
+                        <td class="size-number">92,680 <span class="unit">90.5 KiB</span></td>
+                        <td class="size-number">0.7×</td>
+                        <td>libc, libm, libsqlite3</td>
+                    </tr>
+                    <tr>
+                        <td><code>go build</code></td>
+                        <td class="size-number">2,471,820 <span class="unit">2.36 MiB</span></td>
+                        <td class="size-number">19.0×</td>
+                        <td>nothing, static</td>
+                    </tr>
+                    <tr>
+                        <td><code>go build -ldflags="-s -w"</code></td>
+                        <td class="size-number">1,589,408 <span class="unit">1.52 MiB</span></td>
+                        <td class="size-number">12.2×</td>
+                        <td>nothing, static</td>
+                    </tr>
+                    <tr>
+                        <td><code>cargo build --release</code> (<code>clap</code>)</td>
+                        <td class="size-number">1,042,640 <span class="unit">1018.2 KiB</span></td>
+                        <td class="size-number">8.0×</td>
+                        <td>libc, libgcc_s</td>
+                    </tr>
+                    <tr>
+                        <td><code>cargo build --release</code> + <code>strip</code></td>
+                        <td class="size-number">800,128 <span class="unit">781.4 KiB</span></td>
+                        <td class="size-number">6.1×</td>
+                        <td>libc, libgcc_s</td>
+                    </tr>
+                    <tr>
+                        <td>TypeScript script</td>
+                        <td class="size-number">187</td>
+                        <td class="size-number">n/a</td>
+                        <td>Node 24, 121 MiB</td>
+                    </tr>
+                </tbody>
+            </table>
+            </div>
+            <p class="size-note">
+                Every native build is a single file. Yack loads <code>libsqlite3.so</code>
+                from the system because the runtime exposes SQLite; a Go binary embeds its
+                own runtime and libc, and Rust's <code>clap</code> is compiled in.
+                <code>--trim</code> compiles with <code>-Os</code>, drops unused sections and
+                strips symbols. Sizes are <code>wc -c</code> on the produced file, with no
+                post-build stripping beyond the flags shown.
+            </p>
+
+            <p class="section-link">
+                <a class="text-link" href="cli.html">The same tools behind a real <code>ls</code>, <code>cat</code> and <code>wc</code> <span aria-hidden="true">→</span></a>
+            </p>
+        </section>
+
+        <section class="section web" id="web" aria-labelledby="web-title">
+            <div class="section-head">
+                <p class="section-label">06. Web</p>
+                <h2 id="web-title">An HTTP API is a value.</h2>
+                <p>
+                    Alpage is the web framework written in Yack. Handlers are plain
+                    functions, the request is moved into them, errors are values,
+                    and the whole application can be tested without a socket.
+                </p>
+            </div>
+
+            <div class="memory-grid">
+                <div class="code-card code-card-light">
+                    <div class="code-head">
+                        <span class="file">src/Api.yack</span>
+                        <button class="copy" type="button" data-copy>Copy</button>
+                    </div>
+                    <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun application () : Alpage.t =
+    Alpage.new ()
+    |&gt; Alpage.get ("/", home)
+    |&gt; Alpage.get ("/hello", hello)
+    |&gt; Alpage.get ("/greet", greet)
+    |&gt; Alpage.get ("/square/:n", square)
+    |&gt; Alpage.post ("/sum", sum)
+    |&gt; Alpage.get ("/admin", admin)
+    |&gt; Alpage.with (Alpage.log ())
+    |&gt; Alpage.with (Middleware.before (require_token))
+    |&gt; Alpage.with (Middleware.security_headers ())</code></pre>
+                </div>
+
+                <div class="memory-copy">
+                    <ul class="plain-list">
+                        <li>
+                            <strong>Coming from Go, TypeScript or Gleam?</strong> The
+                            tutorial puts each step next to the code you already write.
+                        </li>
+                        <li>
+                            <strong>No hidden owner.</strong> Reading a request twice is a
+                            compile error, not a bug found at run time.
+                        </li>
+                        <li>
+                            <strong>Tested in process.</strong> The same value runs on the
+                            server and in the test client.
+                        </li>
+                        <li>
+                            <strong>Stops cleanly.</strong> The HTTP server catches
+                            <code>SIGINT</code> and <code>SIGTERM</code>, closes the listener and
+                            every connection, and returns <code>Ok ()</code>.
+                        </li>
+                    </ul>
+                    <p class="memory-foot">
+                        <a class="text-link" href="alpage.html">Start the Alpage tutorial <span aria-hidden="true">→</span></a>
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section state" id="status" aria-labelledby="status-title">
+            <div class="state-intro">
+                <p class="section-label">07. Status</p>
+                <h2 id="status-title">An experiment, tested seriously.</h2>
+                <p>
+                    Yack is an experiment first: a comfortable ML-family language, with
+                    ownership checked in the frontend, carried through to native code, a web
+                    framework and a language server. What is in place is tested under
+                    AddressSanitizer, ThreadSanitizer and fuzzing; the rest is labelled as
+                    such.
+                </p>
+                <a class="text-link" href="https://github.com/AsymetricData/yack-public#état-du-projet">Full status table <span aria-hidden="true">↗</span></a>
+            </div>
+
+            <div class="status" role="table" aria-label="Feature status">
+                <div class="status-row" role="row">
+                    <span role="cell">Frontend, types, modules</span>
+                    <span class="tag stable" role="cell"><i aria-hidden="true"></i> Stable</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">Ownership, moves, borrows</span>
+                    <span class="tag stable" role="cell"><i aria-hidden="true"></i> Stable</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">Ownership re-proved on the SSA graph</span>
+                    <span class="tag stable" role="cell"><i aria-hidden="true"></i> Stable</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">LLVM, native executables</span>
+                    <span class="tag stable" role="cell"><i aria-hidden="true"></i> Stable</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">LSP, formatter, packages</span>
+                    <span class="tag stable" role="cell"><i aria-hidden="true"></i> Stable</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">Heap-free memory mode</span>
+                    <span class="tag experimental" role="cell"><i aria-hidden="true"></i> Experimental</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">Alpage web framework</span>
+                    <span class="tag experimental" role="cell"><i aria-hidden="true"></i> Experimental</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">HTTP server (epoll, clean shutdown)</span>
+                    <span class="tag experimental" role="cell"><i aria-hidden="true"></i> Experimental</span>
+                </div>
+                <div class="status-row" role="row">
+                    <span role="cell">Capturing closures</span>
+                    <span class="tag absent" role="cell"><i aria-hidden="true"></i> Out of scope</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="section start" id="quick-start" aria-labelledby="quick-start-title">
+            <div class="section-head">
+                <p class="section-label">08. Quick start</p>
+                <h2 id="quick-start-title">Three commands are enough.</h2>
+                <p>MLton for the compiler, clang for native output. Node or Bun only for tests.</p>
+            </div>
+
+            <div class="code-card code-card-wide">
+                <div class="code-head">
+                    <span class="file">terminal</span>
+                    <button class="copy" type="button" data-copy>Copy</button>
+                </div>
+                <pre><code><span class="dim"># build the compiler</span>
+make
+
+<span class="dim"># a minimal program, or a starting point:</span>
+./yack new hello
+./yack new hermes --template cli   <span class="dim"># hello | cli | web | tui</span>
+<span class="kw">cd</span> hermes
+../yack run</code></pre>
+            </div>
+
+            <div class="docs">
+                <a href="https://github.com/AsymetricData/yack-public#readme">
+                    <strong>README</strong>
+                    <span>Installation, CLI and overview</span>
+                </a>
+                <a href="https://github.com/AsymetricData/yack-public/tree/main/tutorial">
+                    <strong>Language tutorial</strong>
+                    <span>Learn Yack by example</span>
+                </a>
+                <a href="alpage.html">
+                    <strong>Alpage tutorial</strong>
+                    <span>A tested web API, step by step</span>
+                </a>
+                <a href="https://github.com/AsymetricData/yack-public/blob/main/docs/stdlib.md">
+                    <strong>Standard library</strong>
+                    <span>23 modules, from lists to JSON and TUI</span>
+                </a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-brand">
+            <img src="favicon.svg" alt="" width="26" height="26">
+            <p>Yack: an experimental functional language.<br>No license defined yet.</p>
+        </div>
+        <nav aria-label="Footer links">
+            <a href="https://github.com/AsymetricData/yack-public">GitHub</a>
+        </nav>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

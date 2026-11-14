@@ -1,0 +1,19 @@
+import yack/string
+
+
+
+
+fun pick_b (a : borrow string, b : borrow string) : borrow string from b = b
+
+fun outer (r : borrow string, s : string) : int =
+    string_length (r) + string_length (borrow s)
+
+fun nested (x : string, y : string) : int =
+    outer (pick_b (borrow x, borrow y), x)
+
+fun main () : unit =
+    let val x = string_copy (borrow "abc")
+        val y = string_copy (borrow "de")
+        val n = nested (x, y)
+    in print_int (n)
+    end

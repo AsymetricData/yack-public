@@ -1,0 +1,10 @@
+import yack/string
+
+
+
+fun main () : unit =
+    let val names : int map = map_new ()
+        val value = map_get_borrow (names, "a")
+        val _ = map_set (names, "b", 1)
+    in ()
+    end

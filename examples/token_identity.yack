@@ -1,0 +1,7 @@
+fun identity (token : token) : token =
+    token
+
+fun main () =
+    let val token = new_token ()
+    in consume_token (identity (token))
+    end

@@ -1,0 +1,82 @@
+import sql/Pool
+import sql/Sql
+import sql/Sqlite
+
+fun count_value (rows : Sql.result) : int =
+    case rows of
+        Nil => 0
+      | Cons (row, _) =>
+            (case row of
+                 Nil => 0
+               | Cons ((_, value), _) =>
+                     case value of
+                         Sql.Int number => number
+                       | _ => 0)
+
+fun reader_worker (handle : int64) : unit =
+    let val result = Sqlite.query_handle (handle, "select count(*) from payload;")
+        val count =
+            case result of
+                Error _ => -1
+              | Ok rows => count_value (rows)
+    in
+        print_string ("reader " ^ int_to_string (count))
+    end
+
+fun insert_rows (pool : Pool.pool, index : int, limit : int) : Pool.pool =
+    if index >= limit then pool
+    else
+        let val id = int_to_string (index)
+            val value = int_to_string (index * 2)
+            val sql =
+                "insert into payload(id, value) values (" ^ id ^ ", " ^
+                value ^ ");"
+            val (result, pool) = Pool.exec_writer (pool, sql)
+        in
+            case result of
+                Error message =>
+                    let val _ = print_string (message)
+                    in pool
+                    end
+              | Ok _ => insert_rows (pool, index + 1, limit)
+        end
+
+fun run_readers (pool : Pool.pool, remaining : int) : Pool.pool =
+    if remaining <= 0 then pool
+    else
+        case Pool.acquire_reader (pool) of
+            (None, pool) =>
+                let val _ = print_string ("no reader left")
+                in pool
+                end
+          | (Some reader, pool) =>
+                let val thread =
+                        sys.thread_spawn (reader_worker, Pool.reader_handle (borrow reader))
+                    val pool = run_readers (pool, remaining - 1)
+                    val _ = sys.thread_join (thread)
+                in
+                    Pool.release_reader (pool, reader)
+                end
+
+fun main () =
+    let val path = "/tmp/yack-sqlite-pool-threads.db"
+    in
+        case Pool.open (path, 10) of
+            Error message => print_string (message)
+          | Ok pool =>
+                let val (dropped, pool) =
+                        Pool.exec_writer (pool, "drop table if exists payload;")
+                    val (created, pool) =
+                        Pool.exec_writer (
+                            pool,
+                            "create table payload(id integer primary key, value integer);"
+                        )
+                    val pool = insert_rows (pool, 0, 1000)
+                    val pool = run_readers (pool, 10)
+                    val _ = Pool.close (pool)
+                    val _ = dropped
+                    val _ = created
+                in
+                    print_string ("done")
+                end
+    end

@@ -1,0 +1,17 @@
+
+
+fun pick (flag : bool, left : string, right : string) : string =
+    if flag then
+        let val _ = string_length (borrow right) in left end
+    else right
+
+fun classify (n : int, label : string) : int =
+    case n of
+        0 => string_length (borrow label)
+      | m if m > 10 => m
+      | _ => 1
+
+fun main () =
+    let val s = pick (true, "a" ^ "1", "b" ^ "2")
+        val _ = print_int (classify (3, "zz"))
+    in print_string (s) end

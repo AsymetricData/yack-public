@@ -1,0 +1,10 @@
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), 10)
+        val values = array.push (values, 20)
+        val values = array.push (values, 30)
+        val index = array.index_of_int (borrow values, 20)
+        val found = if array.contains_int (borrow values, 40) then 1 else 0
+    in print_int (index + found)
+    end

@@ -1,0 +1,17 @@
+type request : Affine = { name : string }
+
+type handler : Copy = { run : (consume request, int) -> int }
+
+fun pick (request : consume request, value : int) : int =
+    value
+
+fun call (handler : handler, request : request, value : int) : int =
+    let val run = handler.run
+    in run (request, value)
+    end
+
+fun main () =
+    let val handler = { run = pick }
+        val request = { name = "x" }
+    in print_int (call (handler, request, 42))
+    end

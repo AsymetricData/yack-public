@@ -1,0 +1,10 @@
+fun first (values : borrow (int array)) : int =
+    array_get_copy_borrow (values, 0)
+
+fun main () =
+    let val values : int array = array_make (7, 3)
+        val n = first (borrow values)
+        val _ = array_set (values, 0, 1)
+    in
+        print_int (n + 1)
+    end

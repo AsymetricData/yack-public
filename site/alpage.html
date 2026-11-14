@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Alpage tutorial: a web API in Yack, for Go, TypeScript and Gleam developers</title>
+    <meta name="description" content="Build a small JSON API with Alpage, the Yack web framework, step by step. Written for developers coming from Go, TypeScript or Gleam: ownership, errors as values, middlewares and in-memory tests.">
+    <meta name="theme-color" content="#f7f5ef">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="Yack, home">
+            <img src="favicon.svg" alt="" width="30" height="30">
+            <span>Yack</span>
+        </a>
+        <nav aria-label="Main navigation">
+            <a href="index.html#language">Language</a>
+            <a href="index.html#memory">Memory</a>
+            <a href="cli.html">CLI guide</a>
+            <a href="ideas.html">Ideas</a>
+            <a href="alpage.html" aria-current="page">Alpage tutorial</a>
+            <a href="index.html#quick-start">Quick start</a>
+        </nav>
+        <a class="header-link" href="https://github.com/AsymetricData/yack-public">GitHub <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="content">
+        <div class="tut-hero">
+            <p class="eyebrow">Tutorial · about 30 minutes</p>
+            <h1>A web API with Alpage, <span class="accent">step by step.</span></h1>
+            <p class="lead">
+                Build a small JSON service: routes, query and path parameters, a JSON body,
+                an auth middleware and in-memory tests. Each step shows what you would write
+                in your current language, then the Yack version and why it differs.
+            </p>
+            <ul class="from-langs" aria-label="Written for developers coming from">
+                <li>coming from <strong>Go</strong></li>
+                <li><strong>TypeScript</strong> / Node</li>
+                <li><strong>Gleam</strong></li>
+            </ul>
+        </div>
+
+        <div class="tut-layout">
+            <nav class="toc" aria-label="Tutorial steps">
+                <p>Steps</p>
+                <ol>
+                    <li><a href="#mindset">Change of habits</a></li>
+                    <li><a href="#setup">A project</a></li>
+                    <li><a href="#handler">First handler</a></li>
+                    <li><a href="#ownership">Query string and ownership</a></li>
+                    <li><a href="#params">Path parameters, without closures</a></li>
+                    <li><a href="#json">JSON body, errors as values</a></li>
+                    <li><a href="#app">The application is a value</a></li>
+                    <li><a href="#middleware">Middleware</a></li>
+                    <li><a href="#testing">Testing without a socket</a></li>
+                    <li><a href="#ship">Check, build, run</a></li>
+                    <li><a href="#cheatsheet">Cheat sheet</a></li>
+                </ol>
+            </nav>
+
+            <div class="tut-body">
+                <section class="step" id="mindset" aria-labelledby="mindset-title">
+                    <span class="step-num">Step 01</span>
+                    <h2 id="mindset-title">Change of habits</h2>
+                    <p>
+                        Alpage is a small web framework written in Yack. If you have written a
+                        handler in Go, Express or Wisp, nothing here is exotic: routes, handlers,
+                        middlewares, JSON. Four things differ, and the compiler holds you to them.
+                    </p>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th></th><th>Go</th><th>TypeScript</th><th>Gleam</th><th>Yack</th></tr></thead>
+                        <tbody>
+                            <tr><td>Memory</td><td>GC</td><td>GC</td><td>GC (BEAM)</td><td>ownership, frees placed at compile time</td></tr>
+                            <tr><td>Errors</td><td><code>(T, error)</code></td><td><code>throw</code></td><td><code>Result(a, e)</code></td><td><code>'a result</code>, <code>Reply.fail</code></td></tr>
+                            <tr><td>Absence</td><td><code>nil</code></td><td><code>undefined</code></td><td><code>Option(a)</code></td><td><code>'a option</code></td></tr>
+                            <tr><td>Closures</td><td>yes</td><td>yes</td><td>yes</td><td>no capture: handlers are top-level <code>fun</code></td></tr>
+                            <tr><td>Pipes</td><td>no</td><td>no</td><td><code>|&gt;</code></td><td><code>|&gt;</code>, first argument</td></tr>
+                            <tr><td>A value used twice</td><td>shared pointer</td><td>shared reference</td><td>immutable, shared</td><td>moved, or explicitly borrowed</td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <p>
+                        The last row is the one to keep in mind. In Yack a request, a string or a
+                        list has <em>one owner</em>. Passing it to a function hands it over; the
+                        compiler frees it where the last owner is done. No GC pause, and nothing
+                        to write by hand.
+                    </p>
+                    <div class="callout">
+                        <strong>Coming from Gleam?</strong>
+                        You will feel at home: immutable data, <code>case</code>, <code>result</code>,
+                        pipes. The new part is that a value is consumed when you pass it, unless
+                        you borrow it with <code>&amp;x</code> (short for <code>borrow x</code>).
+                    </div>
+                </section>
+                <section class="step" id="setup" aria-labelledby="setup-title">
+                    <span class="step-num">Step 02</span>
+                    <h2 id="setup-title">A project</h2>
+                    <p>
+                        A project is a folder with a <code>yack.toml</code>. Dependencies are local
+                        paths for now: point them at the <code>lib/</code> folder of your Yack
+                        checkout.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh"># from a checkout of the yack repository
+make
+./yack new alpage_tutorial
+cd alpage_tutorial</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">yack.toml</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="toml">[package]
+name = "alpage_tutorial"
+version = "0.1.0"
+
+[dependencies]
+alpage = { path = "../lib/alpage" }
+web = { path = "../lib/web" }
+http_server = { path = "../lib/http_server" }
+net = { path = "../lib/net" }
+yack = { path = "../lib/yack" }</code></pre>
+                    </div>
+                    <p>
+                        The paths assume the project sits at the root of the checkout, next to
+                        the <code>yack</code> binary. The tutorial uses three files: <code>src/Api.yack</code> (handlers and the
+                        app), <code>src/main.yack</code> (the server) and <code>src/test.yack</code>
+                        (in-memory tests). The finished project is
+                        <code>examples/alpage_tutorial</code> in the repository; every snippet on
+                        this page is copied from it and tested on each commit.
+                    </p>
+                </section>
+                <section class="step" id="handler" aria-labelledby="handler-title">
+                    <span class="step-num">Step 03</span>
+                    <h2 id="handler-title">First handler</h2>
+                    <p>A handler takes a context and the request, and returns a reply.</p>
+                    <div class="code-card code-tabs" data-tabs>
+                        <div class="code-head">
+                            <div class="tabs" role="tablist" aria-label="Same handler in other languages">
+                                <button class="tab" id="t1-0" type="button" role="tab" aria-selected="false" aria-controls="p1-0" tabindex="-1">Go</button><button class="tab" id="t1-1" type="button" role="tab" aria-selected="false" aria-controls="p1-1" tabindex="-1">TypeScript</button><button class="tab" id="t1-2" type="button" role="tab" aria-selected="false" aria-controls="p1-2" tabindex="-1">Gleam</button><button class="tab" id="t1-3" type="button" role="tab" aria-selected="true" aria-controls="p1-3" tabindex="0">Yack</button>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <div class="code-panel" id="p1-0" role="tabpanel" aria-labelledby="t1-0" hidden>
+                            <pre><code data-lang="go">func home(w http.ResponseWriter, r *http.Request) {
+    fmt.Fprint(w, "hello from alpage")
+}</code></pre>
+                        </div>
+                        <div class="code-panel" id="p1-1" role="tabpanel" aria-labelledby="t1-1" hidden>
+                            <pre><code data-lang="ts">app.get("/", (req, res) =&gt; {
+  res.send("hello from alpage")
+})</code></pre>
+                        </div>
+                        <div class="code-panel" id="p1-2" role="tabpanel" aria-labelledby="t1-2" hidden>
+                            <pre><code data-lang="gleam">fn home(_req: Request) -&gt; Response {
+  wisp.ok() |&gt; wisp.string_body("hello from alpage")
+}</code></pre>
+                        </div>
+                        <div class="code-panel" id="p1-3" role="tabpanel" aria-labelledby="t1-3">
+                            <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text ("hello from alpage"))</code></pre>
+                        </div>
+                    </div>
+                    <ul>
+                        <li><code>Ctx.t</code> is <code>Copy</code>: a small value (the request id) you can use freely.</li>
+                        <li><code>consume Request.t</code> says the handler <strong>owns</strong> the request. When it returns, the request is freed. You did not use it here, that is fine: an unused owned value is dropped, not leaked.</li>
+                        <li><code>Reply.t</code> is a success (<code>Reply.ok response</code>) or an application error (<code>Reply.fail error</code>). No exceptions.</li>
+                    </ul>
+                    <div class="callout">
+                        <strong>No <code>ResponseWriter</code>.</strong>
+                        Go writes into <code>w</code> as a side effect; Express mutates <code>res</code>.
+                        In Yack the response is a value you return, like in Wisp.
+                    </div>
+                </section>
+                <section class="step" id="ownership" aria-labelledby="ownership-title">
+                    <span class="step-num">Step 04</span>
+                    <h2 id="ownership-title">Query string and ownership</h2>
+                    <p>
+                        <code>Request.query</code> returns an <code>option</code>. Unwrap it with
+                        <code>option.unwrap_or</code>, or match on it like a Gleam <code>Option</code>.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">src/Api.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun hello (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val name = Request.query (&amp;request, "name") |&gt; option.unwrap_or ("stranger")
+    in Reply.ok (Response.text ("hello, " ^ name)) end</code></pre>
+                    </div>
+                    <p>
+                        <code>^</code> concatenates strings. It consumes both sides, so when the left
+                        one is not needed anymore the compiler grows it in place instead of copying.
+                    </p>
+                    <h3>The mistake every newcomer makes</h3>
+                    <p>
+                        Read two parameters the way you would in Go, without borrowing:
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">traps/request_twice.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/traps/request_twice.yack">fun greet (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val first = Request.query (request, "first")
+        val last = Request.query (request, "last")
+    in
+        Reply.ok (Response.text ("hello"))
+    end</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">yack check</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="plain">error[E3004]: type mismatch in argument 1 of `Request.query`
+  --&gt; traps/request_twice.yack:9:21
+   |
+ 9 |     let val first = Request.query (request, "first")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: expected: borrow Request.t
+   = note: found: consume Request.t
+   = hint: make the intended type explicit with a type annotation, or convert the value</code></pre>
+                    </div>
+                    <p>
+                        <code>Request.query</code> <em>borrows</em> the request: it reads the
+                        value without consuming it. The handler keeps ownership, so the request is
+                        still available afterwards and freed exactly once at the end.
+                    </p>
+                    <p>
+                        The fix is to take one borrow and reuse it: <code>&amp;request</code> is the short form of <code>borrow request</code>.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">src/Api.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun greet (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val req = &amp;request
+        val first = Request.query (req, "first") |&gt; option.unwrap_or ("")
+        val last = Request.query (req, "last") |&gt; option.unwrap_or ("")
+    in
+        Reply.ok (Response.text ("hello, " ^ first ^ " " ^ last))
+    end</code></pre>
+                    </div>
+                    <div class="callout">
+                        <strong>Why <code>val req = &amp;request</code>?</strong>
+                        A shared borrow is <code>Copy</code>, so it can be passed twice. NLL ends
+                        the loan at its last use, then the handler still owns the request.
+                        No tuple, no <code>*_keep</code> variant: the borrow is the whole trick.
+                    </div>
+                </section>
+                <section class="step" id="params" aria-labelledby="params-title">
+                    <span class="step-num">Step 05</span>
+                    <h2 id="params-title">Path parameters, without closures</h2>
+                    <p>
+                        Routes take <code>:name</code> segments. An extractor parses the segment and
+                        calls <em>your</em> function with a typed value, or answers
+                        <code>400</code> on its own.
+                    </p>
+                    <div class="code-card code-tabs" data-tabs>
+                        <div class="code-head">
+                            <div class="tabs" role="tablist" aria-label="Same handler in other languages">
+                                <button class="tab" id="t2-0" type="button" role="tab" aria-selected="false" aria-controls="p2-0" tabindex="-1">Go</button><button class="tab" id="t2-1" type="button" role="tab" aria-selected="false" aria-controls="p2-1" tabindex="-1">TypeScript</button><button class="tab" id="t2-2" type="button" role="tab" aria-selected="false" aria-controls="p2-2" tabindex="-1">Gleam</button><button class="tab" id="t2-3" type="button" role="tab" aria-selected="true" aria-controls="p2-3" tabindex="0">Yack</button>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <div class="code-panel" id="p2-0" role="tabpanel" aria-labelledby="t2-0" hidden>
+                            <pre><code data-lang="go">func square(w http.ResponseWriter, r *http.Request) {
+    n, err := strconv.Atoi(r.PathValue("n"))
+    if err != nil {
+        http.Error(w, "invalid path parameter", 400)
+        return
+    }
+    fmt.Fprintf(w, `{"square":%d}`, n*n)
+}</code></pre>
+                        </div>
+                        <div class="code-panel" id="p2-1" role="tabpanel" aria-labelledby="t2-1" hidden>
+                            <pre><code data-lang="ts">app.get("/square/:n", (req, res) =&gt; {
+  const n = Number.parseInt(req.params.n, 10)
+  if (Number.isNaN(n)) return res.status(400).send("invalid path parameter")
+  res.json({ square: n * n })
+})</code></pre>
+                        </div>
+                        <div class="code-panel" id="p2-2" role="tabpanel" aria-labelledby="t2-2" hidden>
+                            <pre><code data-lang="gleam">fn square(n: String) -&gt; Response {
+  case int.parse(n) {
+    Ok(n) -&gt; json_response(n * n)
+    Error(Nil) -&gt; wisp.bad_request()
+  }
+}</code></pre>
+                        </div>
+                        <div class="code-panel" id="p2-3" role="tabpanel" aria-labelledby="t2-3">
+                            <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun square_of (ctx : Ctx.t, n : int) : Reply.t =
+    Reply.ok (Response.json ("{\"square\":" ^ int_to_string (n * n) ^ "}"))
+
+fun square (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Extract.path_int (ctx, request, "n", square_of)</code></pre>
+                        </div>
+                    </div>
+                    <p>
+                        <code>square_of</code> is a plain top-level function passed by name. Yack has
+                        no capturing closures, so a callback cannot close over local variables:
+                        everything it needs arrives as an argument. That is what keeps ownership
+                        checkable without a GC: a closure would be a hidden second owner.
+                    </p>
+                    <div class="callout warn">
+                        <strong>Coming from TypeScript?</strong>
+                        <code>(req, res) =&gt; ...</code> inline everywhere is not possible. Write a
+                        named <code>fun</code>; the type of a parameter like
+                        <code>(Ctx.t, int) -&gt; Reply.t</code> tells you exactly which arguments it gets.
+                    </div>
+                </section>
+                <section class="step" id="json" aria-labelledby="json-title">
+                    <span class="step-num">Step 06</span>
+                    <h2 id="json-title">JSON body, errors as values</h2>
+                    <p>
+                        <code>Extract.json</code> reads the body, runs your decoder, and on success
+                        calls the next function with the decoded value. A decoder is a function from
+                        the borrowed body to a <code>result</code>.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">src/Api.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun decode_items (body : &amp;string) : int list result =
+    case Decode.parse (body) of
+        Error message =&gt; Error (message)
+      | Ok value =&gt;
+            (case json.as_object (value) of
+                 Error message =&gt; Error (message)
+               | Ok fields =&gt;
+                     json.field_decode (&amp;"items", Decode.int_list, fields))
+
+fun add (pair : int * int) : int = pair.0 + pair.1
+
+fun sum_items (ctx : Ctx.t, items : consume int list) : Reply.t =
+    case items of
+        Nil =&gt; Reply.fail (AppError.unprocessable ("items must not be empty"))
+      | Cons (first, rest) =&gt;
+            let val total = list.foldl (add, first, rest)
+            in Reply.ok (Response.json ("{\"sum\":" ^ int_to_string (total) ^ "}"))
+            end
+
+fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Extract.json (ctx, request, decode_items, sum_items)</code></pre>
+                    </div>
+                    <ul>
+                        <li>A body that is not valid JSON never reaches <code>sum_items</code>: the extractor answers <code>400 invalid JSON body</code>.</li>
+                        <li>An empty list is a business error: <code>Reply.fail (AppError.unprocessable ...)</code> becomes <code>422</code> in one central place.</li>
+                        <li><code>list.foldl</code> takes <code>add</code> by name, again no closure.</li>
+                    </ul>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>AppError</th><th>Status</th><th>Typical use</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>bad_request msg</code></td><td>400</td><td>malformed input</td></tr>
+                            <tr><td><code>unprocessable msg</code></td><td>422</td><td>valid shape, invalid content</td></tr>
+                            <tr><td><code>not_found ()</code></td><td>404</td><td>missing resource (also unknown routes)</td></tr>
+                            <tr><td><code>conflict msg</code></td><td>409</td><td>state conflict</td></tr>
+                            <tr><td><code>unavailable msg</code></td><td>503</td><td>dependency down</td></tr>
+                            <tr><td><code>internal msg</code></td><td>500</td><td>bug or invariant broken</td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                </section>
+                <section class="step" id="app" aria-labelledby="app-title">
+                    <span class="step-num">Step 07</span>
+                    <h2 id="app-title">The application is a value</h2>
+                    <p>
+                        Routes and middlewares are added with a pipeline, Gleam style. The result is
+                        an ordinary value: the server runs it, and so do the tests.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">src/Api.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun application () : Alpage.t =
+    Alpage.new ()
+    |&gt; Alpage.get ("/", home)
+    |&gt; Alpage.get ("/hello", hello)
+    |&gt; Alpage.get ("/greet", greet)
+    |&gt; Alpage.get ("/square/:n", square)
+    |&gt; Alpage.post ("/sum", sum)
+    |&gt; Alpage.get ("/admin", admin)
+    |&gt; Alpage.with (Alpage.log ())
+    |&gt; Alpage.with (Middleware.before (require_token))
+    |&gt; Alpage.with (Middleware.security_headers ())</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">src/main.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/main.yack">import Api
+import alpage/Alpage
+import yack/io
+
+fun main () =
+    case Alpage.run (Api.application (), Alpage.config (18093)) of
+        Ok _ =&gt; ()
+      | Error message =&gt; io.print_line (borrow message)</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh">../yack run
+# another terminal
+curl localhost:18093/hello?name=Ada
+curl -X POST -d '{"items":[4,5]}' localhost:18093/sum
+curl -H 'X-Token: secret' localhost:18093/admin</code></pre>
+                    </div>
+                    <p>
+                        <code>Alpage.run</code> returns a <code>unit result</code>: a failure to bind the
+                        port is a value too, printed by <code>main</code>. A <code>GET</code> on
+                        <code>/sum</code> answers <code>405 method not allowed</code>, an unknown
+                        path <code>404</code>.
+                    </p>
+                </section>
+                <section class="step" id="middleware" aria-labelledby="middleware-title">
+                    <span class="step-num">Step 08</span>
+                    <h2 id="middleware-title">Middleware</h2>
+                    <p>
+                        A <code>before</code> middleware receives the request and returns it, with an
+                        optional early reply. Returning <code>Some reply</code> stops the chain.
+                    </p>
+                    <div class="code-card code-tabs" data-tabs>
+                        <div class="code-head">
+                            <div class="tabs" role="tablist" aria-label="Same handler in other languages">
+                                <button class="tab" id="t3-0" type="button" role="tab" aria-selected="false" aria-controls="p3-0" tabindex="-1">Go</button><button class="tab" id="t3-1" type="button" role="tab" aria-selected="false" aria-controls="p3-1" tabindex="-1">TypeScript</button><button class="tab" id="t3-2" type="button" role="tab" aria-selected="false" aria-controls="p3-2" tabindex="-1">Gleam</button><button class="tab" id="t3-3" type="button" role="tab" aria-selected="true" aria-controls="p3-3" tabindex="0">Yack</button>
+                            </div>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <div class="code-panel" id="p3-0" role="tabpanel" aria-labelledby="t3-0" hidden>
+                            <pre><code data-lang="go">func requireToken(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if strings.HasPrefix(r.URL.Path, "/admin") &amp;&amp;
+            r.Header.Get("X-Token") != "secret" {
+            http.Error(w, "unauthorized", 401)
+            return
+        }
+        next.ServeHTTP(w, r) // a closure over `next`
+    })
+}</code></pre>
+                        </div>
+                        <div class="code-panel" id="p3-1" role="tabpanel" aria-labelledby="t3-1" hidden>
+                            <pre><code data-lang="ts">app.use((req, res, next) =&gt; {
+  if (req.path.startsWith("/admin") &amp;&amp; req.get("X-Token") !== "secret") {
+    return res.status(401).send("unauthorized")
+  }
+  next()
+})</code></pre>
+                        </div>
+                        <div class="code-panel" id="p3-2" role="tabpanel" aria-labelledby="t3-2" hidden>
+                            <pre><code data-lang="gleam">fn require_token(req: Request, next: fn() -&gt; Response) -&gt; Response {
+  case request.get_header(req, "x-token") {
+    Ok("secret") -&gt; next()
+    _ -&gt; wisp.response(401) |&gt; wisp.string_body("unauthorized")
+  }
+}</code></pre>
+                        </div>
+                        <div class="code-panel" id="p3-3" role="tabpanel" aria-labelledby="t3-3">
+                            <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun denied () : Reply.t =
+    Reply.ok (Response.with_status (Response.text ("unauthorized"), 401))
+
+fun token_ok (token : string option) : bool =
+    case token of
+        Some value =&gt; string_eq (&amp;value, &amp;"secret")
+      | None =&gt; false
+
+fun require_token (ctx : Ctx.t, request : Request.t) : Request.t * Reply.t option =
+    let val path = Request.path (&amp;request)
+    in
+        if string.starts_with (&amp;path, &amp;"/admin") then
+            let val token = Request.header (&amp;request, "X-Token")
+            in
+                if token_ok (token) then (request, None)
+                else (request, Some (denied ()))
+            end
+        else (request, None)
+    end</code></pre>
+                        </div>
+                    </div>
+                    <ul>
+                        <li>The middleware owns the request while it runs, reads it through borrows, and gives the same request back. Nothing is copied and no tuple is threaded.</li>
+                        <li>Layers run in the order of <code>Alpage.with</code>. A refused request is still logged (the log layer comes first) and still gets the security headers (their <code>after</code> hook wraps the reply on the way out).</li>
+                        <li>There is no <code>next</code> callback: the chain is data, so no closure is needed.</li>
+                    </ul>
+                </section>
+                <section class="step" id="testing" aria-labelledby="testing-title">
+                    <span class="step-num">Step 09</span>
+                    <h2 id="testing-title">Testing without a socket</h2>
+                    <p>
+                        <code>alpage/Test</code> runs the same router, middlewares and error mapping
+                        as the server; only the transport is gone. Like <code>httptest</code> in Go
+                        or <code>supertest</code> in Node, minus the port.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">src/test.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/test.yack">fun expect (client : Test.client, label : string, raw : string,
+            want_status : int, want_body : string) : Test.client =
+    let val result = Test.request (client, Request.parse (raw))
+        val client = result.1
+        val _ =
+            case result.0 of
+                { status = got, headers = _headers, body = text } =&gt;
+                    if got = want_status then
+                        if string_eq (borrow text, borrow want_body) then say ("ok " ^ label)
+                        else say ("FAIL " ^ label ^ ": body " ^ text)
+                    else say ("FAIL " ^ label ^ ": status " ^ int_to_string (got))
+    in
+        client
+    end
+
+fun get (path : string) : string =
+    "GET " ^ path ^ " HTTP/1.1\r\nHost: localhost\r\n\r\n"
+
+fun main () =
+    case Test.start (Api.application (), Alpage.config (0)) of
+        Error message =&gt; say (message)
+      | Ok client =&gt;
+            client
+            |&gt; expect ("home", get ("/"), 200, "hello from alpage")
+            |&gt; expect ("hello query", get ("/hello?name=Ada"), 200, "hello, Ada")
+            |&gt; expect ("hello default", get ("/hello"), 200, "hello, stranger")
+            |&gt; expect ("greet", get ("/greet?first=Ada&amp;last=Lovelace"), 200,
+                       "hello, Ada Lovelace")
+            |&gt; expect ("square", get ("/square/12"), 200, "{\"square\":144}")
+            |&gt; expect ("square bad", get ("/square/abc"), 400, "invalid path parameter")
+            |&gt; expect ("sum",
+                       "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 17\r\n\r\n{\"items\":[1,2,3]}",
+                       200, "{\"sum\":6}")
+            |&gt; expect ("sum empty",
+                       "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 12\r\n\r\n{\"items\":[]}",
+                       422, "items must not be empty")
+            |&gt; expect ("sum bad json",
+                       "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n{oops",
+                       400, "invalid JSON body")
+            |&gt; expect ("sum wrong method", get ("/sum"), 405, "method not allowed")
+            |&gt; expect ("admin denied", get ("/admin"), 401, "unauthorized")
+            |&gt; expect ("admin",
+                       "GET /admin HTTP/1.1\r\nHost: localhost\r\nX-Token: secret\r\n\r\n",
+                       200, "welcome, admin")
+            |&gt; expect ("missing", get ("/missing"), 404, "not found")
+            |&gt; Test.close</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh">../yack run src/test.yack</code></pre>
+                        <div class="code-out"><span aria-hidden="true">→</span> <code>ok home … ok missing</code></div>
+                    </div>
+                    <p>
+                        The test client is <code>Affine</code> as well: each request consumes it and
+                        returns it, which is why the calls chain with <code>|&gt;</code>. Forget to
+                        thread it and the compiler tells you, the same way as for the request.
+                    </p>
+                </section>
+                <section class="step" id="ship" aria-labelledby="ship-title">
+                    <span class="step-num">Step 10</span>
+                    <h2 id="ship-title">Check, build, run</h2>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh"># type, ownership and the graph validator: silent when all is well
+../yack check src/main.yack
+
+# native binary, then the same server with region allocation, no malloc per request
+../yack build src/main.yack server
+../yack build --memory=stack --arena-reserve=64M src/main.yack server-stack
+
+# what each arena block allocates and frees
+../yack arena src/Api.yack</code></pre>
+                    </div>
+                    <ul>
+                        <li><code>yack check</code> runs the type checker, the ownership checker, then lowers the program and re-proves ownership on its control-flow graph. A program that would leak or double free does not build.</li>
+                        <li><code>--memory=stack</code> allocates per request in regions released at once: no <code>malloc</code>/<code>free</code> per string.</li>
+                        <li><code>yack lsp</code> gives the same diagnostics in your editor, plus inferred types and arena hints.</li>
+                    </ul>
+                </section>
+                <section class="step" id="cheatsheet" aria-labelledby="cheatsheet-title">
+                    <span class="step-num">Step 11</span>
+                    <h2 id="cheatsheet-title">Cheat sheet</h2>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>You want</th><th>Go / TS habit</th><th>Alpage</th></tr></thead>
+                        <tbody>
+                            <tr><td>Route</td><td><code>mux.HandleFunc</code>, <code>app.get</code></td><td><code>Alpage.get ("/path", handler)</code></td></tr>
+                            <tr><td>Path parameter</td><td><code>r.PathValue</code>, <code>req.params</code></td><td><code>Extract.path_int (ctx, request, "n", next)</code></td></tr>
+                            <tr><td>Query parameter</td><td><code>r.URL.Query().Get</code></td><td><code>Request.query (borrow r, "name")</code></td></tr>
+                            <tr><td>Header</td><td><code>r.Header.Get</code></td><td><code>Request.header (borrow r, "Name")</code></td></tr>
+                            <tr><td>JSON body</td><td><code>json.NewDecoder</code>, <code>req.body</code></td><td><code>Extract.json (ctx, request, decoder, next)</code></td></tr>
+                            <tr><td>Response</td><td><code>w.Write</code>, <code>res.send</code></td><td><code>Response.text/html/json</code>, <code>with_status</code>, <code>with_header</code></td></tr>
+                            <tr><td>Error</td><td><code>http.Error</code>, <code>throw</code></td><td><code>Reply.fail (AppError.bad_request "…")</code></td></tr>
+                            <tr><td>Middleware</td><td><code>func(next) Handler</code>, <code>app.use</code></td><td><code>Middleware.before</code>, <code>Middleware.after</code></td></tr>
+                            <tr><td>Read without consuming</td><td>no</td><td><code>&amp;r</code> (short for <code>borrow r</code>): accessors take <code>borrow Request.t</code></td></tr>
+                            <tr><td>Test</td><td><code>httptest</code>, <code>supertest</code></td><td><code>Test.start</code>, <code>Test.request</code></td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <div class="step-nav">
+                        <a class="btn btn-ghost" href="index.html">Back to Yack</a>
+                        <a class="btn" href="https://github.com/AsymetricData/yack-public/tree/main/examples/alpage_tutorial">Full source</a>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-brand">
+            <img src="favicon.svg" alt="" width="26" height="26">
+            <p>Yack: an experimental functional language.<br>Every snippet on this page is compiled and tested.</p>
+        </div>
+        <nav aria-label="Footer links">
+            <a href="index.html">Home</a>
+            <a href="https://github.com/AsymetricData/yack-public">GitHub</a>
+            <a href="https://github.com/AsymetricData/yack-public/tree/main/examples/alpage_tutorial">Tutorial source</a>
+        </nav>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# expect: discarding the Linear value at the whole value
+# A compiler drop over a `token` would free nothing but loses the linear
+# obligation; the validator refuses it.
+fun yack_main {
+  b0:
+    %0 : token = call new_token
+    drop %0! : token
+    %1 : unit = const ()
+    return %1!
+}

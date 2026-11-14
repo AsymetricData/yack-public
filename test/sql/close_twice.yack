@@ -1,0 +1,12 @@
+
+
+
+import sql/Sqlite
+
+fun main () =
+    case Sqlite.open (":memory:") of
+        Error message => print_string (message)
+      | Ok db =>
+          let val _ = Sqlite.close (db)
+          in Sqlite.close (db)
+          end

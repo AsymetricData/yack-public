@@ -1,0 +1,15 @@
+import yack/list
+
+fun double (x : int) : int = x * 2
+fun greater_than_two (x : int) : bool = x > 2
+fun add_pair (pair : int * int) : int =
+    case pair of
+        (acc, x) => acc + x
+
+fun main () =
+    let val values = Cons ((1, Cons ((2, Cons ((3, Nil))))))
+        val mapped = list.map (double, values)
+        val kept = list.filter (greater_than_two, mapped)
+        val total = list.foldl (add_pair, 0, kept)
+    in print_int (total)
+    end

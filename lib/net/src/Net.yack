@@ -1,0 +1,81 @@
+type listener : Linear = { fd : int }
+type stream : Linear = { fd : int }
+
+fun listen (port : int) : listener result =
+    let val fd = sys.socket_tcp ()
+    in if fd < 0 then
+           Error ("socket failed")
+       else
+           let val _ = sys.reuseaddr (fd)
+               val _ = sys.reuseport (fd)
+               val bound = sys.bind_any (fd, port)
+           in if bound < 0 then
+                  let val _ = sys.close (fd)
+                  in Error ("bind failed")
+                  end
+              else
+                  let val listening = sys.listen (fd, 128)
+                  in if listening < 0 then
+                         let val _ = sys.close (fd)
+                         in Error ("listen failed")
+                         end
+                     else
+                         let val value : listener = { fd = fd }
+                         in Ok (value)
+                         end
+                  end
+           end
+    end
+
+fun listener_fd (value : borrow listener) : int =
+    value.fd
+
+fun local_port (value : borrow listener) : int =
+    sys.local_port (value.fd)
+
+fun accept (value : borrow listener) : stream result =
+    let val fd = sys.accept (value.fd)
+    in if fd < 0 then
+           Error ("accept failed")
+       else
+           let val stream : stream = { fd = fd }
+           in Ok (stream)
+           end
+    end
+
+fun connect_loopback (port : int) : stream result =
+    let val fd = sys.socket_tcp ()
+    in if fd < 0 then
+           Error ("socket failed")
+       else
+           let val connected = sys.connect_loopback (fd, port)
+           in if connected < 0 then
+                  let val _ = sys.close (fd)
+                  in Error ("connect failed")
+                  end
+              else
+                  let val stream : stream = { fd = fd }
+                  in Ok (stream)
+                  end
+           end
+    end
+
+fun close_listener (value : listener) : unit =
+    case value of
+        { fd = fd } => let val _ = sys.close (fd) in () end
+
+fun close (value : stream) : unit =
+    case value of
+        { fd = fd } => let val _ = sys.close (fd) in () end
+
+fun stream_fd (value : borrow stream) : int =
+    value.fd
+
+fun set_nonblocking (value : borrow stream) : int =
+    sys.set_nonblocking (value.fd)
+
+fun epoll_add_read (epfd : int, value : borrow stream) : int =
+    sys.epoll_add (epfd, value.fd, 1)
+
+fun epoll_wait (epfd : int, fds : int32 array, events : int32 array, maxevents : int, timeout : int) : int =
+    sys.epoll_wait (epfd, fds, events, maxevents, timeout)

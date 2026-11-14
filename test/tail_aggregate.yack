@@ -1,0 +1,9 @@
+type state : Copy = { a : int, b : int, c : int, d : int }
+
+fun loop (state : state, n : int) : state =
+    if n <= 0 then state
+    else loop ({ a = state.a + 1, b = state.b, c = state.c, d = state.d }, n - 1)
+
+fun main () =
+    let val result = loop ({ a = 0, b = 1, c = 2, d = 3 }, 10)
+    in print_int (result.a) end

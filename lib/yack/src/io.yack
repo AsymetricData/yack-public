@@ -1,0 +1,90 @@
+import yack/string
+
+(* yack/io : entrées/sorties de fichiers et flux standard.
+
+Le noyau expose `io.read_file`, `io.read_stdin` et `io.write_file`, avec
+`string result` comme type d'erreur. Les handles, `stderr`, `read_line` et
+les opérations de répertoire manquent encore côté backend. *)
+(* Lit intégralement un fichier.
+   - `path` : chemin transmis au système d'E/S.
+
+   Retourne le contenu possédé ou l'erreur de lecture. La lecture ne modifie pas le
+   fichier. *)
+fun read_file (path : string) : string result = io.read_file (path)
+
+(* Écrit un contenu dans un fichier.
+   - `path` : chemin du fichier cible.
+   - `contents` : contenu à écrire.
+
+   Retourne `Ok ()` ou l'erreur d'écriture. Cette opération peut créer ou tronquer le
+   fichier cible ; elle ne modifie pas les chaînes d'entrée. *)
+fun write_file (path : string, contents : string) : unit result =
+    io.write_file (path, contents)
+
+(* Lit l'intégralité de l'entrée standard. Retourne le texte possédé ou l'erreur de
+   lecture ; consomme les données disponibles sur stdin. *)
+fun read_stdin () : string result = io.read_stdin ()
+
+(* `print_string` ajoute un saut de ligne ; `print_span` écrit brut. *)
+(* Écrit une chaîne sur stdout sans ajouter de saut de ligne.
+   - `value` : chaîne empruntée pendant l'écriture.
+
+   Produit un effet d'E/S sur stdout ; ne modifie pas la chaîne. *)
+fun print_raw (value : borrow string) : unit =
+    print_span (value, 0, string_length (value))
+
+(* Écrit une chaîne suivie d'un saut de ligne sur stdout.
+   - `value` : chaîne empruntée puis copiée pour ajouter `\n`.
+
+   Produit un effet d'E/S sur stdout ; ne modifie pas la chaîne d'entrée. *)
+fun print_line (value : borrow string) : unit =
+    let val line = string.copy (value) ^ "\n"
+    in print_span (borrow line, 0, string_length (borrow line))
+    end
+
+(* Alias d'écriture brute sur stdout, sans saut de ligne.
+   - `value` : chaîne empruntée pendant l'écriture.
+
+   Produit un effet d'E/S ; ne modifie pas la chaîne. *)
+fun print (value : borrow string) : unit =
+    print_raw (value)
+
+(* `stderr` n'est pas un builtin : sur Unix, ouvrir `/dev/stderr` écrit sur le
+   descripteur 2 sans toucher au stdout. Le fd ouvert est refermé après usage. *)
+(* Écrit une chaîne sans saut de ligne sur stderr.
+   - `value` : chaîne empruntée puis copiée avant l'écriture.
+
+   Écrit via `/dev/stderr` ; ne modifie pas la chaîne d'entrée. *)
+fun eprint (value : borrow string) : unit =
+    let val copy = string.copy (value)
+        val _ = io.write_file "/dev/stderr" copy
+    in ()
+    end
+
+(* Écrit une chaîne suivie d'un saut de ligne sur stderr.
+   - `value` : chaîne empruntée puis copiée pour ajouter `\n`.
+
+   Écrit via `/dev/stderr` ; ne modifie pas la chaîne d'entrée. *)
+fun eprint_line (value : borrow string) : unit =
+    let val line = string.copy (value) ^ "\n"
+        val _ = io.write_file "/dev/stderr" line
+    in ()
+    end
+
+(* Lit l'intégralité de l'entrée standard. Retourne le texte possédé ou l'erreur
+   produite par le builtin ; la lecture consomme les données disponibles sur stdin. *)
+fun read_all () : string result =
+    io.read_stdin ()
+
+(* Écrit une liste de chaînes sur stdout, une par ligne.
+   - `values` : liste Affine consommée dans l'ordre ; les chaînes sont empruntées
+     pour l'écriture puis abandonnées.
+
+   Produit une suite de lignes sur stdout ; la liste vide n'écrit rien. *)
+fun print_lines (values : string list) : unit =
+    case values of
+        Nil => ()
+      | Cons (line, rest) =>
+            let val _ = print_line (borrow line)
+            in print_lines (rest)
+            end

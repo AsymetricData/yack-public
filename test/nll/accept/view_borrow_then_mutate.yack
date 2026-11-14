@@ -1,0 +1,16 @@
+import yack/string
+
+
+fun first_then_set (values : string array) : int =
+    let val view = array_get_borrow_view (borrow values, 0)
+        val size = string_length (view)
+        val _ = array_set (values, 0, "done")
+    in size
+    end
+
+fun main () : unit =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "abcd")
+        val n = first_then_set (values)
+    in print_int (n)
+    end

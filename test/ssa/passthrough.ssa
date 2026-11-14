@@ -1,0 +1,89 @@
+fun yack_main {
+  b0:
+    %0 : int = const 4
+    %1 : int = call yack_relay %0!
+    %2 : unit = call print_int %1!
+    %4 : bool = test _ %2!
+    branch %4 b2 b3
+  b1(%3 : unit):
+    return %3!
+  b2:
+    %5 : int = const 1
+    %6 : int = call yack_boxed %5!
+    %7 : unit = call print_int %6!
+    %9 : bool = test _ %7!
+    branch %9 b5 b6
+  b3:
+    unreachable
+  b4(%8 : unit):
+    jump b1(%8!)
+  b5:
+    %10 : string = view const "z"
+    %11 : string = call yack_build move %10!
+    print move %11!
+    %12 : unit = const ()
+    jump b4(%12!)
+  b6:
+    unreachable
+}
+fun yack_relay {
+  b0(%0.n : int):
+    %1 : int = const 2
+    %2 : int * int = tuple %0.n!, %1!
+    %3.s : yack_data_shape = ctor Rect %2!
+    %4.u : yack_data_shape = call yack_pass move %3.s!  # at 19:23
+    %5 : int = call yack_area move %4.u!  # at 21:14
+    return %5!
+}
+fun yack_area {
+  b0(%0.s : yack_data_shape):
+    %2 : bool = test Circle (r) %0.s  # at 4:10
+    branch %2 b2 b3
+  b1(%1 : int):
+    return %1!
+  b2:
+    %3.r : int = view bind 0 %0.s  # at 4:10
+    destructure %0.s! : yack_data_shape  # at 4:10
+    %4 : int = * %3.r!, %3.r!  # at 5:25
+    jump b1(%4!)
+  b3:
+    %5 : bool = test Rect ((w, h)) %0.s  # at 5:25
+    branch %5 b4 b5
+  b4:
+    %6.w : int = view bind 0.0 %0.s  # at 5:25
+    %7.h : int = view bind 0.1 %0.s  # at 5:25
+    destructure %0.s! : yack_data_shape  # at 5:25
+    %8 : int = * %6.w!, %7.h!  # at 6:28
+    jump b1(%8!)
+  b5:
+    unreachable
+}
+fun yack_pass {
+  b0(%0.s : yack_data_shape):
+    return move %0.s!
+}
+fun yack_boxed {
+  b0(%0.n : int):
+    %1.__yack_arena_enter_0 : unit = sys.sys.scratch_enter_all
+    %2 : string = view const "k"
+    %3.b : string = call yack_build move %2!
+    %4 : &string = borrow &%3.b  # at 27:30
+    %5 : int = string.string_length %4!  # at 27:30
+    %6 : int = + %5!, %0.n!  # at 27:35
+    drop %3.b! : string  # at 26:9
+    %7.__yack_arena_result_1 : int = call yack_arena_keep__int32 %6!  # at 27:35
+    %8.__yack_arena_leave_2 : unit = sys.sys.scratch_leave
+    return %7.__yack_arena_result_1!
+}
+fun yack_arena_keep__int32 {
+  b0(%0.value : int):
+    return %0.value!
+}
+fun yack_build {
+  b0(%0.name : string):
+    %1 : string = view const "-"
+    %2 : string = view const "x"
+    %3 : string = view const "y"
+    %4.d : string = concat move %0.name!, move %1!, move %2!, move %3!
+    return move %4.d!
+}

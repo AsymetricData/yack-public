@@ -1,0 +1,9 @@
+
+fun make () : int option * bool = (Some (42), true)
+
+fun main () =
+    let val value = make ()
+    in case value.0 of
+         None => print_bool (value.1)
+       | Some x => print_int (x)
+    end

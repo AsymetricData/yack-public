@@ -1,0 +1,19 @@
+fun fold_length
+    (values : borrow (string list),
+     f : (borrow string) -> int,
+     acc : int)
+    : int =
+    case values of
+        Nil => acc
+      | Cons (head, rest) => fold_length (rest, f, acc + f (head))
+
+fun length (text : borrow string) : int =
+    string_length (text)
+
+fun main () =
+    let val values = Cons (("aa", Cons (("bbb", Nil))))
+        val total = fold_length (borrow values, length, 0)
+        val n = list_length (values)
+    in
+        print_int (total + n)
+    end

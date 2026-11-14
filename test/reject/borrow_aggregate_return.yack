@@ -1,0 +1,7 @@
+fun bad () =
+    let val s = "hello" ^ " world"
+    in (borrow s, 0) end
+
+fun main () =
+    let val (b, _) = bad ()
+    in print_string (b) end

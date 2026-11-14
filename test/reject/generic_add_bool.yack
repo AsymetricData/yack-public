@@ -1,0 +1,7 @@
+fun add (x, y) =
+    x + y
+
+fun main () =
+    let val result = add (true, false)
+    in ()
+    end

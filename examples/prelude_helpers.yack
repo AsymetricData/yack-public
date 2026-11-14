@@ -1,0 +1,12 @@
+fun main () =
+    let val some = Some (42)
+        val none : int option = None
+        val ok : int result = Ok (7)
+        val err : int result = Error ("no")
+        val a = option_is_some (some)
+        val b = option_is_some (none)
+        val c = result_is_ok (ok)
+        val d = result_is_ok (err)
+    in print_int ((if a then 1 else 0) + (if b then 0 else 10)
+                  + (if c then 100 else 0) + (if d then 0 else 1000))
+    end

@@ -1,0 +1,16 @@
+datatype value = Number of int | Flag of bool | Nothing | Pair of int * bool
+
+fun describe (value : value) : int =
+    case value of
+        Number n => n
+      | Flag flag => if flag then 1 else 0
+      | Nothing => -1
+      | Pair (number, flag) => if flag then number else 0
+
+fun main () =
+    let val a = describe (Number (40))
+        val b = describe (Flag (true))
+        val c = describe (Nothing)
+        val d = describe (Pair ((2, true)))
+    in print_int (a + b + c + d)
+    end

@@ -1,0 +1,4 @@
+fun main () =
+    case 1 of
+        "one" => ()
+      | _ => ()

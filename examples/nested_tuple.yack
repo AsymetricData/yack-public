@@ -1,0 +1,9 @@
+fun classify (pair : bool * bool) : int =
+    case pair of
+        (true, true) => 1
+      | (true, false) => 2
+      | (false, true) => 3
+      | (false, false) => 4
+
+fun main () =
+    print_int (classify ((true, false)))

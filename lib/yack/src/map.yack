@@ -1,0 +1,25 @@
+(* Crée une map vide indexée par des clés chaîne. La map Affine rendue possède ses
+   ressources ; elle se transmet par déplacement. *)
+fun new () : 'v map = map_new ()
+
+(* Insère ou remplace la valeur associée à une clé, puis rend la map mutée.
+   - `values` : map Affine consommée puis rendue après mutation.
+   - `key` : clé chaîne transférée à la map.
+   - `value` : valeur transférée à la map ; un remplacement libère l’ancienne valeur. *)
+fun set (values : 'v map, key : string, value : 'v) : 'v map =
+    let val _ = map_set (values, key, value) in values end
+
+(* Supprime la clé si elle existe et rend la map mutée.
+   - `values` : map Affine consommée puis rendue après mutation.
+   - `key` : clé chaîne recherchée ; la map libère les ressources de l’entrée
+     supprimée. *)
+fun remove (values : 'v map, key : string) : 'v map =
+    let val _ = map_remove (values, key) in values end
+
+(* Extrait les clés et rend également la map pour que l’appelant puisse continuer à
+   l’utiliser.
+   - `values` : map Affine consommée puis rendue dans le second élément du couple.
+
+   Renvoie `(clés, map)` ; le tableau de clés rendu est Affine et appartient à
+   l’appelant. *)
+fun keys (values : 'v map) : string array * 'v map = (map_keys (values), values)

@@ -1,0 +1,145 @@
+import yack/args
+import yack/io
+import yack/string
+
+(* Décrit une sous-commande d'application. `Command (name, summary, specs)` contient
+   son nom, son résumé court et les spécifications d'arguments acceptées; les chaînes
+   et la liste sont des valeurs détenues par le constructeur. Utilisé pour composer
+   l'aide globale. *)
+datatype command = Command of string * string * args.spec list
+
+(* Produit la section d'usage à partir du programme et des options déclarées.
+   - `program` : nom affiché de l'exécutable, consommé par délégation.
+   - `specs` : spécifications d'arguments consommées par `args.usage`.
+
+   Retourne une chaîne d'aide; n'écrit pas sur stdout. *)
+fun usage (program : string, specs : args.spec list) : string =
+    args.usage (program, specs)
+
+(* Produit l'aide détaillée du programme et de ses options.
+   - `program` : nom affiché de l'exécutable, consommé par délégation.
+   - `summary` : description générale, consommée par délégation.
+   - `specs` : spécifications d'arguments consommées par `args.help`.
+
+   Retourne une chaîne d'aide sans l'imprimer. *)
+fun help
+        (program : string,
+         summary : string,
+         specs : args.spec list) : string =
+    args.help (program, summary, specs)
+
+(* Formate une entrée de sous-commande pour la liste d'aide globale.
+   - `command` : valeur consommée par le filtrage du constructeur.
+
+   Retourne une ligne contenant le nom et le résumé; la liste d'options n'est pas
+   affichée ici. *)
+fun command_line (command : command) : string =
+    case command of
+        Command (name, summary, specs) =>
+            "  " ^ name ^ "  " ^ summary
+
+(* Convertit récursivement des sous-commandes en lignes d'aide.
+   - `commands` : liste consommée récursivement; les commandes sont consommées au
+     rendu.
+
+   Retourne une nouvelle liste de chaînes sans modifier de stockage partagé. *)
+fun command_lines (commands : command list) : string list =
+    case commands of
+        Nil => Nil
+      | Cons (command, rest) =>
+            Cons ((command_line (command), command_lines (rest)))
+
+(* Construit l'aide globale qui présente l'utilisation et les sous-commandes.
+   - `program` : nom de l'exécutable, consommé lors de la concaténation.
+   - `summary` : résumé affiché avant la liste, consommé.
+   - `commands` : commandes consommées lors de la construction des lignes.
+
+   Retourne une chaîne terminée par un retour à la ligne; ne l'imprime pas. *)
+fun global_help
+        (program : string,
+         summary : string,
+         commands : command list) : string =
+    summary ^ "\n\n" ^
+    "Usage: " ^ program ^ " <command> [options]\n\n" ^
+    "Commands:\n" ^ string.join ("\n", command_lines (commands)) ^ "\n"
+
+(* Émet un texte brut sur stdout sans ajouter de retour à la ligne.
+   - `value` : contenu emprunté pendant l'écriture.
+
+   Effet : écrit immédiatement sur stdout; aucune mutation de la chaîne. *)
+fun emit (value : string) : unit =
+    let val text = value
+    in io.print_raw (borrow text)
+    end
+
+(* Imprime l'aide du programme sur stdout sans ajouter de nouvelle ligne.
+   - `program`, `summary` : textes consommés lors de la construction de l'aide.
+   - `specs` : spécifications consommées par le rendu de l'aide.
+
+   Effet : écrit le texte brut sur stdout. *)
+fun print_help
+        (program : string,
+         summary : string,
+         specs : args.spec list) : unit =
+    emit (help (program, summary, specs))
+
+(* Imprime l'aide globale et sa liste de sous-commandes sur stdout.
+   - `program`, `summary` : textes consommés lors de la construction de l'aide.
+   - `commands` : liste consommée lors de la construction des lignes.
+
+   Effet : écrit le texte brut sur stdout. *)
+fun print_global_help
+        (program : string,
+         summary : string,
+         commands : command list) : unit =
+    emit (global_help (program, summary, commands))
+
+(* Écrit un diagnostic préfixé par « error: » sur stderr, suivi d'une nouvelle ligne.
+   - `message` : texte consommé lors de la construction du diagnostic.
+
+   Effet : émet une ligne sur stderr. *)
+fun print_error (message : string) : unit =
+    let val line = "error: " ^ message
+    in io.eprint_line (borrow line)
+    end
+
+(* Écrit un avertissement préfixé par « warning: » sur stderr, suivi d'une nouvelle
+   ligne.
+   - `message` : texte consommé lors de la construction du diagnostic.
+
+   Effet : émet une ligne sur stderr. *)
+fun print_warning (message : string) : unit =
+    let val line = "warning: " ^ message
+    in io.eprint_line (borrow line)
+    end
+
+(* Formate le nom du programme et sa version.
+   - `program` : nom de l'exécutable, consommé par concaténation.
+   - `value` : numéro ou chaîne de version, consommé par concaténation.
+
+   Retourne `program` suivi de la version, sans effet d'entrée-sortie. *)
+fun version (program : string, value : string) : string =
+    program ^ " " ^ value
+
+(* Imprime la version du programme sur stdout, terminée par une nouvelle ligne.
+   - `program`, `value` : textes consommés pour construire la ligne.
+
+   Effet : écrit sur stdout. *)
+fun print_version
+        (program : string, value : string) : unit =
+    emit (version (program, value) ^ "\n")
+
+(* Analyse les arguments de la ligne de commande selon leurs spécifications.
+   - `specs` : schéma d'options emprunté à `args.parse`.
+   - `argv` : arguments consommés ou empruntés selon le contrat de `args.parse`.
+
+   Retourne le résultat typé du parseur; les erreurs sont représentées par `result`. *)
+fun parse (specs : args.spec list, argv : string list) : args.parsed result =
+    args.parse (specs, argv)
+
+(* Retourne le code de sortie conventionnel d'une exécution réussie (0). *)
+fun exit_ok () : int = 0
+(* Retourne le code de sortie conventionnel d'une erreur d'usage (2). *)
+fun exit_usage () : int = 2
+(* Retourne le code de sortie conventionnel d'un échec général (1). *)
+fun exit_failure () : int = 1

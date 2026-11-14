@@ -1,0 +1,7 @@
+[package]
+name = "sqlite_pool_threads"
+version = "0.1.0"
+
+[dependencies]
+sql = { path = "../../lib/sql" }
+yack = { path = "../../lib/yack" }

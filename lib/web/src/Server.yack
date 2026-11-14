@@ -1,0 +1,21 @@
+import http_server/Server as Base
+import web/Request
+import web/Response
+import web/Router
+
+fun dispatch_text (text : consume string, app : Router.t) : string * Router.t =
+    let val request = Request.parse (text)
+    in
+        case Router.dispatch (app, request) of
+            (response, app) =>
+                let val rendered = Response.render_keepalive (response)
+                in
+                    (rendered, app)
+                end
+    end
+
+fun dispatcher () = { run = dispatch_text }
+
+fun config (port : int) = Base.config (port)
+
+fun run (app, settings) = Base.run (dispatcher (), app, settings)

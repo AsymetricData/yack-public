@@ -1,0 +1,33 @@
+# Keep the Docker build context to what the compiler and the release need.
+/.git
+/.gitignore
+/.dockerignore
+
+# Build outputs and caches.
+/yack
+/yack-dev
+/dist
+/node_modules
+/.yack
+**/__pycache__
+**/*.pyc
+**/*.ll
+**/*.llvm
+**/*.o
+**/*.out
+/src/build_info.sml
+
+# Development-only material (never copied by the Dockerfile).
+/.trail
+/bench
+/docs
+/examples
+/hello_server
+/letsgo
+/site
+/test
+/tutorial
+/tools
+/zoo
+/editors
+/CHANGELOG.md

@@ -1,0 +1,7 @@
+fun main () =
+    let val base = 40
+        fun add (x) = x + base
+        fun fact (n) =
+            if n = 0 then 1 else n * fact (n - 1)
+    in print_int (add (2) + add (1) + fact (3))
+    end

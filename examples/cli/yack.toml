@@ -1,0 +1,6 @@
+[package]
+name = "cli-demo"
+version = "0.1.0"
+
+[dependencies]
+yack = { path = "../../lib/yack" }

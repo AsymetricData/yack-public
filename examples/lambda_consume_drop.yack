@@ -1,0 +1,4 @@
+fun apply (f : consume string -> unit, text : string) : unit = f (text)
+
+fun main () =
+    apply (x => print_string (x), "a" ^ "aa")

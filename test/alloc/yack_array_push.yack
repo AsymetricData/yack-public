@@ -1,0 +1,7 @@
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), "a" ^ "b")
+        val values = array.push_unchecked (values, "c" ^ "d")
+    in print_int (array.length (borrow values))
+    end

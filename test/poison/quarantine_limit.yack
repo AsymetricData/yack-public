@@ -1,0 +1,13 @@
+
+
+fun loop (n : int) : int =
+    if n = 0 then 0
+    else
+        let val length =
+                arena
+                    val text = "abcdefgh" ^ "ijklmnop"
+                in string_length (borrow text)
+                end
+        in loop (n - 1) end
+
+fun main () = print_int (loop (100))

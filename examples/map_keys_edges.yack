@@ -1,0 +1,14 @@
+fun main () =
+    let val empty : int map = map_new ()
+        val emptyKeys = map_keys (empty)
+        val names : int map = map_new ()
+        val _ = map_set (names, "a" ^ "1", 1)
+        val _ = map_set (names, "b" ^ "2", 2)
+        val _ = map_remove (names, "a" ^ "1")
+        val keys = map_keys (names)
+        val first = array_get_borrow (keys, 0)
+    in print_int (array_length (emptyKeys) * 1000
+                  + array_length (keys) * 100
+                  + map_length (names) * 10
+                  + string_length (first))
+    end

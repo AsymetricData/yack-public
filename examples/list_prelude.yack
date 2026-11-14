@@ -1,0 +1,17 @@
+fun total (values : string list) : int =
+    case values of
+        Nil => 0
+      | Cons (head, rest) => string_length (borrow head) + total (rest)
+
+fun main () =
+  let val values = Cons (("ab" ^ "c", Cons (("de", Nil))))
+      val count = list_length (values)
+      val chars = total (Cons (("xy", Nil)))
+      val more = Cons (("ignored", Nil))
+      val tail = list_tail (Cons (("ignored", Nil)))
+  in case list_head (more) of
+       None => print_int (count + chars + list_length (tail))
+     | Some (text) =>
+         print_int (count + chars + string_length (borrow text)
+                    + list_length (tail))
+  end

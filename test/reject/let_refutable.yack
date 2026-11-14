@@ -1,0 +1,5 @@
+fun main () =
+    let val Some x = Some (1)
+    in
+        print_int (x)
+    end

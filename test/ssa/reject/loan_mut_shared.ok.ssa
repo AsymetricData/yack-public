@@ -1,0 +1,11 @@
+# The same graph, accepted: the shared borrow is dead before the mutable
+# one is taken.
+fun yack_f {
+  b0(%0.s : string):
+    %1.r : &string = borrow &%0.s
+    %3 : int = string.string_length %1.r
+    %2.m : &mut string = borrow mut &%0.s
+    %4 : unit = call yack_touch %2.m
+    drop %0.s : string
+    return %3
+}

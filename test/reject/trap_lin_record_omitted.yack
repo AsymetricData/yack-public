@@ -1,0 +1,7 @@
+type holder : Linear = { t : token, n : int }
+
+fun main () =
+    let val h : holder = { t = new_token (), n = 3 }
+    in case h of
+           { n = n } => print_int (n)
+    end

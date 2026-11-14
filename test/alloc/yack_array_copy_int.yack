@@ -1,0 +1,7 @@
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), 5)
+        val copy = array.copy_int (borrow values)
+    in print_int (array.sum_int (borrow copy))
+    end

@@ -1,0 +1,6 @@
+fun main () =
+    let val n = 1
+        fun f () = n
+        val n = 2
+    in print_int (f ())
+    end

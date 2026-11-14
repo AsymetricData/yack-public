@@ -1,0 +1,166 @@
+import yack/array
+
+(* Encode une chaîne en tableau d’octets.
+   - `text` : chaîne empruntée en lecture seule et non consommée.
+
+   Rend un nouveau tableau Affine `int8 array`. *)
+fun from_string (text : borrow string) : int8 array = bytes_from_string (text)
+
+(* Décode tout le tableau d’octets en une chaîne.
+   - `values` : tableau Affine consommé par la conversion ; il n’est pas rendu. *)
+fun to_string (values : int8 array) : string = bytes_to_string (values)
+
+(* Décode en chaîne `count` octets à partir de `offset`.
+   - `values` : tableau Affine consommé ; il n'est pas rendu.
+   - `offset` : indice du premier octet.
+   - `count` : nombre d'octets à décoder. *)
+fun to_string_range (values : int8 array, offset : int, count : int) : string =
+    bytes_to_string_range (values, offset, count)
+
+(* Remplace l’octet à l’indice indiqué et rend le tableau modifié.
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `index` : indice à remplacer, contrôlé par `yack/array`.
+   - `value` : nouvel octet. *)
+fun set (values : int8 array, index : int, value : int8) : int8 array =
+    array.set (values, index, value)
+
+(* Variante historique de `set` : le contrôle de bornes est le même. Le
+   suffixe `_unchecked` ne change plus le comportement des accès.
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `index` : indice à remplacer.
+   - `value` : nouvel octet. *)
+fun set_unchecked (values : int8 array, index : int, value : int8) : int8 array =
+    set (values, index, value)
+
+(* Copie les octets à partir de `index` dans le tableau cible et rend celui-ci.
+   - `source` : tableau source Affine consommé pendant la copie.
+   - `target` : tableau cible Affine consommé, muté et rendu.
+   - `index` : premier indice à copier.
+   - `size` : borne exclusive de la copie. *)
+fun copy_from (source : int8 array, target : int8 array, index : int, size : int) : int8 array =
+    if index >= size then
+        target
+    else
+        let
+            val value = array.get (borrow source, index)
+            val target = array.set (target, index, value)
+        in
+            copy_from (source, target, index + 1, size)
+        end
+
+(* Crée une copie indépendante du tableau d’octets.
+   - `values` : tableau Affine source consommé ; ses octets sont copiés dans un
+     tableau neuf. *)
+fun copy (values : int8 array) : int8 array =
+    let
+        val size = array.length (borrow values)
+        val result : int8 array = array.make (0, size)
+    in
+        copy_from (values, result, 0, size)
+    end
+
+(* Compare l’égalité des deux tableaux sur une plage de longueur `size`.
+   - `left`, `right` : tableaux Affine consommés par la comparaison.
+   - `index` : prochain indice à comparer.
+   - `size` : borne exclusive de la plage.
+
+   Les tableaux ne sont pas rendus. *)
+fun equal_from (left : int8 array, right : int8 array, index : int, size : int) : bool =
+    if index >= size then
+        true
+    else if array.get (borrow left, index) <> array.get (borrow right, index) then
+        false
+    else
+        equal_from (left, right, index + 1, size)
+
+(* Indique si les deux tableaux d’octets ont la même longueur et le même contenu.
+   - `left`, `right` : tableaux Affine consommés ; ils ne sont pas rendus. *)
+fun equal (left : int8 array, right : int8 array) : bool =
+    let
+        val leftSize = array.length (borrow left)
+        val rightSize = array.length (borrow right)
+    in
+        if leftSize <> rightSize then false else equal_from (left, right, 0, leftSize)
+    end
+
+(* Compare lexicographiquement les octets à partir de `index` jusqu’à `size`.
+   - `left`, `right` : tableaux Affine consommés par la comparaison.
+   - `index` : prochain indice à comparer.
+   - `size` : borne exclusive de la plage.
+
+   Renvoie un entier négatif, nul ou positif selon l’ordre ; les tableaux ne sont pas
+   rendus. *)
+fun compare_from (left : int8 array, right : int8 array, index : int, size : int) : int =
+    if index >= size then
+        0
+    else
+        let
+            val a = array.get (borrow left, index)
+            val b = array.get (borrow right, index)
+        in
+            if a < b then
+                -1
+            else if a > b then 1 else compare_from (left, right, index + 1, size)
+        end
+
+(* Compare les tableaux d’octets dans l’ordre lexicographique, puis par longueur.
+   - `left`, `right` : tableaux Affine consommés ; ils ne sont pas rendus.
+
+   Renvoie un entier négatif, nul ou positif selon l’ordre. *)
+fun compare (left : int8 array, right : int8 array) : int =
+    let
+        val leftSize = array.length (borrow left)
+        val rightSize = array.length (borrow right)
+        val common = if leftSize <= rightSize then leftSize else rightSize
+        val order = compare_from (left, right, 0, common)
+    in
+        if order <> 0 then
+            order
+        else if leftSize < rightSize then -1 else if leftSize > rightSize then 1 else 0
+    end
+
+(* Copie une plage de la source dans le tableau cible et rend la cible.
+   - `source` : tableau Affine source consommé pendant la copie.
+   - `target` : tableau Affine cible consommé, muté et rendu.
+   - `index` : prochain indice source.
+   - `stop` : borne exclusive source.
+   - `targetIndex` : prochain indice cible. *)
+fun slice_from (
+    source : int8 array,
+    target : int8 array,
+    index : int,
+    stop : int,
+    targetIndex : int
+) : int8 array =
+    if index >= stop then
+        target
+    else
+        let
+            val value = array.get (borrow source, index)
+            val target = array.set (target, targetIndex, value)
+        in
+            slice_from (source, target, index + 1, stop, targetIndex + 1)
+        end
+
+(* Rend une copie des octets de la plage `[start, stop)`, en bornant les indices à la
+   taille du tableau.
+   - `values` : tableau Affine consommé ; la tranche rendue est indépendante.
+   - `start` : indice de début, borné entre zéro et la longueur.
+   - `stop` : borne de fin, bornée de la même façon.
+
+   Une plage vide ou inversée produit un tableau vide. *)
+fun slice (values : int8 array, start : int, stop : int) : int8 array =
+    let
+        val size = array.length (borrow values)
+        val first = if start < 0 then 0 else if start > size then size else start
+        val last = if stop < 0 then 0 else if stop > size then size else stop
+    in
+        if last <= first then
+            array.make (0, 0)
+        else
+            let
+                val result : int8 array = array.make (0, last - first)
+            in
+                slice_from (values, result, first, last, 0)
+            end
+    end

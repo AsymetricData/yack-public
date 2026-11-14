@@ -1,0 +1,5 @@
+fun main () =
+    let val resource = new_resource ()
+        val same = resource = resource
+    in drop_resource (resource)
+    end

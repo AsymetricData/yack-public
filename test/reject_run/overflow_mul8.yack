@@ -1,0 +1,4 @@
+fun multiply (x : int8, y : int8) : int8 = x * y
+
+fun main () =
+    print_string (int8_to_string (multiply (100, 2)))

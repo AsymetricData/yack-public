@@ -1,0 +1,4 @@
+fun multiply (x : int64, y : int64) : int64 = x * y
+
+fun main () =
+    print_int64 (multiply (4000000000, 4000000000))

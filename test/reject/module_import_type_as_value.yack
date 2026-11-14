@@ -1,0 +1,3 @@
+import fixtures/Shapes.{point}
+
+fun main () = print_int (0)

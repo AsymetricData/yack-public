@@ -1,0 +1,9 @@
+# expect: `h` (%0) is not consumed on the path to return: leak
+# A declared Linear record holds no memory, but forgetting it skips a
+# protocol step (the fd is never closed).  Its int field cannot count as
+# consuming it.
+fun yack_f {
+  b0(%0.h : linear { fd : int }):
+    %1.fd : int = view field 0 %0.h
+    return %1.fd
+}

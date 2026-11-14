@@ -1,0 +1,4 @@
+fun negate (x : int) : int = -x
+
+fun main () =
+    print_int (negate (0 - 2147483647 - 1))

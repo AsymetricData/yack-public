@@ -1,0 +1,8 @@
+fun id (x) =
+    x
+
+fun main () =
+    let val number = id (42)
+        val flag = id (true)
+    in print_int (number)
+    end

@@ -1,0 +1,6 @@
+datatype language = Yack of { desc : string } | Other of int
+
+fun main () =
+    let val value = Yack ({ desc = "yack" })
+    in print_string (value.desc)
+    end

@@ -1,0 +1,10 @@
+fun eat (s : string) : unit = ()
+
+fun main () =
+    let
+        val f : string -> unit = eat
+        val s = "hello" ^ " world"
+        val _ = f (s)
+    in
+        print_int (string_length (borrow s))
+    end

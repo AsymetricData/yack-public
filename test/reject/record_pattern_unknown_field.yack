@@ -1,0 +1,7 @@
+type user : Affine = { name : int, age : int }
+
+fun bad (user : user) : int =
+    case user of
+        { missing = value } => 0
+
+fun main () = ()

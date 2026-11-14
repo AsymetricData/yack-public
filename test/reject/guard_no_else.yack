@@ -1,0 +1,5 @@
+fun main () =
+    let guard true
+    in
+        0
+    end

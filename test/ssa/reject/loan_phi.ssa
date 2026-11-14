@@ -1,0 +1,18 @@
+# expect: drops `x` (%0) while its borrow %4 of `x` (%0) is live
+# The borrow reaches the join through a block parameter: the join must
+# keep the loans of both predecessors live.
+fun yack_f {
+  b0(%0.x : string, %1.y : string, %2.left : bool):
+    branch %2.left b1 b2
+  b1:
+    %4 : &string = borrow &%0.x
+    jump b3(%4)
+  b2:
+    %5 : &string = borrow &%1.y
+    jump b3(%5)
+  b3(%3.r : &string):
+    drop %0.x : string
+    %6 : int = string.string_length %3.r
+    drop %1.y : string
+    return %6
+}

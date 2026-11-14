@@ -1,0 +1,10 @@
+
+
+import yack/array
+
+fun main () =
+    let val values = array.new ()
+        val values = array.push (values, 1)
+        val values = array.push (values, 2)
+    in print_int (array.get_int (borrow values, 5))
+    end

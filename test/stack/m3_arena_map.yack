@@ -1,0 +1,15 @@
+fun make () : int map =
+    arena
+        val values : int map = map_new ()
+        val _ = map_set (values, "a", 1)
+    in values
+    end
+
+fun main () =
+    let val values = make ()
+        val _ = arena
+                    val junk : int map = map_new ()
+                    val _ = map_set (junk, "x", 9)
+                in ()
+                end
+    in print_int (map_get (values, "a")) end

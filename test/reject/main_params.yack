@@ -1,0 +1,2 @@
+fun main (x) =
+    print_int (x)

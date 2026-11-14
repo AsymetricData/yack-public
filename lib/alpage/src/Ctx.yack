@@ -1,0 +1,9 @@
+type t : Copy = {
+    request_id : int
+}
+
+fun make (request_id : int) : t =
+    { request_id = request_id }
+
+fun request_id (ctx : t) : int =
+    ctx.request_id

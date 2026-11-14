@@ -1,0 +1,347 @@
+import alpage/AppError
+import alpage/Ctx
+import alpage/Handler
+import alpage/Middleware
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+import http_server/Server as Http
+import yack/array
+import yack/list
+import yack/string
+
+type t : Affine = {
+    methods : string array,
+    patterns : string array,
+    handlers : Handler.t array,
+    layers : Middleware.t array,
+    next_request_id : int
+}
+
+type scan : Affine = {
+    exact : Handler.t option,
+    pattern : Handler.t option,
+    params : (string * string) list,
+    path_seen : bool,
+    allowed : string list,
+    methods : string array,
+    patterns : string array,
+    handlers : Handler.t array
+}
+
+type config : Copy = {
+    port : int,
+    workers : int
+}
+
+fun new () : t =
+    { methods = array.new ()
+    , patterns = array.new ()
+    , handlers = array.new ()
+    , layers = array.new ()
+    , next_request_id = 0
+    }
+
+fun config (port : int) : config =
+    { port = port, workers = 1 }
+
+fun workers (settings : config, count : int) : config =
+    { port = settings.port, workers = count }
+
+fun add
+    (app : t
+    , method : string
+    , pattern : string
+    , handler : (Ctx.t, consume Request.t) -> Reply.t
+    ) : t =
+    case app of
+        { methods = methods
+        , patterns = patterns
+        , handlers = handlers
+        , layers = layers
+        , next_request_id = next_request_id
+        } =>
+            let val methods = array.push (methods, method)
+                val patterns = array.push (patterns, pattern)
+                val handlers = array.push (handlers, Handler.make (handler))
+            in
+                { methods = methods
+                , patterns = patterns
+                , handlers = handlers
+                , layers = layers
+                , next_request_id = next_request_id
+                }
+            end
+
+fun get (app : t, pattern : string, handler : (Ctx.t, consume Request.t) -> Reply.t) : t =
+    add (app, "GET", pattern, handler)
+
+fun post (app : t, pattern : string, handler : (Ctx.t, consume Request.t) -> Reply.t) : t =
+    add (app, "POST", pattern, handler)
+
+fun put (app : t, pattern : string, handler : (Ctx.t, consume Request.t) -> Reply.t) : t =
+    add (app, "PUT", pattern, handler)
+
+fun delete (app : t, pattern : string, handler : (Ctx.t, consume Request.t) -> Reply.t) : t =
+    add (app, "DELETE", pattern, handler)
+
+fun with (app : t, layer : Middleware.t) : t =
+    case app of
+        { methods = methods
+        , patterns = patterns
+        , handlers = handlers
+        , layers = layers
+        , next_request_id = next_request_id
+        } =>
+            let val layers = array.push (layers, layer)
+            in
+                { methods = methods
+                , patterns = patterns
+                , handlers = handlers
+                , layers = layers
+                , next_request_id = next_request_id
+                }
+            end
+
+fun log () : Middleware.t =
+    Middleware.log ()
+
+fun drop_empty_parts_acc
+    (values : string list, acc : string list) : string list =
+    case values of
+        Nil => list.reverse (acc)
+      | part :: rest =>
+          let val empty =
+                  let val text = borrow part
+                  in string.is_empty (text)
+                  end
+          in
+              if empty then drop_empty_parts_acc (rest, acc)
+              else drop_empty_parts_acc (rest, Cons ((part, acc)))
+          end
+
+fun drop_empty_parts (values : string list) : string list =
+    drop_empty_parts_acc (values, Nil)
+
+fun segments (text : borrow string) : string list =
+    drop_empty_parts (string.split (47, text))
+
+fun match_segments
+    (pattern : string list, path : string list, params : (string * string) list)
+    : (string * string) list option =
+    case pattern of
+        Nil =>
+            (case path of
+                 Nil => Some (params)
+               | _ => None)
+      | segment :: rest =>
+            let val colon = ":"
+                val star = "*"
+                val is_param = string.starts_with (borrow segment, borrow colon)
+                val is_wildcard = string.starts_with (borrow segment, borrow star)
+            in
+                if is_wildcard then
+                    let val name = string_slice (borrow segment, 1, string_length (borrow segment))
+                        val value = string.join ("/", path)
+                    in Some (Cons (((name, value), params)))
+                    end
+                else
+                    case path of
+                        Nil => None
+                      | value :: tail =>
+                            if is_param then
+                                let val name =
+                                        string_slice
+                                            (borrow segment, 1, string_length (borrow segment))
+                                in match_segments (rest, tail, Cons (((name, value), params)))
+                                end
+                            else if string_eq (borrow segment, borrow value) then
+                                match_segments (rest, tail, params)
+                            else None
+            end
+
+fun match_path (pattern : borrow string, path : borrow string) : (string * string) list option =
+    match_segments (segments (pattern), segments (path), Nil)
+
+(* Route littérale : éviter de découper pattern et path en segments. *)
+fun is_literal_pattern (pattern : borrow string) : bool =
+    let val colon = string_find_char (pattern, 58)
+        val star = string_find_char (pattern, 42)
+    in
+        if colon < 0 then star < 0 else false
+    end
+
+fun scan_from
+    (state : scan
+    , method : borrow string
+    , path : borrow string
+    , count : int
+    , index : int
+    ) : scan =
+    if index >= count then state
+    else
+        case state of
+            { exact = exact
+            , pattern = pattern
+            , params = params
+            , path_seen = path_seen
+            , allowed = allowed
+            , methods = methods
+            , patterns = patterns
+            , handlers = handlers
+            } =>
+                let val inspected =
+                        let val route_method = array.get_borrow (borrow methods, index)
+                            val route_path = array.get_borrow (borrow patterns, index)
+                            val same_method = string_eq (route_method, method)
+                            val same_path = string_eq (route_path, path)
+                            val matched =
+                                if is_literal_pattern (route_path) then
+                                    if same_path then Some (Nil) else None
+                                else match_path (route_path, path)
+                            (* Only a method mismatch needs an owned copy for
+                               the 405 `Allow` list.  Copying every route on
+                               every request leaks in stack mode. *)
+                            val copied_method =
+                                if same_method then ""
+                                else string_copy (route_method)
+                        in
+                            (same_method, same_path, matched, copied_method)
+                        end
+                    val handler = Handler.copy (array.get_borrow (borrow handlers, index))
+                    val next =
+                        case inspected.2 of
+                            Some values =>
+                                { exact =
+                                      if inspected.0 then
+                                          if inspected.1 then Some (handler)
+                                          else exact
+                                      else exact
+                                , pattern =
+                                      if inspected.0 then
+                                          if inspected.1 then pattern
+                                          else Some (handler)
+                                      else pattern
+                                , params =
+                                      if inspected.0 then
+                                          if inspected.1 then params
+                                          else values
+                                      else params
+                                , path_seen = true
+                                , allowed =
+                                      if inspected.0 then allowed
+                                      else Cons ((inspected.3, allowed))
+                                , methods = methods
+                                , patterns = patterns
+                                , handlers = handlers
+                                }
+                          | None =>
+                                { exact =
+                                      if inspected.0 then
+                                          if inspected.1 then Some (handler)
+                                          else exact
+                                      else exact
+                                , pattern = pattern
+                                , params = params
+                                , path_seen = path_seen
+                                , allowed = allowed
+                                , methods = methods
+                                , patterns = patterns
+                                , handlers = handlers
+                                }
+                in
+                    scan_from (next, method, path, count, index + 1)
+                end
+
+fun dispatch (app : t, request : Request.t) : Reply.t * t =
+    case app of
+        { methods = methods
+        , patterns = patterns
+        , handlers = handlers
+        , layers = layers
+        , next_request_id = next_request_id
+        } =>
+            let val req = borrow request
+                val method = Request.method (req)
+                val path = Request.path (req)
+                val count = array.length (borrow patterns)
+                val initial_scan =
+                    { exact = None
+                    , pattern = None
+                    , params = Nil
+                    , path_seen = false
+                    , allowed = Nil
+                    , methods = methods
+                    , patterns = patterns
+                    , handlers = handlers
+                    }
+                val scanned =
+                    scan_from
+                        (initial_scan, borrow method, borrow path, count, 0)
+                val ctx = Ctx.make (next_request_id)
+                val reply =
+                    case scanned of
+                        { exact = exact
+                        , pattern = pattern
+                        , params = params
+                        , path_seen = path_seen
+                        , allowed = allowed
+                        , methods = scanned_methods
+                        , patterns = scanned_patterns
+                        , handlers = scanned_handlers
+                        } =>
+                            let val selected =
+                                    case exact of
+                                        Some value => (Some (value), Nil)
+                                      | None => (pattern, params)
+                                val handler = selected.0
+                                val selected_params = selected.1
+                                val (response, layers) =
+                                    case handler of
+                                        Some value =>
+                                            let val request =
+                                                    Request.with_params (request, selected_params)
+                                            in
+                                                Middleware.run
+                                                    (layers, value, ctx, request)
+                                            end
+                                      | None =>
+                                            if path_seen then
+                                                ( Reply.fail
+                                                    (AppError.method_not_allowed (allowed))
+                                                , layers
+                                                )
+                                            else
+                                                (Reply.fail (AppError.not_found ()), layers)
+                            in
+                                ( response
+                                , { methods = scanned_methods
+                                  , patterns = scanned_patterns
+                                  , handlers = scanned_handlers
+                                  , layers = layers
+                                  , next_request_id = next_request_id + 1
+                                  }
+                                )
+                            end
+            in
+                reply
+            end
+
+fun dispatch_text (text : consume string, app : consume t) : string * t =
+    let val request = Request.parse (text)
+    in
+        case dispatch (app, request) of
+            (reply, app) =>
+                let val response = Reply.to_response (reply)
+                    val rendered = Response.render_keepalive (response)
+                in
+                    (rendered, app)
+                end
+    end
+
+fun run (app : t, settings : config) : unit result =
+    let val dispatcher = { run = dispatch_text }
+        val server_settings = Http.config (settings.port)
+    in
+        Http.run (dispatcher, app, server_settings)
+    end

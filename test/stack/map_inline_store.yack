@@ -1,0 +1,9 @@
+datatype cell : Copy = Cell of int
+
+fun main () =
+    let val values : cell map = map_new ()
+        val _ = map_set (values, "k", Cell (42))
+    in case map_get (values, "k") of
+         Cell n => print_int (n)
+       | _ => print_int (0)
+    end

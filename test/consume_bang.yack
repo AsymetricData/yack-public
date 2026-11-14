@@ -1,0 +1,10 @@
+fun borrow_length (value : !string) : int =
+    string_length (borrow value)
+
+fun owned_length (value : consume string) : int =
+    string_length (borrow value)
+
+fun main () =
+    let val text = "yack"
+    in print_int (borrow_length (text) + owned_length ("!"))
+    end

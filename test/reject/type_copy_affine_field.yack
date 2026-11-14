@@ -1,0 +1,4 @@
+type handle : Affine = { id : int }
+type bad : Copy = { handle : handle }
+
+fun main () = ()

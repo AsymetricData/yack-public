@@ -1,0 +1,16 @@
+fun main () =
+    let val values : string map = map_new ()
+        val _ = arena
+                    val key = "ke" ^ "y1"
+                    val text = "val" ^ "ue1"
+                    val _ = map_set (values, key, text)
+                in ()
+                end
+        val _ = arena
+                    val junk = "XXXXXXXXXXXXXXXXXXXX"
+                    val _ = array_push (array_new (), junk)
+                in ()
+                end
+        val kept = map_get_borrow (values, "key1")
+    in print_string (string_copy (kept))
+    end

@@ -1,0 +1,13 @@
+# The same graph, accepted: the view is read, not moved.
+fun yack_main {
+  b0:
+    %0.a : string = view const "a"
+    %1.b : string = view const "b"
+    %2.p : string * string = tuple move %0.a, move %1.b
+    %3.x : string = view bind 0 %2.p
+    %4.v : string = concat %3.x, %1.b
+    drop %4.v! : string
+    drop %2.p! : string * string
+    %5 : unit = const ()
+    return %5!
+}

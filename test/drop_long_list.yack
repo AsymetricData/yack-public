@@ -1,0 +1,10 @@
+
+
+
+fun build (n : int, acc : int list) : int list =
+    if n = 0 then acc else build (n - 1, Cons ((n, acc)))
+
+fun main () =
+    let val values = build (1000000, Nil)
+    in print_int (1)
+    end

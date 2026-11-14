@@ -1,0 +1,21 @@
+fun main () =
+    let val server = sys.socket_tcp ()
+        val bound = sys.bind_loopback (server, 0)
+        val listening = sys.listen (server, 16)
+        val port = sys.local_port (server)
+        val client = sys.socket_tcp ()
+        val connected = sys.connect_loopback (client, port)
+        val accepted = sys.accept (server)
+        val hello = "hello"
+        val payload = bytes_from_string (borrow hello)
+        val sent = send_from (client, payload, 0, 5)
+        val epfd = sys.epoll_create ()
+        val added = sys.epoll_add (epfd, accepted, 1)
+        val fds : int32 array = array_make (0, 4)
+        val events : int32 array = array_make (0, 4)
+        val ready = sys.epoll_wait (epfd, fds, events, 4, 1000)
+        val buffer : int8 array = array_make (0, 5)
+        val received = recv_into (accepted, buffer, 0, 5)
+        val text = bytes_to_string (buffer)
+    in print_string (text)
+    end

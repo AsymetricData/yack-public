@@ -1,0 +1,17 @@
+import alpage/AppError
+import alpage/Response
+
+datatype t =
+    Respond of Response.t
+  | Reject of AppError.t
+
+fun ok (response : Response.t) : t =
+    Respond (response)
+
+fun fail (error : AppError.t) : t =
+    Reject (error)
+
+fun to_response (reply : t) : Response.t =
+    case reply of
+        Respond response => response
+      | Reject error => AppError.to_response (error)

@@ -1,0 +1,5 @@
+fun make () : token = new_token ()
+
+fun main () =
+    let val _ = make ()
+    in () end

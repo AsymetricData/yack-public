@@ -1,0 +1,28 @@
+import yack/array
+
+fun show (value : int option) : int =
+    case value of
+        None => 0
+      | Some number => number
+
+fun main () =
+    let
+        val values = array.new ()
+        val values = array.push (values, 5)
+        val values = array.push (values, 3)
+        val values = array.push (values, 9)
+        val values = array.set_int (values, 0, 7)
+        val reversed = array.reverse_int (values)
+        val copied = array.copy_int (borrow reversed)
+        val pair = array.take (copied, 0)
+        val restored = array.put (pair.0, 0, pair.1)
+        val _ = print_int (array.length (borrow restored))
+        val _ = print_int (array.capacity (borrow restored))
+        val _ = print_int (array.sum_int (borrow restored))
+        val _ = print_int (show (array.max_int (borrow restored)))
+        val _ = print_int (show (array.min_int (borrow restored)))
+        val _ = print_int (array.index_of_int (borrow restored, 7))
+    in
+        if array.contains_int (borrow restored, 42) then print_int (1)
+        else print_int (0)
+    end

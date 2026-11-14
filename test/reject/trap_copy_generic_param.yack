@@ -1,0 +1,5 @@
+datatype 'a cell : Copy = Cell of 'a
+
+fun main () =
+    let val c = Cell (new_token ())
+    in () end

@@ -1,0 +1,17 @@
+import yack/string
+
+
+
+fun branch_move (flag : bool, s : string) : int =
+    if flag then
+        string_length (borrow s)
+    else
+        let val t = s
+        in string_length (borrow t)
+        end
+
+fun main () : unit =
+    let val s = string_copy (borrow "branch")
+        val n = branch_move (true, s)
+    in print_int (n)
+    end

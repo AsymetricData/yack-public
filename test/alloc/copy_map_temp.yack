@@ -1,0 +1,6 @@
+datatype cell : Copy = Cell of int
+
+fun main () =
+    let val _ = map_set (map_new (), "k", Cell (42))
+    in ()
+    end

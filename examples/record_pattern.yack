@@ -1,0 +1,8 @@
+type user : Affine = { name : int, age : int }
+
+fun getName (user : user) : int =
+    case user of
+        { name = name } => name
+
+fun main () =
+    print_int (getName ({ name = 42, age = 32 }))

@@ -1,0 +1,9 @@
+
+
+datatype slot = Free of int | Held of token
+
+fun take (s : slot) : int =
+    let guard Free n <- s else 0
+    in n end
+
+fun main () = print_int (take (Free (3)))

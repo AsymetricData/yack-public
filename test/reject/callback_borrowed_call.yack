@@ -1,0 +1,6 @@
+fun main () =
+    let val f = x => print_string (x)
+        val s = "a" ^ "b"
+        val _ = f (s)
+    in ()
+    end

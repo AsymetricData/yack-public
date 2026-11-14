@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+fun build (n : int, acc : int list) : int list =
+    if n = 0 then acc else build (n - 1, Cons ((n, acc)))
+
+fun label (list : borrow int list) : string =
+    case list of
+        Nil => "end"
+      | Cons ((value, _)) => int_to_string (value)
+
+fun walk (current : borrow int list, tag : string, acc : int) : int =
+    case current of
+        Nil => acc + string_length (borrow tag)
+      | Cons ((value, rest)) => walk (rest, label (rest), acc + value % 7)
+
+fun main () =
+    let val list = build (1000000, Nil)
+    in print_int (walk (borrow list, "", 0))
+    end

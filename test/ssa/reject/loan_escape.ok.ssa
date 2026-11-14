@@ -1,0 +1,7 @@
+# The same graph, accepted: a reborrow of a borrow parameter points into
+# the caller's value, which outlives the call (`borrow ... from 1`).
+fun yack_f {
+  b0(%0.s : &string):
+    %1 : &string = borrow &%0.s
+    return %1
+}

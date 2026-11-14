@@ -1,0 +1,11 @@
+fun copy (values : int list) : int list =
+    case values of
+        Nil => Nil
+      | Cons (head, rest) => Cons ((head, copy (rest)))
+
+fun serve (count : int, values : int list) : int =
+    if count = 0 then 0
+    else serve (count - 1, copy (values))
+
+fun main () =
+    print_int (serve (2, Cons ((1, Nil))))

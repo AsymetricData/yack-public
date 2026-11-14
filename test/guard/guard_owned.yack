@@ -1,0 +1,26 @@
+
+
+
+
+fun first_word (s : string option) : string =
+    let guard Some w <- s else "none"
+    in w ^ "!" end
+
+fun use_token (o : token option) : int =
+    let guard Some t <- o else 0
+        val _ = consume_token (t)
+    in 1 end
+
+fun chain (a : string option, b : string option) : string =
+    let guard Some x <- a else "no-a"
+        guard Some y <- b else "no-b"
+    in x ^ y end
+
+fun main () =
+    let val _ = print_string (first_word (Some ("hi")))
+        val _ = print_string (first_word (None))
+        val _ = print_int (use_token (Some (new_token ())))
+        val _ = print_int (use_token (None))
+        val _ = print_string (chain (Some ("p" ^ "q"), Some ("r")))
+        val _ = print_string (chain (Some ("leak?" ^ "x"), None))
+    in print_string (chain (None, Some ("s" ^ "t"))) end

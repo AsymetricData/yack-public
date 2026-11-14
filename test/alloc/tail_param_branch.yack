@@ -1,0 +1,9 @@
+
+
+fun loop (n : int, text : string) : int =
+    if n = 0 then string_length (borrow text)
+    else if n % 2 = 0 then loop (n - 1, text)
+    else loop (n - 1, "x" ^ int_to_string (n))
+
+fun main () =
+    print_int (loop (1000, "a" ^ "b"))

@@ -1,0 +1,10 @@
+fun make () : string list =
+    arena
+        val b = "b" ^ "b"
+        val tail = Cons ((b, Nil))
+        val a = "a" ^ "a"
+    in Cons ((a, tail))
+    end
+
+fun main () =
+    print_int (list_length (make ()))

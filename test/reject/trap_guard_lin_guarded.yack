@@ -1,0 +1,8 @@
+
+
+fun pick (o : token option, k : bool) : int =
+    case o of
+        Some t if k => let val _ = consume_token (t) in 1 end
+      | _ => 0
+
+fun main () = print_int (pick (None, true))

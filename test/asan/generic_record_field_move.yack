@@ -1,0 +1,15 @@
+
+
+type 'a holder = { value : 'a, label : string }
+
+fun take (box : 'a holder) : 'a =
+    let val label = box.label
+        val value = box.value
+        val _ = print_string (label)
+    in value
+    end
+
+fun main () =
+    let val value = take ({ value = "wor" ^ "ld", label = "hel" ^ "lo" })
+    in print_string (value)
+    end

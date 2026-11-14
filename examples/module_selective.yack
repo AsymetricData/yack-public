@@ -1,0 +1,7 @@
+import modules/Shapes.{type point, type shape, Circle, area, point_x}
+
+fun main () =
+    let val p : point = { x = 4, y = 5 }
+        val r : shape = Circle (2)
+    in print_int (area (r) + point_x (p))
+    end

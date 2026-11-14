@@ -1,0 +1,13 @@
+
+datatype tree = Leaf | Node of tree * string * tree
+type holder = { name : string, tree : tree }
+
+fun main () =
+    let val xs = array_new ()
+        val _ = array_push (xs, { name = "n" ^ "m", tree = Leaf })
+        val h = array_take (xs, 0)
+        val g = array_take (xs, 0)
+    in case g.tree of
+         Leaf => print_string (h.name)
+       | Node (_, s, _) => print_string (s)
+    end

@@ -1,0 +1,17 @@
+import yack/string
+
+
+fun alias_chain (line : string) : string =
+    let val first = borrow line
+        val second = first
+        val third = second
+        val size = string_length (third)
+    in
+        if size >= 0 then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "hello")
+        val out = alias_chain (s)
+    in print_string (out)
+    end

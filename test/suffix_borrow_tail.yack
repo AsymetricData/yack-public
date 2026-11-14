@@ -1,0 +1,10 @@
+fun walk (previous : borrow string, n : int, acc : int) : int =
+    if n <= 0 then acc + string_length (previous)
+    else
+        case previous of
+            "x" ^ rest => walk (borrow rest, n - 1, acc + string_length (previous))
+          | _ => walk (previous, n - 1, acc + string_length (previous))
+fun main () =
+    let val start = "xxxxxxxxxx"
+    in print_int (walk (borrow start, 1000, 0))
+    end

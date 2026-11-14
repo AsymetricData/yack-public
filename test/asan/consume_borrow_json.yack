@@ -1,0 +1,22 @@
+
+
+
+import yack/json
+
+fun decode (body : consume string) : json.value result =
+    json.parse (borrow body)
+
+fun main () =
+    let val key = "a"
+    in
+        case decode ("{\"a\":1}") of
+            Ok value =>
+                (case json.as_object (value) of
+                     Ok fields =>
+                         (case json.field_decode (borrow key, json.as_int, fields) of
+                              Ok number =>
+                                  if number = 1 then () else os.exit (1)
+                            | Error _ => os.exit (1))
+                   | Error _ => os.exit (1))
+          | Error _ => os.exit (1)
+    end

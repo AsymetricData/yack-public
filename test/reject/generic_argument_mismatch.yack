@@ -1,0 +1,4 @@
+
+fun bad () : bool option = Some (42)
+
+fun main () = ()

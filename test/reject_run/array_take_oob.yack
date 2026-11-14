@@ -1,0 +1,7 @@
+
+fun main () =
+    let val xs = array_new ()
+        val _ = array_push (xs, "a" ^ "b")
+        val s = array_take (xs, 1)
+    in print_string (s)
+    end

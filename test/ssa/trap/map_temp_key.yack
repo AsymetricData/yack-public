@@ -1,0 +1,17 @@
+
+
+fun probe (values : borrow (string map), counts : borrow (int map)) : int =
+    let val has = map_has_borrow (values, "k" ^ string_of_int (1))
+        val n = string_length (map_get_borrow_view (values, "k" ^ string_of_int (1)))
+        val count = map_get_copy_borrow (counts, "k" ^ string_of_int (1))
+    in
+        (if has then 1 else 0) + n +
+        count
+    end
+
+fun main () =
+    let val values : string map = map_new ()
+        val counts : int map = map_new ()
+        val _ = map_set (values, "k1", "abcd")
+        val _ = map_set (counts, "k1", 10)
+    in print_int (probe (borrow values, borrow counts)) end

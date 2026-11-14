@@ -1,0 +1,10 @@
+fun main () =
+    let val values : int array = array_make_uninit (4)
+        val _ = array_set_unchecked (values, 0, 10)
+        val _ = array_set_unchecked (values, 1, 20)
+        val _ = array_set_unchecked (values, 2, 30)
+        val first = array_get_unchecked (values, 0)
+        val last = array_get_unchecked (values, 2)
+    in
+        print_int (first + last + array_length (values))
+    end

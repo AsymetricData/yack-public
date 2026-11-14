@@ -1,0 +1,10 @@
+fun make_values () : string array =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "a" ^ "b")
+    in values
+    end
+
+fun main () =
+    let val text = array_get_borrow (make_values (), 0)
+    in print_int (string_length (text))
+    end

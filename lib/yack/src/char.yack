@@ -1,0 +1,148 @@
+(* Extrait le code du premier octet d’une chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne `-1` si la chaîne est vide, sinon le code de son premier octet. *)
+fun code (text : borrow string) : int =
+    if string_length (text) = 0 then -1 else string_char_at_unchecked (text, 0)
+
+(* Construit une chaîne à partir d’un code d’octet.
+   - `value` : code numérique à examiner.
+
+   Retourne une chaîne possédée ; une valeur négative produit la chaîne vide. *)
+fun from_code (value : int) : string = if value < 0 then "" else string_of_char (value)
+
+(* Teste si un code est un chiffre ASCII (`0`–`9`).
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_digit_code (value : int) : bool = if value >= 48 then value <= 57 else false
+
+(* Teste si un code est une majuscule ASCII (`A`–`Z`).
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_upper_code (value : int) : bool = if value >= 65 then value <= 90 else false
+
+(* Teste si un code est une minuscule ASCII (`a`–`z`).
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_lower_code (value : int) : bool = if value >= 97 then value <= 122 else false
+
+(* Teste si un code est une lettre ASCII.
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_alpha_code (value : int) : bool =
+    if is_upper_code (value) then true else is_lower_code (value)
+
+(* Teste si un code est une lettre ou un chiffre ASCII.
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_alnum_code (value : int) : bool =
+    if is_alpha_code (value) then true else is_digit_code (value)
+
+(* Teste si un code est un espace, une tabulation, LF ou CR ASCII.
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_space_code (value : int) : bool =
+    if value = 32 then
+        true
+    else if value = 9 then
+        true
+    else if value = 10 then true else if value = 13 then true else false
+
+(* Teste si un code appartient à la plage ASCII imprimable (32–126).
+   - `value` : code numérique à examiner.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_printable_code (value : int) : bool = if value >= 32 then value <= 126 else false
+
+(* Convertit une minuscule ASCII en majuscule, si applicable.
+   - `value` : code numérique à examiner.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun to_upper_code (value : int) : int =
+    if is_lower_code (value) then value - 32 else value
+
+(* Convertit une majuscule ASCII en minuscule, si applicable.
+   - `value` : code numérique à examiner.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun to_lower_code (value : int) : int =
+    if is_upper_code (value) then value + 32 else value
+
+(* Teste si le premier octet est un chiffre ASCII.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_digit (text : borrow string) : bool = is_digit_code (code (text))
+
+(* Teste si le premier octet est une lettre ASCII.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_alpha (text : borrow string) : bool = is_alpha_code (code (text))
+
+(* Teste si le premier octet est une lettre ou un chiffre ASCII.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_alnum (text : borrow string) : bool = is_alnum_code (code (text))
+
+(* Teste si le premier octet est un espace ASCII reconnu.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_space (text : borrow string) : bool = is_space_code (code (text))
+
+(* Teste si le premier octet est une majuscule ASCII.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_upper (text : borrow string) : bool = is_upper_code (code (text))
+
+(* Teste si le premier octet est une minuscule ASCII.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_lower (text : borrow string) : bool = is_lower_code (code (text))
+
+(* Convertit le premier octet en majuscule ASCII et le retourne sous forme de chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une nouvelle chaîne possédée ; seuls les octets ASCII correspondants sont
+   convertis. *)
+fun to_upper (text : borrow string) : string = from_code (to_upper_code (code (text)))
+
+(* Convertit le premier octet en minuscule ASCII et le retourne sous forme de chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une nouvelle chaîne possédée ; seuls les octets ASCII correspondants sont
+   convertis. *)
+fun to_lower (text : borrow string) : string = from_code (to_lower_code (code (text)))
+
+(* Compare les codes du premier octet de deux chaînes.
+   - `left` : première chaîne empruntée (emprunté, non consommé ni modifié en place).
+   - `right` : seconde chaîne empruntée (emprunté, non consommé ni modifié en place).
+
+   Retourne un entier négatif, nul ou positif selon l’ordre lexicographique en
+   octets. *)
+fun compare (left : borrow string, right : borrow string) : int =
+    let
+        val a = code (left)
+        val b = code (right)
+    in
+        if a < b then -1 else if a > b then 1 else 0
+    end

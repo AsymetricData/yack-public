@@ -1,0 +1,11 @@
+
+
+fun main () =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "old")
+        val _ = arena
+                    val text = "he" ^ "llo"
+                    val _ = array_put_arena (values, 0, text)
+                in ()
+                end
+    in print_string (string_copy (array_get_borrow (values, 0))) end

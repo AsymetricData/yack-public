@@ -1,0 +1,19 @@
+import yack/string
+
+
+
+fun use (line : string) : string =
+    let val size =
+            arena
+                val copy = string_copy (borrow line)
+            in string_length (borrow copy)
+            end
+    in
+        if size >= 0 then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "hello")
+        val out = use (s)
+    in print_string (out)
+    end

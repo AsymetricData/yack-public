@@ -1,0 +1,6 @@
+fun main () =
+    let val result = io.read_file "/tmp/yack_file_that_does_not_exist_12345"
+    in case result of
+         Ok content => print_string (content)
+       | Error message => print_string (message)
+    end

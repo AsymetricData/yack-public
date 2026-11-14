@@ -1,0 +1,126 @@
+import yack/array
+import yack/string
+
+(* Décale vers la droite les entiers supérieurs à `key` avant `position`, puis
+   renvoie l’indice d’insertion et le tableau.
+   - `values` : tableau Affine consommé, muté en place et rendu dans le couple.
+   - `position` : indice de départ du décalage.
+   - `key` : valeur à insérer après le décalage. *)
+fun shift_int (values : int array, position : int, key : int) : int * int array =
+    if position < 0 then
+        (0, values)
+    else if array.get_int (borrow values, position) > key then
+        let
+            val moved = array.get_int (borrow values, position)
+            val values = array.set_int (values, position + 1, moved)
+        in
+            shift_int (values, position - 1, key)
+        end
+    else
+        (position + 1, values)
+
+(* Trie en place le suffixe du tableau à partir de `index` par insertion et rend le
+   tableau.
+   - `values` : tableau Affine consommé et rendu à chaque étape.
+   - `index` : premier indice du suffixe à insérer.
+   - `size` : longueur du tableau, utilisée comme borne exclusive. *)
+fun sort_int_from (values : int array, index : int, size : int) : int array =
+    if index >= size then
+        values
+    else
+        let
+            val key = array.get_int (borrow values, index)
+            val shifted = shift_int (values, index - 1, key)
+            val target = shifted.0
+            val values = shifted.1
+            val values = array.set_int (values, target, key)
+        in
+            sort_int_from (values, index + 1, size)
+        end
+
+(* Trie en place un tableau d’entiers par insertion et rend le tableau trié.
+   - `values` : tableau Affine consommé puis rendu après mutation. *)
+fun sort_int (values : int array) : int array =
+    let val size = array.length (borrow values) in sort_int_from (values, 1, size) end
+
+(* Insère `value` à sa place dans une liste d’entiers déjà triée.
+   - `value` : entier inséré.
+   - `values` : liste Affine consommée ; ses cellules sont reconstruites par
+     déplacement.
+
+   Rend une nouvelle liste ordonnée sans modifier une autre copie. *)
+fun insert_int (value : int, values : int list) : int list =
+    case values of
+        Nil => Cons ((value, Nil))
+      | Cons (head, rest) =>
+          if value <= head then
+              Cons ((value, Cons ((head, rest))))
+          else
+              Cons ((head, insert_int (value, rest)))
+
+(* Trie une liste d’entiers par insertion récursive.
+   - `values` : liste Affine consommée ; ses éléments sont déplacés dans la liste
+     triée rendue. *)
+fun sort_int_list (values : int list) : int list =
+    case values of
+        Nil => Nil
+      | Cons (head, rest) => insert_int (head, sort_int_list (rest))
+
+(* Insère `value` à sa place dans une liste de chaînes déjà triée.
+   - `value` : chaîne déplacée dans la liste triée.
+   - `values` : liste Affine consommée ; ses cellules sont reconstruites par
+     déplacement.
+
+   Compare avec `string.compare` (ordre des octets) et rend une nouvelle liste
+   ordonnée sans modifier une autre copie. *)
+fun insert_string (value : string, values : string list) : string list =
+    case values of
+        Nil => Cons ((value, Nil))
+      | Cons (head, rest) =>
+          if string.compare (borrow value, borrow head) <= 0 then
+              Cons ((value, Cons ((head, rest))))
+          else
+              Cons ((head, insert_string (value, rest)))
+
+(* Trie une liste de chaînes par insertion récursive, par ordre des octets.
+   - `values` : liste Affine consommée ; ses éléments sont déplacés dans la liste
+     triée rendue. *)
+fun sort_string_list (values : string list) : string list =
+    case values of
+        Nil => Nil
+      | Cons (head, rest) => insert_string (head, sort_string_list (rest))
+
+(* Recherche `needle` dans l’intervalle inclus `[low, high]` d’un tableau trié.
+   - `values` : tableau Affine consommé et rendu inchangé dans le couple résultat.
+   - `low` : borne inférieure inclusive.
+   - `high` : borne supérieure inclusive.
+   - `needle` : entier recherché.
+
+   Renvoie `(Some indice, tableau)` si trouvé, sinon `(None, tableau)`. *)
+fun binary_search_int_from (values : int array, low : int, high : int, needle : int) : int option * int array =
+    if low > high then
+        (None, values)
+    else
+        let
+            val middle = low + (high - low) / 2
+            val current = array.get_int (borrow values, middle)
+        in
+            if current = needle then
+                (Some (middle), values)
+            else if current < needle then
+                binary_search_int_from (values, middle + 1, high, needle)
+            else
+                binary_search_int_from (values, low, middle - 1, needle)
+        end
+
+(* Recherche un entier dans un tableau trié par recherche binaire.
+   - `values` : tableau Affine consommé puis rendu inchangé dans le couple.
+   - `needle` : entier recherché.
+
+   Renvoie `(Some indice, tableau)` si trouvé, sinon `(None, tableau)`. *)
+fun binary_search_int (values : int array, needle : int) : int option * int array =
+    let
+        val size = array.length (borrow values)
+    in
+        binary_search_int_from (values, 0, size - 1, needle)
+    end

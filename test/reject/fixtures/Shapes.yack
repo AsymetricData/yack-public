@@ -1,0 +1,1 @@
+type point : Copy = { x : int, y : int }

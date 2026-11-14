@@ -1,0 +1,12 @@
+import yack/int
+
+
+fun main () =
+    let val top = int_to_int64 (2147483647) * int_to_int64 (2147483647) * int_to_int64 (2) + int_to_int64 (2147483647) * int_to_int64 (4) + int_to_int64 (1)
+        val _ = print_int64 (int.wrapping_add64 (top, int_to_int64 (1)))
+        val _ = print_int64 (int.wrapping_sub64 (int.wrapping_add64 (top, int_to_int64 (1)), int_to_int64 (1)))
+        val _ = print_int64 (int.wrapping_mul64 (top, int_to_int64 (2)))
+        val _ = print_int (int64_to_int_wrapping (int_to_int64 (2147483647) + int_to_int64 (1)))
+        val _ = print_int (int64_to_int (int_to_int64 (0 - 42)))
+    in ()
+    end

@@ -1,0 +1,10 @@
+# expect: drops `v` (%1) after it was consumed (double free)
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string = concat %0.s, %0.s
+    drop %1.v! : string
+    drop %1.v! : string
+    %2 : unit = const ()
+    return %2!
+}

@@ -1,0 +1,5 @@
+
+
+fun shout (text : borrow string) : int = string_length (text)
+
+fun main () = print_int (shout ("hey"))

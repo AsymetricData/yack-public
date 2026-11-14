@@ -1,0 +1,8 @@
+fun choose (flag : bool) : int * int =
+    if flag then (40, 2) else (1, 2)
+
+fun main () =
+    let val value = choose (true)
+        val result = value.0 + value.1
+    in print_int (result)
+    end

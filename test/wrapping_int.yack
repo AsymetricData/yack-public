@@ -1,0 +1,9 @@
+import yack/int
+
+
+fun main () =
+    let val _ = print_int (int.wrapping_add (2147483647, 1))
+        val _ = print_int (int.wrapping_sub (0 - 2147483647 - 1, 1))
+        val _ = print_int (int.wrapping_mul (100000, 100000))
+    in ()
+    end

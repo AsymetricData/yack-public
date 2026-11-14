@@ -1,0 +1,156 @@
+import yack/args
+import yack/cli
+import yack/io
+import yack/os
+import yack/string
+
+(* wc: count lines, words and bytes.
+
+   Words are separated by ASCII whitespace (space, tab, newline, carriage
+   return, vertical tab, form feed).  Without a file argument `wc` reads
+   stdin, like the real one. *)
+
+fun specs () : args.spec list =
+    [
+        args.Flag (("help", Some ("h"), "show this help")),
+        args.Positional (("file", "file to count", false))
+    ]
+
+(* Compte les lignes d'un texte emprunté, dernière ligne partielle incluse. *)
+fun count_lines (contents : borrow string) : int =
+    let val size = string.length (contents)
+        val breaks = string.count (contents, borrow "\n")
+    in
+        if size = 0 then 0
+        else if string.char_at_unchecked (contents, size - 1) = 10 then breaks
+        else breaks + 1
+    end
+
+(* Reconnaît les séparateurs de mots que `wc` compte.
+   - `code` : code d'octet à tester.
+
+   Retourne vrai pour espace, tabulation, saut de ligne, retour chariot,
+   tabulation verticale et saut de page. *)
+fun is_word_space (code : int) : bool =
+    if code = 32 then true
+    else if code = 9 then true
+    else if code = 10 then true
+    else if code = 13 then true
+    else if code = 11 then true
+    else code = 12
+
+(* Parcourt le texte et compte les débuts de mots.
+   - `contents` : texte emprunté, indexé en octets.
+   - `index` : position courante.
+   - `size` : borne exclusive.
+   - `inside` : vrai si le parcours est dans un mot.
+   - `total` : mots déjà comptés. *)
+fun count_words_from
+        (contents : borrow string, index : int, size : int, inside : bool,
+         total : int) : int =
+    if index >= size then
+        total
+    else
+        let val space =
+                is_word_space (string.char_at_unchecked (contents, index))
+        in
+            if space then
+                count_words_from (contents, index + 1, size, false, total)
+            else if inside then
+                count_words_from (contents, index + 1, size, true, total)
+            else
+                count_words_from (contents, index + 1, size, true, total + 1)
+        end
+
+(* Compte les mots séparés par n'importe quel espace ASCII. *)
+fun count_words (contents : borrow string) : int =
+    count_words_from (contents, 0, string.length (contents), false, 0)
+
+(* Aligne un entier sur sept colonnes. *)
+fun column (value : int) : string =
+    let val text = int_to_string (value)
+    in string.pad_left (borrow text, 7, 32)
+    end
+
+(* Construit la ligne `lines words bytes name`.
+   - `name` : nom affiché, emprunté.
+   - `contents` : contenu emprunté, source des compteurs. *)
+fun report (name : borrow string, contents : borrow string) : string =
+    column (count_lines (contents)) ^
+    column (count_words (contents)) ^
+    column (string.length (contents)) ^
+    " " ^ string.copy (name)
+
+(* Termine avec le code d'échec s'il y a eu au moins une erreur.
+   - `failures` : nombre de fichiers illisibles. *)
+fun finish (failures : int) : unit =
+    if failures = 0 then () else os.exit (cli.exit_failure ())
+
+(* Compte un fichier et écrit sa ligne. Retourne le nombre d'échecs.
+   - `path` : chemin consommé par la lecture. *)
+fun count_one (path : string) : int =
+    let val name = string.copy (borrow path)
+    in
+        case io.read_file (path) of
+            Ok (contents) =>
+                let val line = report (borrow name, borrow contents)
+                    val _ = io.print_line (borrow line)
+                in 0
+                end
+          | Error (message) =>
+                let val line = "wc: " ^ name ^ ": " ^ message
+                    val _ = io.eprint_line (borrow line)
+                in 1
+                end
+    end
+
+(* Compte chaque fichier de la liste.
+   - `paths` : liste Affine consommée dans l'ordre. *)
+fun count_paths (paths : string list) : int =
+    case paths of
+        Nil => 0
+      | Cons (path, rest) => count_one (path) + count_paths (rest)
+
+(* Compte l'entrée standard quand aucun fichier n'est nommé. *)
+fun count_stdin () : unit =
+    case io.read_stdin () of
+        Error (message) =>
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_failure ())
+            end
+      | Ok (contents) =>
+            let val line = report (borrow "-", borrow contents)
+                val _ = io.print_line (borrow line)
+            in ()
+            end
+
+(* Choisit stdin ou les fichiers nommés.
+   - `paths` : positionnels consommés. *)
+fun count_all (paths : string list) : unit =
+    case paths of
+        Nil => count_stdin ()
+      | Cons (path, rest) =>
+            finish (count_one (path) + count_paths (rest))
+
+(* Affiche l'aide puis termine avec le code 0. *)
+fun print_help () : unit =
+    let val _ = cli.print_help ("wc", "Count lines, words and bytes.", specs ())
+    in os.exit (cli.exit_ok ())
+    end
+
+(* Consomme les options puis lance le comptage.
+   - `value` : `parsed` consommé par les accesseurs. *)
+fun dispatch (value : args.parsed) : unit =
+    let val helpPair = args.take_flag (value, "help")
+        val paths = args.positionals (helpPair.1)
+    in
+        if helpPair.0 then print_help () else count_all (paths)
+    end
+
+fun main () =
+    case args.parse (specs (), os.command_args ()) of
+        Error (message) =>
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_usage ())
+            end
+      | Ok (value) => dispatch (value)

@@ -1,0 +1,9 @@
+
+fun describe (value : bool option) : int =
+    case value of
+        None => 0
+      | Some true => 1
+      | Some false => 2
+
+fun main () =
+    print_int (describe (Some (true)))

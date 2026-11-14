@@ -1,0 +1,9 @@
+fun copy_one (values : int list) : int list =
+    case values of
+        Nil => Nil
+      | Cons (head, _) => Cons ((head, Nil))
+
+fun main () =
+    let val values = Cons ((1, Nil))
+        val copied = copy_one (values)
+    in print_int (list_length (copied)) end

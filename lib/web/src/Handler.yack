@@ -1,0 +1,13 @@
+import web/Request
+import web/Response
+
+type t : Copy =
+    { run : (consume Request.t, consume (string * string) list) -> Response.t }
+
+fun make (run : (consume Request.t, consume (string * string) list) -> Response.t) : t =
+    { run = run }
+
+fun call (handler : t, request : Request.t, params : (string * string) list) : Response.t =
+    let val run = handler.run
+    in run (request, params)
+    end

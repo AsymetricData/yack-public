@@ -1,0 +1,22 @@
+
+
+
+datatype tree = Leaf | Node of tree * int * tree
+
+fun full (depth : int) : tree =
+    if depth = 0 then Leaf
+    else Node ((full (depth - 1), depth, full (depth - 1)))
+
+fun spine (n : int, acc : tree) : tree =
+    if n = 0 then acc else spine (n - 1, Node ((Leaf, n, acc)))
+
+fun root (t : borrow tree) : int =
+    case t of
+      Leaf => 0
+    | Node (_, value, _) => value
+
+fun main () =
+    let val balanced = full (20)
+        val right = spine (1000000, Leaf)
+    in print_int (root (borrow balanced) + root (borrow right))
+    end

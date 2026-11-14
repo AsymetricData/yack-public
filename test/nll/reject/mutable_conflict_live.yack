@@ -1,0 +1,13 @@
+
+
+fun bad_mut (value : string) : int =
+    let val first = borrow value
+        val second = borrow mut value
+        val size = string_length (first)
+    in size end
+
+fun main () : unit =
+    let val s = "hello"
+        val n = bad_mut (s)
+    in print_int (n)
+    end

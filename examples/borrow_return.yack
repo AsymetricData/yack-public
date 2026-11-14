@@ -1,0 +1,14 @@
+type user : Affine = { name : int }
+
+fun reborrow (value : borrow user) : borrow user from value =
+    value
+
+fun choose (left : borrow user, right : borrow user) : borrow user from right =
+    right
+
+fun main () =
+    let val user : user = { name = 1 }
+        val borrowed = borrow user
+        val selected = choose (borrowed, borrowed)
+    in ()
+    end

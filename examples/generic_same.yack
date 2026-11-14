@@ -1,0 +1,8 @@
+fun same (x, y) =
+    x = y
+
+fun main () =
+    let val a = same (1, 2)
+        val b = same (true, false)
+    in if a then print_int (1) else print_int (0)
+    end

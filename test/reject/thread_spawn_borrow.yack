@@ -1,0 +1,7 @@
+fun worker (value : int64) : unit = ()
+
+fun main () =
+    let val text = "message"
+        val _ = sys.thread_spawn (worker, borrow text)
+    in ()
+    end

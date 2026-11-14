@@ -1,0 +1,59 @@
+import Api
+import alpage/Alpage
+import alpage/Request
+import alpage/Test
+import yack/io
+
+(* Step 8: test the app in memory. `Test.request` runs the same router,
+   middlewares and error mapping as the server; only the socket is gone.
+   The client is Affine: each request consumes it and hands it back. *)
+
+fun say (message : string) : unit =
+    io.print_line (borrow message)
+
+fun expect (client : Test.client, label : string, raw : string,
+            want_status : int, want_body : string) : Test.client =
+    let val result = Test.request (client, Request.parse (raw))
+        val client = result.1
+        val _ =
+            case result.0 of
+                { status = got, headers = _headers, body = text } =>
+                    if got = want_status then
+                        if string_eq (borrow text, borrow want_body) then say ("ok " ^ label)
+                        else say ("FAIL " ^ label ^ ": body " ^ text)
+                    else say ("FAIL " ^ label ^ ": status " ^ int_to_string (got))
+    in
+        client
+    end
+
+fun get (path : string) : string =
+    "GET " ^ path ^ " HTTP/1.1\r\nHost: localhost\r\n\r\n"
+
+fun main () =
+    case Test.start (Api.application (), Alpage.config (0)) of
+        Error message => say (message)
+      | Ok client =>
+            client
+            |> expect ("home", get ("/"), 200, "hello from alpage")
+            |> expect ("hello query", get ("/hello?name=Ada"), 200, "hello, Ada")
+            |> expect ("hello default", get ("/hello"), 200, "hello, stranger")
+            |> expect ("greet", get ("/greet?first=Ada&last=Lovelace"), 200,
+                       "hello, Ada Lovelace")
+            |> expect ("square", get ("/square/12"), 200, "{\"square\":144}")
+            |> expect ("square bad", get ("/square/abc"), 400, "invalid path parameter")
+            |> expect ("sum",
+                       "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 17\r\n\r\n{\"items\":[1,2,3]}",
+                       200, "{\"sum\":6}")
+            |> expect ("sum empty",
+                       "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 12\r\n\r\n{\"items\":[]}",
+                       422, "items must not be empty")
+            |> expect ("sum bad json",
+                       "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n{oops",
+                       400, "invalid JSON body")
+            |> expect ("sum wrong method", get ("/sum"), 405, "method not allowed")
+            |> expect ("admin denied", get ("/admin"), 401, "unauthorized")
+            |> expect ("admin",
+                       "GET /admin HTTP/1.1\r\nHost: localhost\r\nX-Token: secret\r\n\r\n",
+                       200, "welcome, admin")
+            |> expect ("missing", get ("/missing"), 404, "not found")
+            |> Test.close

@@ -1,0 +1,4 @@
+fun main () =
+    let val _ = array_push (array_new (), "x")
+    in ()
+    end

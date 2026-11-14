@@ -1,0 +1,14 @@
+import yack/array
+
+fun value_of (item : int option) : int =
+    case item of
+        Some (value) => value
+      | None => 0
+
+fun main () =
+    let val values = array.push (array.new (), 3)
+        val values = array.push (values, 1)
+        val values = array.push (values, 2)
+    in print_int (value_of (array.max_int (borrow values)) +
+                  value_of (array.min_int (borrow values)))
+    end

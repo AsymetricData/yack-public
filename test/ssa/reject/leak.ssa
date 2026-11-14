@@ -1,0 +1,16 @@
+# expect: is not consumed on the path to return: leak
+# One path drops the owned value, the other returns without it.
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string = concat %0.s, %0.s
+    %2 : bool = const true
+    branch %2 b1 b2
+  b1:
+    drop %1.v! : string
+    %3 : unit = const ()
+    return %3!
+  b2:
+    %4 : unit = const ()
+    return %4!
+}

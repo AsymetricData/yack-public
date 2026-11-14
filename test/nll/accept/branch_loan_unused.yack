@@ -1,0 +1,15 @@
+
+
+
+fun bad (flag : bool, values : int list) : int =
+    let val maybe =
+            if flag then Some (borrow values) else None
+        val length = list_length (values)
+    in length
+    end
+
+fun main () : unit =
+    let val values = Cons ((1, Nil))
+        val n = bad (true, values)
+    in print_int (n)
+    end

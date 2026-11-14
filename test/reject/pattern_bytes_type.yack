@@ -1,0 +1,4 @@
+fun main () =
+    case "GET" of
+        <<"GET">> => ()
+      | _ => ()

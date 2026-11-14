@@ -1,0 +1,5 @@
+fun add (x : float, y : float) : float =
+    x + y
+
+fun main () =
+    print_float (add (1.5, 2.5))

@@ -1,0 +1,11 @@
+# The same graph, accepted: the borrowed value is read before the removal.
+fun yack_f {
+  b0(%0.values : string map):
+    %1 : string = view const "k"
+    %2.first : &string = map.map_get_borrow %0.values, move %1
+    %5 : int = string.string_length %2.first
+    %3 : string = view const "k"
+    %4 : unit = map.map_remove %0.values, move %3
+    drop %0.values : string map
+    return %5
+}

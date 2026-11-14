@@ -1,0 +1,17 @@
+import sql/Sqlite
+
+
+fun main () =
+    case Sqlite.open (":memory:") of
+        Error _ => print_int (1)
+      | Ok db =>
+          let val _ = Sqlite.exec (borrow db, "create table t(x integer)")
+              val status =
+                  case Sqlite.prepare (borrow db, "insert into t values (42)") of
+                      Error _ => 1
+                    | Ok statement =>
+                          let val _ = Sqlite.finalize (statement)
+                          in 0 end
+              val _ = Sqlite.close (db)
+          in print_int (status)
+          end

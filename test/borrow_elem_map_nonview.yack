@@ -1,0 +1,9 @@
+datatype box = Box of int
+fun value_of (item : borrow box) : int =
+    case item of Box (value) => value
+fun main () =
+    let val boxes : box map = map_new ()
+        val _ = map_set (boxes, "k", Box (42))
+        val item = map_get_borrow (boxes, "k")
+    in print_int (value_of (item))
+    end

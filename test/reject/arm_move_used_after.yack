@@ -1,0 +1,14 @@
+
+
+fun take (s : string) : int = string_length (borrow s)
+fun peek (s : borrow string) : int = string_length (s)
+
+fun run (c : bool) : int =
+    let
+        val s = "hello" ^ "!"
+        val b = borrow s
+        val x = if c then take (s) else peek (b)
+    in x + peek (b)
+    end
+
+fun main () = print_int (run (true))

@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Command-line tools in Yack: ls, cat, wc and a TUI demo</title>
+    <meta name="description" content="Four complete command-line programs in Yack, with imports, helpers and main: ls -al, cat, wc and a colour demo, built with the standard library only.">
+    <meta name="theme-color" content="#f7f5ef">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="Yack, home">
+            <img src="favicon.svg" alt="" width="30" height="30">
+            <span>Yack</span>
+        </a>
+        <nav aria-label="Main navigation">
+            <a href="index.html#language">Language</a>
+            <a href="index.html#memory">Memory</a>
+            <a href="cli.html" aria-current="page">CLI</a>
+            <a href="ideas.html">Ideas</a>
+            <a href="alpage.html">Alpage tutorial</a>
+            <a href="index.html#quick-start">Quick start</a>
+        </nav>
+        <a class="header-link" href="https://github.com/AsymetricData/yack-public">GitHub <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="content">
+        <div class="tut-hero">
+            <p class="eyebrow">Guide · CLI · about 15 minutes</p>
+            <h1>Four CLIs, <span class="accent">complete source.</span></h1>
+            <p class="lead">
+                <code>ls -al</code>, <code>cat</code>, <code>wc</code> and a small TUI demo, each shown as the
+                whole file: imports, helpers and <code>main</code>. Nothing is elided, nothing needs a
+                runtime, an argument-parser crate or a garbage collector.
+            </p>
+            <ul class="from-langs" aria-label="Written for developers coming from">
+                <li>coming from <strong>Go</strong> <code>flag</code></li>
+                <li><strong>Rust</strong> <code>clap</code></li>
+                <li><strong>Node</strong> <code>commander</code></li>
+            </ul>
+        </div>
+
+        <div class="tut-layout">
+            <nav class="toc" aria-label="Guide steps">
+                <p>Steps</p>
+                <ol>
+                    <li><a href="#setup">Three commands</a></li>
+                    <li><a href="#ls">A complete ls</a></li>
+                    <li><a href="#cat">A complete cat</a></li>
+                    <li><a href="#wc">A complete wc</a></li>
+                    <li><a href="#look">Colour and boxes</a></li>
+                    <li><a href="#ship">Check, build, run</a></li>
+                    <li><a href="#limits">What is still missing</a></li>
+                    <li><a href="#cheatsheet">Cheat sheet</a></li>
+                </ol>
+            </nav>
+
+            <div class="tut-body">
+                <section class="step" id="setup" aria-labelledby="setup-title">
+                    <span class="step-num">Step 01</span>
+                    <h2 id="setup-title">Three commands</h2>
+                    <p>
+                        A CLI is an ordinary Yack project: a folder with <code>yack.toml</code>, one
+                        dependency on <code>lib/yack</code>, and a <code>main</code> function. Every
+                        file below is copied verbatim from <code>examples/cli</code> and compiled on
+                        each commit.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh"># from a checkout of the yack repository
+make
+./yack new mycli
+cd mycli
+../yack run</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">yack.toml</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="toml">[package]
+name = "cli-demo"
+version = "0.1.0"
+
+[dependencies]
+yack = { path = "../lib/yack" }</code></pre>
+                    </div>
+                    <p>
+                        Each program is one file under <code>examples/cli/src</code>. Copy it into
+                        <code>mycli/src/main.yack</code> and <code>../yack run</code> works: there is no
+                        generated code and no hidden module.
+                    </p>
+                </section>
+
+                <section class="step" id="ls" aria-labelledby="ls-title">
+                    <span class="step-num">Step 02</span>
+                    <h2 id="ls-title">A complete ls</h2>
+                    <p>
+                        <code>main</code> reads argv with <code>os.command_args ()</code>, parses it with
+                        <code>args.parse</code>, then hands the parsed value to
+                        <code>dispatch</code>. <code>-a</code> and <code>-l</code> combine into the
+                        cluster <code>-al</code>, and the accessors return a pair so the rest of the
+                        parsed arguments stays available.
+                    </p>
+                    <p>
+                        The long format asks <code>io.read_file</code> for the bytes and uses the string
+                        length as the size. A missing path writes on stderr, is counted, and
+                        <code>finish</code> exits with status 1. <code>--help</code> exits 0, no path
+                        exits 2.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">ls.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/cli/src/ls.yack">import yack/args
+import yack/cli
+import yack/io
+import yack/os
+import yack/sort
+import yack/string
+
+(* ls: a tiny `ls` built on the standard library.
+
+   The kernel exposes no `readdir`/`stat` yet, so this variant lists the paths
+   named on the command line instead of walking a directory.  `-l` reports the
+   size it gets by reading the file, and `-a` is accepted for `ls`
+   compatibility. *)
+
+fun specs () : args.spec list =
+    [
+        args.Flag (("all", Some ("a"), "show hidden entries (no effect yet)")),
+        args.Flag (("long", Some ("l"), "long format: size and name")),
+        args.Flag (("help", Some ("h"), "show this help")),
+        args.Positional (("path", "file or directory", false))
+    ]
+
+(* Formate une ligne de sortie.
+   - `long` : vrai pour préfixer la taille.
+   - `name` : nom emprunté pour la ligne.
+   - `contents` : contenu emprunté, source de la taille. *)
+fun line_of (long : bool, name : borrow string, contents : borrow string) : string =
+    if long then
+        let val size = int_to_string (string.length (contents))
+        in string.pad_left (borrow size, 8, 32) ^ "  " ^ string.copy (name)
+        end
+    else
+        string.copy (name)
+
+(* Écrit la ligne d'un chemin. Retourne faux si la lecture échoue.
+   - `long` : format long demandé.
+   - `path` : chemin consommé par la lecture. *)
+fun print_one (long : bool, path : string) : bool =
+    let val name = string.copy (borrow path)
+    in
+        case io.read_file (path) of
+            Ok (contents) =&gt;
+                let val line = line_of (long, borrow name, borrow contents)
+                    val _ = io.print_line (borrow line)
+                in true
+                end
+          | Error (message) =&gt;
+                let val line = "ls: " ^ name ^ ": " ^ message
+                    val _ = io.eprint_line (borrow line)
+                in false
+                end
+    end
+
+(* Écrit chaque chemin et compte les échecs.
+   - `long` : format long demandé.
+   - `paths` : liste Affine consommée dans l'ordre. *)
+fun print_paths (long : bool, paths : string list) : int =
+    case paths of
+        Nil =&gt; 0
+      | Cons (path, rest) =&gt;
+            let val ok = print_one (long, path)
+                val failures = print_paths (long, rest)
+            in if ok then failures else failures + 1
+            end
+
+(* Termine avec le code d'échec s'il y a eu au moins une erreur.
+   - `failures` : nombre de chemins illisibles. *)
+fun finish (failures : int) : unit =
+    if failures = 0 then () else os.exit (cli.exit_failure ())
+
+(* Affiche l'aide puis termine avec le code 0. *)
+fun print_help () : unit =
+    let val _ = cli.print_help ("ls", "List file information.", specs ())
+    in os.exit (cli.exit_ok ())
+    end
+
+(* Signale l'absence de chemin puis termine avec le code d'usage. *)
+fun no_path () : unit =
+    let val _ = cli.print_error ("no path given: readdir is not available yet")
+    in os.exit (cli.exit_usage ())
+    end
+
+(* Trie les chemins avant de les lister.
+   - `long` : format long demandé.
+   - `paths` : positionnels consommés. *)
+fun list_paths (long : bool, paths : string list) : unit =
+    case paths of
+        Nil =&gt; no_path ()
+      | Cons (path, rest) =&gt;
+            finish
+                (print_paths
+                     (long, sort.sort_string_list (Cons ((path, rest)))))
+
+(* Consomme les options puis transmet les chemins au rendu.
+   - `value` : `parsed` consommé par les accesseurs. *)
+fun dispatch (value : args.parsed) : unit =
+    let val helpPair = args.take_flag (value, "help")
+        val longPair = args.take_flag (helpPair.1, "long")
+    in
+        if helpPair.0 then print_help ()
+        else list_paths (longPair.0, args.positionals (longPair.1))
+    end
+
+fun main () =
+    case args.parse (specs (), os.command_args ()) of
+        Error (message) =&gt;
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_usage ())
+            end
+      | Ok (value) =&gt; dispatch (value)</code></pre>
+                        <p class="code-note">Complete file: imports, helpers and <code>main</code>.</p>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh">../../yack build src/ls.yack ls
+./ls -al README.md src/main.yack src/ls.yack src/wc.yack src/cat.yack
+./ls --nope            # stderr: error: unknown option `--nope`, exit 2</code></pre>
+                        <pre><code data-lang="plain">    1449  README.md
+    2843  src/cat.yack
+    3977  src/ls.yack
+    3477  src/main.yack
+    5447  src/wc.yack</code></pre>
+                    </div>
+                    <div class="callout warn">
+                        <strong>What <code>ls</code> cannot do yet.</strong>
+                        The kernel exposes no <code>readdir</code> or <code>stat</code>, so this
+                        example lists the paths you name instead of walking a directory, and
+                        <code>-a</code> is accepted but changes nothing. Directories read as empty.
+                        The missing primitives are tracked in
+                        <a class="text-link" href="https://github.com/AsymetricData/yack-public/blob/main/docs/stdlib.md#11-primitives-compilateur-manquantes">the standard library plan <span aria-hidden="true">↗</span></a>.
+                    </div>
+                </section>
+
+                <section class="step" id="cat" aria-labelledby="cat-title">
+                    <span class="step-num">Step 03</span>
+                    <h2 id="cat-title">A complete cat</h2>
+                    <p>
+                        <code>cat</code> is the smallest shape of a CLI: a <code>result</code> from
+                        <code>io.read_file</code>, raw output through <code>io.print_raw</code>, and
+                        error lines on stderr. One function handles a file, the recursive
+                        <code>copy_paths</code> threads the list, and <code>finish</code> turns the
+                        failure count into an exit status. With no argument it reads stdin.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">cat.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/cli/src/cat.yack">import yack/args
+import yack/cli
+import yack/io
+import yack/os
+import yack/string
+
+(* cat: copy files, or stdin, to stdout.
+
+   Shows the two halves of a CLI: a `result` from `io.read_file`, and error
+   lines on stderr with a non-zero exit status. *)
+
+fun specs () : args.spec list =
+    [
+        args.Flag (("help", Some ("h"), "show this help")),
+        args.Positional (("file", "file to print", false))
+    ]
+
+(* Termine avec le code d'échec s'il y a eu au moins une erreur.
+   - `failures` : nombre de fichiers illisibles. *)
+fun finish (failures : int) : unit =
+    if failures = 0 then () else os.exit (cli.exit_failure ())
+
+(* Écrit un fichier sur stdout. Retourne le nombre d'échecs.
+   - `path` : chemin consommé par la lecture. *)
+fun copy_one (path : string) : int =
+    let val name = string.copy (borrow path)
+    in
+        case io.read_file (path) of
+            Ok (contents) =&gt;
+                let val _ = io.print_raw (borrow contents)
+                in 0
+                end
+          | Error (message) =&gt;
+                let val line = "cat: " ^ name ^ ": " ^ message
+                    val _ = io.eprint_line (borrow line)
+                in 1
+                end
+    end
+
+(* Copie chaque fichier de la liste.
+   - `paths` : liste Affine consommée dans l'ordre. *)
+fun copy_paths (paths : string list) : int =
+    case paths of
+        Nil =&gt; 0
+      | Cons (path, rest) =&gt; copy_one (path) + copy_paths (rest)
+
+(* Copie stdin quand aucun fichier n'est nommé. *)
+fun copy_stdin () : unit =
+    case io.read_stdin () of
+        Error (message) =&gt;
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_failure ())
+            end
+      | Ok (contents) =&gt;
+            let val _ = io.print_raw (borrow contents)
+            in ()
+            end
+
+(* Choisit stdin ou les fichiers nommés.
+   - `paths` : positionnels consommés. *)
+fun copy_all (paths : string list) : unit =
+    case paths of
+        Nil =&gt; copy_stdin ()
+      | Cons (path, rest) =&gt;
+            finish (copy_one (path) + copy_paths (rest))
+
+(* Affiche l'aide puis termine avec le code 0. *)
+fun print_help () : unit =
+    let val _ = cli.print_help ("cat", "Copy files to standard output.", specs ())
+    in os.exit (cli.exit_ok ())
+    end
+
+(* Consomme les options puis lance la copie.
+   - `value` : `parsed` consommé par les accesseurs. *)
+fun dispatch (value : args.parsed) : unit =
+    let val helpPair = args.take_flag (value, "help")
+        val paths = args.positionals (helpPair.1)
+    in
+        if helpPair.0 then print_help () else copy_all (paths)
+    end
+
+fun main () =
+    case args.parse (specs (), os.command_args ()) of
+        Error (message) =&gt;
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_usage ())
+            end
+      | Ok (value) =&gt; dispatch (value)</code></pre>
+                        <p class="code-note">Complete file: no helper is hidden.</p>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh">../../yack build src/cat.yack cat
+./cat README.md
+./cat missing.txt      # stderr: cat: missing.txt: cannot read file, exit 1
+printf 'raw bytes' | ./cat</code></pre>
+                    </div>
+                    <p>
+                        <code>copy_one</code> copies the name before passing the path to
+                        <code>io.read_file</code>: reading consumes the path, so the error message
+                        needs its own owner. The compiler would reject the other order.
+                    </p>
+                </section>
+
+                <section class="step" id="wc" aria-labelledby="wc-title">
+                    <span class="step-num">Step 04</span>
+                    <h2 id="wc-title">A complete wc</h2>
+                    <p>
+                        <code>wc</code> counts from a borrowed string: <code>count_lines</code> checks
+                        the last byte, <code>count_words_from</code> walks the bytes once, and
+                        <code>string.length</code> gives the byte count. <code>report</code> pads the
+                        three columns and adds the name, so files and stdin print the same format.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">wc.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/cli/src/wc.yack">import yack/args
+import yack/cli
+import yack/io
+import yack/os
+import yack/string
+
+(* wc: count lines, words and bytes.
+
+   Words are separated by ASCII whitespace (space, tab, newline, carriage
+   return, vertical tab, form feed).  Without a file argument `wc` reads
+   stdin, like the real one. *)
+
+fun specs () : args.spec list =
+    [
+        args.Flag (("help", Some ("h"), "show this help")),
+        args.Positional (("file", "file to count", false))
+    ]
+
+(* Compte les lignes d'un texte emprunté, dernière ligne partielle incluse. *)
+fun count_lines (contents : borrow string) : int =
+    let val size = string.length (contents)
+        val breaks = string.count (contents, borrow "\n")
+    in
+        if size = 0 then 0
+        else if string.char_at_unchecked (contents, size - 1) = 10 then breaks
+        else breaks + 1
+    end
+
+(* Reconnaît les séparateurs de mots que `wc` compte.
+   - `code` : code d'octet à tester.
+
+   Retourne vrai pour espace, tabulation, saut de ligne, retour chariot,
+   tabulation verticale et saut de page. *)
+fun is_word_space (code : int) : bool =
+    if code = 32 then true
+    else if code = 9 then true
+    else if code = 10 then true
+    else if code = 13 then true
+    else if code = 11 then true
+    else code = 12
+
+(* Parcourt le texte et compte les débuts de mots.
+   - `contents` : texte emprunté, indexé en octets.
+   - `index` : position courante.
+   - `size` : borne exclusive.
+   - `inside` : vrai si le parcours est dans un mot.
+   - `total` : mots déjà comptés. *)
+fun count_words_from
+        (contents : borrow string, index : int, size : int, inside : bool,
+         total : int) : int =
+    if index &gt;= size then
+        total
+    else
+        let val space =
+                is_word_space (string.char_at_unchecked (contents, index))
+        in
+            if space then
+                count_words_from (contents, index + 1, size, false, total)
+            else if inside then
+                count_words_from (contents, index + 1, size, true, total)
+            else
+                count_words_from (contents, index + 1, size, true, total + 1)
+        end
+
+(* Compte les mots séparés par n'importe quel espace ASCII. *)
+fun count_words (contents : borrow string) : int =
+    count_words_from (contents, 0, string.length (contents), false, 0)
+
+(* Aligne un entier sur sept colonnes. *)
+fun column (value : int) : string =
+    let val text = int_to_string (value)
+    in string.pad_left (borrow text, 7, 32)
+    end
+
+(* Construit la ligne `lines words bytes name`.
+   - `name` : nom affiché, emprunté.
+   - `contents` : contenu emprunté, source des compteurs. *)
+fun report (name : borrow string, contents : borrow string) : string =
+    column (count_lines (contents)) ^
+    column (count_words (contents)) ^
+    column (string.length (contents)) ^
+    " " ^ string.copy (name)
+
+(* Termine avec le code d'échec s'il y a eu au moins une erreur.
+   - `failures` : nombre de fichiers illisibles. *)
+fun finish (failures : int) : unit =
+    if failures = 0 then () else os.exit (cli.exit_failure ())
+
+(* Compte un fichier et écrit sa ligne. Retourne le nombre d'échecs.
+   - `path` : chemin consommé par la lecture. *)
+fun count_one (path : string) : int =
+    let val name = string.copy (borrow path)
+    in
+        case io.read_file (path) of
+            Ok (contents) =&gt;
+                let val line = report (borrow name, borrow contents)
+                    val _ = io.print_line (borrow line)
+                in 0
+                end
+          | Error (message) =&gt;
+                let val line = "wc: " ^ name ^ ": " ^ message
+                    val _ = io.eprint_line (borrow line)
+                in 1
+                end
+    end
+
+(* Compte chaque fichier de la liste.
+   - `paths` : liste Affine consommée dans l'ordre. *)
+fun count_paths (paths : string list) : int =
+    case paths of
+        Nil =&gt; 0
+      | Cons (path, rest) =&gt; count_one (path) + count_paths (rest)
+
+(* Compte l'entrée standard quand aucun fichier n'est nommé. *)
+fun count_stdin () : unit =
+    case io.read_stdin () of
+        Error (message) =&gt;
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_failure ())
+            end
+      | Ok (contents) =&gt;
+            let val line = report (borrow "-", borrow contents)
+                val _ = io.print_line (borrow line)
+            in ()
+            end
+
+(* Choisit stdin ou les fichiers nommés.
+   - `paths` : positionnels consommés. *)
+fun count_all (paths : string list) : unit =
+    case paths of
+        Nil =&gt; count_stdin ()
+      | Cons (path, rest) =&gt;
+            finish (count_one (path) + count_paths (rest))
+
+(* Affiche l'aide puis termine avec le code 0. *)
+fun print_help () : unit =
+    let val _ = cli.print_help ("wc", "Count lines, words and bytes.", specs ())
+    in os.exit (cli.exit_ok ())
+    end
+
+(* Consomme les options puis lance le comptage.
+   - `value` : `parsed` consommé par les accesseurs. *)
+fun dispatch (value : args.parsed) : unit =
+    let val helpPair = args.take_flag (value, "help")
+        val paths = args.positionals (helpPair.1)
+    in
+        if helpPair.0 then print_help () else count_all (paths)
+    end
+
+fun main () =
+    case args.parse (specs (), os.command_args ()) of
+        Error (message) =&gt;
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_usage ())
+            end
+      | Ok (value) =&gt; dispatch (value)</code></pre>
+                        <p class="code-note">Complete file: the counters and <code>main</code>.</p>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh">../../yack build src/wc.yack wc
+./wc src/*.yack
+printf 'a b\nc\n' | ./wc</code></pre>
+                        <pre><code data-lang="plain">      85     336     3477 src/main.yack
+     110     588     3977 src/ls.yack
+     156     808     5447 src/wc.yack
+      88     422     2843 src/cat.yack
+      2      3      6 -</code></pre>
+                    </div>
+                    <div class="callout">
+                        <strong>No shared mutable state.</strong>
+                        <code>count_all</code> sums the failures of <code>count_one</code> and
+                        <code>count_paths</code>; <code>finish</code> maps that number to the exit
+                        code. The counters never touch a global: two instances in one process would
+                        not interfere.
+                    </div>
+                </section>
+
+                <section class="step" id="look" aria-labelledby="look-title">
+                    <span class="step-num">Step 05</span>
+                    <h2 id="look-title">Colour and boxes</h2>
+                    <p>
+                        The last program combines <code>yack/args</code>, <code>yack/ansi</code> and
+                        <code>yack/tui</code>. ANSI helpers return strings; the TUI builds a box, a
+                        progress bar, a menu and a status line from those strings. Rendering is a
+                        value, so the same code runs in a terminal or in a test.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">main.yack</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="yack" data-from="examples/cli/src/main.yack">import yack/args
+import yack/ansi
+import yack/cli
+import yack/io
+import yack/os
+import yack/string
+import yack/tui
+
+fun flag_help () : args.spec =
+    args.Flag (("help", Some ("h"), "show this help"))
+
+fun flag_verbose () : args.spec =
+    args.Flag (("verbose", Some ("v"), "verbose output"))
+
+fun opt_output () : args.spec =
+    args.Opt (("output", Some ("o"), "output file", None))
+
+fun pos_file () : args.spec =
+    args.Positional (("file", "input file", true))
+
+fun specs () : args.spec list =
+    [
+        flag_help (),
+        flag_verbose (),
+        opt_output (),
+        pos_file ()
+    ]
+
+fun main () =
+    let val argv = os.command_args ()
+        val parsed = args.parse (specs (), argv)
+    in
+        case parsed of
+            Error (message) =&gt;
+                let val _ = cli.print_error (message)
+                in os.exit_usage ()
+                end
+          | Ok (value0) =&gt;
+                let val helpPair = args.take_flag (value0, "help")
+                    val help = helpPair.0
+                    val value1 = helpPair.1
+                in
+                    if help then
+                        let val _ =
+                                cli.print_help
+                                    ("cli-demo", "A tiny Yack CLI.", specs ())
+                        in os.exit_ok ()
+                        end
+                    else
+                        let val verbosePair = args.take_flag (value1, "verbose")
+                            val verboseFlag = verbosePair.0
+                            val value2 = verbosePair.1
+                            val outputPair =
+                                args.take_option_or (value2, "output", "stdout")
+                            val output = outputPair.0
+                            val value3 = outputPair.1
+                            val files = args.positionals (value3)
+                            val verbose = if verboseFlag then "yes" else "no"
+                            val fileList = string.join (", ", files)
+                            val body =
+                                tui.kv ("verbose", verbose) ^ "\n" ^
+                                tui.kv ("output", output) ^ "\n" ^
+                                tui.kv ("files", fileList)
+                            val menuItems =
+                                Cons (("one", Cons (("two", Cons (("three", Nil))))))
+                            val header =
+                                ansi.bold () ^ "cli-demo" ^ ansi.reset () ^
+                                ansi.dim () ^ "  tiny yack cli" ^ ansi.reset () ^
+                                "\n\n"
+                            val _ = io.print_raw (borrow header)
+                            val boxed = tui.box ("run", body, 60) ^ "\n\n"
+                            val _ = io.print_raw (borrow boxed)
+                            val progress =
+                                ansi.fg_cyan () ^
+                                tui.progress (2, 5, 32) ^
+                                ansi.reset () ^ "\n\n"
+                            val _ = io.print_raw (borrow progress)
+                            val menu = tui.menu (menuItems, 1, 24) ^ "\n"
+                            val _ = io.print_raw (borrow menu)
+                            val status = tui.status_bar ("✓ done  ·  0.1.0", 60) ^ "\n"
+                            val _ = io.print_raw (borrow status)
+                        in os.exit_ok ()
+                        end
+                end
+    end</code></pre>
+                        <p class="code-note">Complete file: <code>yack/args</code>, <code>yack/ansi</code> and <code>yack/tui</code>.</p>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh">../../yack build src/main.yack cli-demo
+./cli-demo -v -o out.txt a.yack b.yack</code></pre>
+                        <pre><code data-lang="plain">cli-demo  tiny yack cli
+
+╭─ run ────────────────────────────────────────────────────╮
+│                                                          │
+│   verbose     yes                                        │
+│   output      out.txt                                    │
+│   files       a.yack, b.yack                             │
+│                                                          │
+╰──────────────────────────────────────────────────────────╯
+
+━━━━━━━━━━━━╸───────────────────  40%
+
+  one
+❯ two
+  three
+
+  ✓ done  ·  0.1.0
+</code></pre>
+                    </div>
+                    <p>
+                        The interactive loop (raw mode, key reading) is the one part still missing:
+                        <code>tui.menu_step</code> already moves a selection, but the terminal stays in
+                        cooked mode until <code>termios</code> is exposed.
+                    </p>
+                </section>
+
+                <section class="step" id="ship" aria-labelledby="ship-title">
+                    <span class="step-num">Step 06</span>
+                    <h2 id="ship-title">Check, build, run</h2>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy" type="button" data-copy>Copy</button>
+                        </div>
+                        <pre><code data-lang="sh"># types, ownership and the SSA validator: silent when all is well
+../yack check src/ls.yack
+
+# one native binary: LLVM IR, then clang
+../yack build src/ls.yack ls
+./ls --help
+
+# region allocation: no malloc/free per string, frees at scope exit
+../yack build --memory=stack src/wc.yack wc-stack
+</code></pre>
+                    </div>
+                    <ul>
+                        <li>There is no interpreter: <code>yack build</code> emits LLVM IR and calls clang.</li>
+                        <li><code>--memory=stack</code> allocates in regions released at once, a good fit for short-lived CLIs.</li>
+                        <li><code>make test-cli</code> builds all four programs and checks flags, sizes, stdin and exit codes.</li>
+                    </ul>
+                </section>
+
+                <section class="step" id="limits" aria-labelledby="limits-title">
+                    <span class="step-num">Step 07</span>
+                    <h2 id="limits-title">What is still missing</h2>
+                    <p>
+                        The standard library is honest about its edges. A real <code>ls -al</code>
+                        needs metadata the kernel does not expose yet, and an interactive TUI needs a
+                        raw terminal.
+                    </p>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>Need</th><th>Status</th><th>Workaround today</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>readdir</code></td><td>missing</td><td>name the paths on the command line</td></tr>
+                            <tr><td><code>stat</code> (mode, owner, date)</td><td>missing</td><td>size from <code>io.read_file</code> length</td></tr>
+                            <tr><td>raw mode, <code>read_line</code></td><td>missing</td><td>render a screen, read stdin when piped</td></tr>
+                            <tr><td>spawn a process</td><td>missing</td><td>one binary, no shelling out</td></tr>
+                            <tr><td>clock, date formatting</td><td>missing</td><td>no timestamps in output</td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <p>
+                        These are compiler primitives, not library gaps: each one arrives with
+                        <code>docs/stdlib.md</code> and tests. Everything else on this page is already
+                        in <code>lib/yack</code>.
+                    </p>
+                </section>
+
+                <section class="step" id="cheatsheet" aria-labelledby="cheatsheet-title">
+                    <span class="step-num">Step 08</span>
+                    <h2 id="cheatsheet-title">Cheat sheet</h2>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>You want</th><th>Go / Rust habit</th><th>Yack</th></tr></thead>
+                        <tbody>
+                            <tr><td>Arguments</td><td><code>os.Args</code>, <code>env::args</code></td><td><code>os.command_args ()</code></td></tr>
+                            <tr><td>Environment</td><td><code>os.Getenv</code></td><td><code>os.getenv_or ("HOME", ".")</code></td></tr>
+                            <tr><td>Parse flags</td><td><code>flag</code>, <code>clap</code></td><td><code>args.parse (specs (), argv)</code></td></tr>
+                            <tr><td><code>-al</code> cluster</td><td>built in</td><td>one flag per letter, or <code>--all --long</code></td></tr>
+                            <tr><td>Read a file</td><td><code>os.ReadFile</code></td><td><code>io.read_file (path)</code></td></tr>
+                            <tr><td>Read stdin</td><td><code>io::stdin</code></td><td><code>io.read_stdin ()</code></td></tr>
+                            <tr><td>Write raw</td><td><code>print!</code>, <code>fmt.Print</code></td><td><code>io.print_raw (&amp;text)</code></td></tr>
+                            <tr><td>Error line</td><td><code>eprintln!</code></td><td><code>cli.print_error (message)</code></td></tr>
+                            <tr><td>Exit code</td><td><code>os.Exit</code></td><td><code>os.exit (code)</code></td></tr>
+                            <tr><td>Sort strings</td><td><code>sort.Strings</code></td><td><code>sort.sort_string_list (names)</code></td></tr>
+                            <tr><td>Colour</td><td><code>ansi</code> crate</td><td><code>ansi.fg_green () ^ text ^ ansi.reset ()</code></td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <div class="step-nav">
+                        <a class="btn btn-ghost" href="index.html">Back to Yack</a>
+                        <a class="btn" href="https://github.com/AsymetricData/yack-public/tree/main/examples/cli">Full source</a>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-brand">
+            <img src="favicon.svg" alt="" width="26" height="26">
+            <p>Yack: an experimental functional language.<br>Every file on this page is compiled and tested.</p>
+        </div>
+        <nav aria-label="Footer links">
+            <a href="index.html">Home</a>
+            <a href="alpage.html">Alpage tutorial</a>
+            <a href="https://github.com/AsymetricData/yack-public">GitHub</a>
+        </nav>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

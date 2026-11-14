@@ -1,0 +1,16 @@
+# expect: is consumed on some incoming paths and not on others
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string = concat %0.s, %0.s
+    %2 : bool = const true
+    branch %2 b1 b2
+  b1:
+    drop %1.v! : string
+    jump b3()
+  b2:
+    jump b3()
+  b3:
+    %3 : unit = const ()
+    return %3!
+}

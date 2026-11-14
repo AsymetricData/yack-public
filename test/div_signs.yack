@@ -1,0 +1,9 @@
+
+
+fun main () =
+    let val _ = print_int ((0 - 7) / 2)
+        val _ = print_int (7 / (0 - 2))
+        val _ = print_int ((0 - 7) % 2)
+        val _ = print_int (7 % (0 - 2))
+    in ()
+    end

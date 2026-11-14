@@ -1,0 +1,11 @@
+fun first (values : borrow (string array)) : int =
+    string_length (array_get_borrow_view (values, 0))
+
+fun main () =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "abc")
+        val n = first (borrow values)
+        val length = array_length (values)
+    in
+        print_int (n + length)
+    end

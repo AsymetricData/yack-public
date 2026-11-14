@@ -1,0 +1,8 @@
+fun main () =
+    let val _ = arena
+                    val value = array_get (array_make (42, 1), 0)
+                    val _ = print_int (value)
+                in ()
+                end
+    in ()
+    end

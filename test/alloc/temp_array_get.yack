@@ -1,0 +1,4 @@
+fun main () =
+    let val value = array_get (array_make (42, 1), 0)
+    in print_int (value)
+    end

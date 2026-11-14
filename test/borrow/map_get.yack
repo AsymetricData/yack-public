@@ -1,0 +1,11 @@
+fun get (values : borrow (string map)) : int =
+    string_length (map_get_borrow_view (values, "k"))
+
+fun main () =
+    let val values : string map = map_new ()
+        val _ = map_set (values, "k", "abcd")
+        val n = get (borrow values)
+        val length = map_length (values)
+    in
+        print_int (n + length)
+    end

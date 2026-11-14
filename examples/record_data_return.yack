@@ -1,0 +1,10 @@
+type box = { value : int option }
+
+fun make () : box = { value = Some (42) }
+
+fun main () =
+    let val boxed = make ()
+    in case boxed.value of
+         None => ()
+       | Some x => print_int (x)
+    end

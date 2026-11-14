@@ -1,0 +1,13 @@
+import alpage/Ctx
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+
+(* Tutorial trap: `Request.query` reads through a borrow, so the handler must
+   borrow the request. Passing the owned request directly is rejected. *)
+fun greet (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val first = Request.query (request, "first")
+        val last = Request.query (request, "last")
+    in
+        Reply.ok (Response.text ("hello"))
+    end

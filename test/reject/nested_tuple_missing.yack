@@ -1,0 +1,6 @@
+fun bad (pair : bool * bool) : int =
+    case pair of
+        (true, _) => 1
+      | (_, true) => 2
+
+fun main () = ()

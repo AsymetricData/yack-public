@@ -1,0 +1,13 @@
+datatype user = User of { name : string, age : int, friends : user list }
+
+fun describe (u : user) : string =
+    case u of
+        User ({ name = name, age = age, friends = friends }) =>
+            name ^ " (" ^ int_to_string (age) ^ ", " ^
+            int_to_string (list_length (friends)) ^ " amis)"
+
+fun main () =
+    let val ada = User ({ name = "Ada", age = 36, friends = Nil })
+        val bob = User ({ name = "Bob", age = 41, friends = Cons ((ada, Nil)) })
+    in print_string (describe (bob))
+    end

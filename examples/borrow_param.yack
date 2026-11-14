@@ -1,0 +1,9 @@
+type user : Affine = { name : int }
+
+fun read (value : borrow user) : unit =
+    ()
+
+fun main () =
+    let val user : user = { name = 1 }
+    in read (borrow user)
+    end

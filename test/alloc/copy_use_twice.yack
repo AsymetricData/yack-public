@@ -1,0 +1,12 @@
+datatype cell : Copy = Cell of int
+
+fun take (value : cell) : int =
+    case value of
+        Cell n => n
+
+fun main () =
+    let val value = Cell (42)
+        val a = take (value)
+        val b = take (value)
+    in print_int (a + b)
+    end

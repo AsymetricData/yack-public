@@ -1,0 +1,16 @@
+import yack/string
+
+
+fun bad (line : string) : string =
+    let val borrowed = borrow line
+        val moved = line
+        val size = string_length (borrowed)
+    in
+        if size >= 0 then moved else moved
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "hello")
+        val out = bad (s)
+    in print_string (out)
+    end

@@ -1,0 +1,29 @@
+fun route (request : int8 array) : string =
+    case request of
+        <<"GET ", rest>> =>
+            "get " ^ int_to_string (array_length (rest))
+      | <<"POST ", rest>> =>
+            "post " ^ int_to_string (array_length (rest))
+      | <<"GET", rest>> =>
+            "bare get " ^ int_to_string (array_length (rest))
+      | <<80, 85, 84, 32, rest>> =>
+            "numeric put " ^ int_to_string (array_length (rest))
+      | <<>> => "empty"
+      | _ => "other"
+
+fun main () =
+    let val getText = "GET /hello"
+        val postText = "POST /users"
+        val bareText = "GET"
+        val putText = "PUT /x"
+        val emptyText = ""
+        val otherText = "NOPE"
+        val a = route (bytes_from_string (borrow getText))
+        val b = route (bytes_from_string (borrow postText))
+        val c = route (bytes_from_string (borrow bareText))
+        val d = route (bytes_from_string (borrow putText))
+        val e = route (bytes_from_string (borrow emptyText))
+        val f = route (bytes_from_string (borrow otherText))
+        val all = a ^ "|" ^ b ^ "|" ^ c ^ "|" ^ d ^ "|" ^ e ^ "|" ^ f
+    in print_string (all)
+    end

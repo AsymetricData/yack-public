@@ -1,0 +1,11 @@
+# The same graph, accepted: the read comes before the move.
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string = concat %0.s, %0.s
+    print %1.v!
+    %2.w : string = concat move %1.v, %0.s
+    %3 : unit = const ()
+    drop %2.w! : string
+    return %3!
+}

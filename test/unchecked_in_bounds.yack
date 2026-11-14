@@ -1,0 +1,12 @@
+
+
+fun main () =
+    let val xs = array_make (7, 3)
+        val _ = array_set_unchecked (xs, 2, 5)
+        val last = array_get_unchecked (xs, 2)
+        val _ = array_push_unchecked (xs, 1)
+        val pushed = array_get_unchecked (xs, 3)
+        val s = "abc"
+        val c = string_char_at_unchecked (borrow s, 2)
+    in print_int (last + pushed + c + array_length (xs))
+    end

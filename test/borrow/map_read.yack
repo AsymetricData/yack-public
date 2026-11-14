@@ -1,0 +1,17 @@
+fun has (values : borrow (string map)) : bool =
+    map_has_borrow (values, "k")
+
+fun length (values : borrow (string map)) : int =
+    map_length_borrow (values)
+
+fun main () =
+    let val values : string map = map_new ()
+        val _ = map_set (values, "k", "v")
+        val _ = map_set (values, "x", "y")
+        val n = length (borrow values)
+        val h = has (borrow values)
+    in
+        let val _ = print_int (n)
+        in print_int (if h then 1 else 0)
+        end
+    end

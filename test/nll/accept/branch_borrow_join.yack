@@ -1,0 +1,20 @@
+import yack/string
+
+
+
+fun branch_borrow (flag : bool, line : string) : string =
+    let val size =
+            if flag then
+                let val borrowed = borrow line
+                in string_length (borrowed)
+                end
+            else 0
+    in
+        if size >= 0 then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "world")
+        val out = branch_borrow (true, s)
+    in print_string (out)
+    end

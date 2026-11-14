@@ -1,0 +1,6 @@
+fun main () =
+    let val buffer : int8 array = array_make (0, 8)
+    in case send_from (1, buffer, 4, 8) of
+         Ok count => print_int (count)
+       | Error message => print_string (message)
+    end

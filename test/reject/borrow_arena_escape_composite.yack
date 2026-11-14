@@ -1,0 +1,11 @@
+fun show (text : borrow string) : int = string_length (text)
+
+fun main () =
+    let val kept =
+            arena
+                val values : string array = array_new ()
+                val _ = array_push (values, "abc")
+                val borrowed = array_get_borrow (values, 0)
+            in (borrowed, 1)
+            end
+    in print_int (show (kept.0)) end

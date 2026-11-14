@@ -1,0 +1,34 @@
+import web/Response as Base
+
+type t = Base.t
+
+fun text (body : string) : t = Base.text (body)
+
+fun html (body : string) : t = Base.html (body)
+
+fun json (body : string) : t = Base.json (body)
+
+fun make (status : int, content_type : string, body : string) : t =
+    Base.make (status, content_type, body)
+
+fun with_status (response : t, status : int) : t =
+    Base.with_status (response, status)
+
+fun with_header (response : t, name : string, value : string) : t =
+    Base.with_header (response, borrow name, borrow value)
+
+fun status_code (response : borrow t) : int =
+    Base.status_code (response)
+
+fun render (response : t) : string =
+    Base.render (response)
+
+fun render_keepalive (response : t) : string =
+    Base.render_keepalive (response)
+
+(* Consomme la réponse et rend ses trois composantes inspectables par les
+   tests. Le champ session reste interne à web/Response. *)
+fun inspect (response : t) : int * (string * string) list * string =
+    case response of
+        { status = status, headers = headers, body = body, session = _ } =>
+            (status, headers, body)

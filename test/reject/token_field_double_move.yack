@@ -1,0 +1,10 @@
+type box : Linear = { tok : token }
+
+fun main () =
+    let
+        val b : box = { tok = new_token () }
+        val t1 = b.tok
+        val t2 = b.tok
+        val _ = consume_token (t1)
+    in consume_token (t2)
+    end

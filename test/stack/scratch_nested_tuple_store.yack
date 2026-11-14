@@ -1,0 +1,13 @@
+datatype box = Box of (string * string)
+
+fun main () =
+    let val values : box array = array_new ()
+        val _ = arena
+                    val left = "he" ^ "llo"
+                    val right = "wo" ^ "rld"
+                    val pair = (left, right)
+                    val _ = array_push (values, Box (pair))
+                in ()
+                end
+    in print_int (array_length (values))
+    end

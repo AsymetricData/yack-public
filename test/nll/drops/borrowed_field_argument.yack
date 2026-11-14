@@ -1,0 +1,14 @@
+import yack/string
+
+
+
+fun length_of (line : string) : int =
+    let val pair = (borrow line, 7)
+    in string_length (pair.0)
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "abcd")
+        val n = length_of (s)
+    in print_int (n)
+    end

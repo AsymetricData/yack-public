@@ -1,0 +1,22 @@
+import alpage/Alpage
+import alpage/Ctx
+import alpage/Reply
+import alpage/Request
+import alpage/Response
+import yack/io
+
+fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text ("hello"))
+
+fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text ("{\"sum\":6}"))
+
+fun application () : Alpage.t =
+    Alpage.new ()
+    |> Alpage.get ("/", home)
+    |> Alpage.post ("/sum", sum)
+
+fun main () =
+    case Alpage.run (application (), Alpage.config (18092)) of
+        Ok _ => ()
+      | Error message => io.print_line (borrow message)

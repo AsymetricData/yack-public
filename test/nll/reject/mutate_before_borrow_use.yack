@@ -1,0 +1,9 @@
+
+fun bad (values : string array) : int =
+    let val first = array_get_borrow (values, 0)
+        val _ = array_set (values, 0, "done")
+        val size = string_length (first)
+    in size
+    end
+
+fun main () : unit = ()

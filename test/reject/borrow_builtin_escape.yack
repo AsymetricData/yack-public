@@ -1,0 +1,8 @@
+fun main () =
+    let val borrowed =
+            let val values : string array = array_new ()
+                val _ = array_push (values, "a" ^ "aa")
+            in array_get_borrow (values, 0)
+            end
+    in print_int (string_length (borrowed))
+    end

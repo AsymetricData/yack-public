@@ -1,0 +1,10 @@
+type user : Affine = { name : string }
+
+fun touch (value : borrow mut string) : unit =
+    ()
+
+fun main () =
+    let val user : user = { name = "a" }
+        val _ = touch (borrow mut user.name)
+    in ()
+    end

@@ -1,0 +1,10 @@
+import yack/array
+
+fun main () =
+    let val ints = array.push (array.new (), 7)
+        val number = array.get_int (borrow ints, 0)
+        val texts = array.push (array.new (), "a" ^ "b")
+        val text = array.get_borrow (borrow texts, 0)
+        val size = string_length (text)
+    in print_int (number + size)
+    end

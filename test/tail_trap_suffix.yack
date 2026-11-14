@@ -1,0 +1,27 @@
+
+
+
+
+
+
+
+
+fun number (text : borrow string) : int =
+    case string_to_int (text) of
+        Some (value) => value
+      | None => 0
+
+fun walk (previous : borrow string, n : int, acc : int) : int =
+    if n <= 0 then acc + number (previous)
+    else
+        let val local = "x" ^ int_to_string (n)
+        in
+            case local of
+                "x" ^ rest => walk (borrow rest, n - 1, acc + number (previous))
+              | _ => 0
+        end
+
+fun main () =
+    let val start = "0"
+    in print_int (walk (borrow start, 1000, 0))
+    end

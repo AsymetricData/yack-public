@@ -1,0 +1,7 @@
+fun sum (pair : int * int) : int =
+    pair.0 + pair.1
+
+fun main () =
+    let val total = sum ((40, 2))
+    in print_int (total)
+    end

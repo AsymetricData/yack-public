@@ -1,0 +1,7 @@
+fun sum (values : int list) : int =
+    case values of
+        [] => 0
+      | value :: rest => value + sum (rest)
+
+fun main () =
+    print_int (sum ([1, 2, 3,]))

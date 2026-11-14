@@ -1,0 +1,4 @@
+fun main () =
+    case Some ((1, new_token ())) of
+        Some ((n, _)) => print_int (n)
+      | None => ()

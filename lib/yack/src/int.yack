@@ -1,0 +1,171 @@
+(* Retourne la valeur absolue de l'entier.
+   - `value` : entier dont on veut la valeur absolue.
+
+   Retourne `value` s'il est positif ou nul, sinon son opposé. Aucun effet mémoire. *)
+fun abs (value : int) : int = if value < 0 then 0 - value else value
+
+(* Retourne le plus petit de deux entiers.
+   - `left` : premier entier à comparer.
+   - `right` : second entier à comparer.
+
+   Retourne l'entier inférieur ou, en cas d'égalité, leur valeur commune. Aucun effet
+   mémoire. *)
+fun min (left : int, right : int) : int = if left <= right then left else right
+
+(* Retourne le plus grand de deux entiers.
+   - `left` : premier entier à comparer.
+   - `right` : second entier à comparer.
+
+   Retourne l'entier supérieur ou, en cas d'égalité, leur valeur commune. Aucun effet
+   mémoire. *)
+fun max (left : int, right : int) : int = if left >= right then left else right
+
+(* Addition qui repasse à zéro au lieu d'échouer, pour les hachages et les
+   checksums. Le calcul se fait en `int64`, donc il ne peut pas déborder ;
+   `int64_to_int_wrapping` garde les 32 bits du bas.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne la somme modulo 2³². Aucun effet mémoire. *)
+fun wrapping_add (left : int, right : int) : int =
+    int64_to_int_wrapping (int_to_int64 (left) + int_to_int64 (right))
+
+(* Soustraction qui repasse à zéro au lieu d'échouer, pour les hachages et les
+   checksums. Le calcul se fait en `int64`, donc il ne peut pas déborder.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne la différence modulo 2³². Aucun effet mémoire. *)
+fun wrapping_sub (left : int, right : int) : int =
+    int64_to_int_wrapping (int_to_int64 (left) - int_to_int64 (right))
+
+(* Multiplication qui repasse à zéro au lieu d'échouer, pour les hachages et
+   les checksums. Le produit de deux `int` tient dans `int64`.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne le produit modulo 2³². Aucun effet mémoire. *)
+fun wrapping_mul (left : int, right : int) : int =
+    int64_to_int_wrapping (int_to_int64 (left) * int_to_int64 (right))
+
+(* Addition `int64` qui repasse à zéro au lieu d'échouer, pour les hachages
+   64 bits (FNV-1a, …). `+` sur `int64` arrête le programme au débordement.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne la somme modulo 2⁶⁴. Aucun effet mémoire. *)
+fun wrapping_add64 (left : int64, right : int64) : int64 =
+    int64_wrapping_add (left, right)
+
+(* Soustraction `int64` qui repasse à zéro au lieu d'échouer.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne la différence modulo 2⁶⁴. Aucun effet mémoire. *)
+fun wrapping_sub64 (left : int64, right : int64) : int64 =
+    int64_wrapping_sub (left, right)
+
+(* Multiplication `int64` qui repasse à zéro au lieu d'échouer.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne le produit modulo 2⁶⁴. Aucun effet mémoire. *)
+fun wrapping_mul64 (left : int64, right : int64) : int64 =
+    int64_wrapping_mul (left, right)
+
+(* Borne un entier dans l'intervalle défini par ses deux limites.
+   - `value` : valeur à borner.
+   - `low` : limite inférieure.
+   - `high` : limite supérieure.
+
+   Retourne `low` si `value` lui est inférieur, `high` s'il lui est supérieur, sinon
+   `value`. Aucun effet mémoire. *)
+fun clamp (value : int, low : int, high : int) : int =
+    if value < low then low else if value > high then high else value
+
+(* Indique le signe d'un entier par une valeur de -1, 0 ou 1.
+   - `value` : entier dont on veut déterminer le signe.
+
+   Retourne -1 pour un entier négatif, 1 pour un entier positif et 0 pour zéro. Aucun
+   effet mémoire. *)
+fun sign (value : int) : int = if value < 0 then -1 else if value > 0 then 1 else 0
+
+(* Vérifie si un entier est divisible par deux.
+   - `value` : entier à tester.
+
+   Retourne `true` si `value` est pair, sinon `false`. Aucun effet mémoire. *)
+fun is_even (value : int) : bool = value % 2 = 0
+
+(* Vérifie si un entier n'est pas divisible par deux.
+   - `value` : entier à tester.
+
+   Retourne `true` si `value` est impair, sinon `false`. Aucun effet mémoire. *)
+fun is_odd (value : int) : bool = value % 2 <> 0
+
+(* Calcule une puissance entière positive par multiplications successives.
+   - `base` : base à multiplier.
+   - `exponent` : nombre de multiplications restantes ; une valeur inférieure ou
+     égale à zéro termine le calcul.
+   - `acc` : accumulateur initial du résultat.
+
+   Retourne l'accumulateur multiplié par `base` `exponent` fois au plus. Fonction
+   récursive sans effet mémoire. *)
+fun pow_from (base : int, exponent : int, acc : int) : int =
+    if exponent <= 0 then acc else pow_from (base, exponent - 1, acc * base)
+
+(* Calcule une puissance entière pour un exposant non négatif.
+   - `base` : base de la puissance.
+   - `exponent` : exposant ; s'il est négatif, le résultat est défini ici comme zéro.
+
+   Retourne `base` élevé à `exponent`, avec 1 pour l'exposant zéro. Aucun effet
+   mémoire. *)
+fun pow (base : int, exponent : int) : int =
+    if exponent < 0 then 0 else pow_from (base, exponent, 1)
+
+(* Calcule récursivement le plus grand commun diviseur avec l'algorithme d'Euclide.
+   - `a` : premier opérande courant.
+   - `b` : second opérande courant, dont le reste sert à poursuivre le calcul.
+
+   Retourne `a` lorsque `b` vaut zéro. Fonction récursive sans effet mémoire. *)
+fun gcd_from (a : int, b : int) : int = if b = 0 then a else gcd_from (b, a % b)
+
+(* Calcule le plus grand commun diviseur positif de deux entiers.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne le PGCD des valeurs absolues des opérandes. Aucun effet mémoire. *)
+fun gcd (left : int, right : int) : int = gcd_from (abs (left), abs (right))
+
+(* Calcule le plus petit multiple commun de deux entiers.
+   - `left` : premier entier.
+   - `right` : second entier.
+
+   Retourne zéro si l'un des opérandes vaut zéro, sinon le PPCM positif. Aucun effet
+   mémoire. *)
+fun lcm (left : int, right : int) : int =
+    if left = 0 then
+        0
+    else if right = 0 then 0 else abs (left / gcd (left, right) * right)
+
+(* Convertit une chaîne en entier si son contenu est valide.
+   - `text` : chaîne empruntée à lire, sans en prendre possession.
+
+   Retourne `Some` de l'entier analysé, ou `None` si la conversion échoue. Ne modifie
+   pas la chaîne. *)
+fun parse (text : borrow string) : int option = string_to_int (text)
+
+(* Formate un entier en chaîne décimale.
+   - `value` : entier à convertir.
+
+   Retourne une nouvelle chaîne représentant `value`. Aucun argument mutable n'est
+   modifié. *)
+fun to_string (value : int) : string = int_to_string (value)
+
+(* Compare deux entiers selon leur ordre numérique.
+   - `left` : premier entier à comparer.
+   - `right` : second entier à comparer.
+
+   Retourne -1 si `left` est inférieur, 1 s'il est supérieur et 0 s'ils sont égaux.
+   Aucun effet mémoire. *)
+fun compare (left : int, right : int) : int =
+    if left < right then -1 else if left > right then 1 else 0

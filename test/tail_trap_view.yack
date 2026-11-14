@@ -1,0 +1,23 @@
+
+
+
+
+
+
+
+
+type cell = { value : int }
+
+fun build (n : int, acc : cell list) : cell list =
+    if n = 0 then acc else build (n - 1, Cons (({ value = n }, acc)))
+
+fun walk (previous : borrow cell, current : borrow cell list, acc : int) : int =
+    case current of
+        Nil => acc + previous.value
+      | Cons ((item, rest)) => walk (borrow item, rest, acc + previous.value)
+
+fun main () =
+    let val values = build (1000, Nil)
+        val start = { value = 0 }
+    in print_int (walk (borrow start, borrow values, 0))
+    end

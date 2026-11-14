@@ -1,0 +1,88 @@
+import yack/args
+import yack/cli
+import yack/io
+import yack/os
+import yack/string
+
+(* cat: copy files, or stdin, to stdout.
+
+   Shows the two halves of a CLI: a `result` from `io.read_file`, and error
+   lines on stderr with a non-zero exit status. *)
+
+fun specs () : args.spec list =
+    [
+        args.Flag (("help", Some ("h"), "show this help")),
+        args.Positional (("file", "file to print", false))
+    ]
+
+(* Termine avec le code d'échec s'il y a eu au moins une erreur.
+   - `failures` : nombre de fichiers illisibles. *)
+fun finish (failures : int) : unit =
+    if failures = 0 then () else os.exit (cli.exit_failure ())
+
+(* Écrit un fichier sur stdout. Retourne le nombre d'échecs.
+   - `path` : chemin consommé par la lecture. *)
+fun copy_one (path : string) : int =
+    let val name = string.copy (borrow path)
+    in
+        case io.read_file (path) of
+            Ok (contents) =>
+                let val _ = io.print_raw (borrow contents)
+                in 0
+                end
+          | Error (message) =>
+                let val line = "cat: " ^ name ^ ": " ^ message
+                    val _ = io.eprint_line (borrow line)
+                in 1
+                end
+    end
+
+(* Copie chaque fichier de la liste.
+   - `paths` : liste Affine consommée dans l'ordre. *)
+fun copy_paths (paths : string list) : int =
+    case paths of
+        Nil => 0
+      | Cons (path, rest) => copy_one (path) + copy_paths (rest)
+
+(* Copie stdin quand aucun fichier n'est nommé. *)
+fun copy_stdin () : unit =
+    case io.read_stdin () of
+        Error (message) =>
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_failure ())
+            end
+      | Ok (contents) =>
+            let val _ = io.print_raw (borrow contents)
+            in ()
+            end
+
+(* Choisit stdin ou les fichiers nommés.
+   - `paths` : positionnels consommés. *)
+fun copy_all (paths : string list) : unit =
+    case paths of
+        Nil => copy_stdin ()
+      | Cons (path, rest) =>
+            finish (copy_one (path) + copy_paths (rest))
+
+(* Affiche l'aide puis termine avec le code 0. *)
+fun print_help () : unit =
+    let val _ = cli.print_help ("cat", "Copy files to standard output.", specs ())
+    in os.exit (cli.exit_ok ())
+    end
+
+(* Consomme les options puis lance la copie.
+   - `value` : `parsed` consommé par les accesseurs. *)
+fun dispatch (value : args.parsed) : unit =
+    let val helpPair = args.take_flag (value, "help")
+        val paths = args.positionals (helpPair.1)
+    in
+        if helpPair.0 then print_help () else copy_all (paths)
+    end
+
+fun main () =
+    case args.parse (specs (), os.command_args ()) of
+        Error (message) =>
+            let val _ = cli.print_error (message)
+            in os.exit (cli.exit_usage ())
+            end
+      | Ok (value) => dispatch (value)

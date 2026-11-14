@@ -1,0 +1,12 @@
+fun main () =
+  let val scores : int map = map_new ()
+      val _ = map_set (scores, "alice", 10)
+      val _ = map_set (scores, "bob", 20)
+      val _ = map_set (scores, "alice", 30)
+      val _ = map_remove (scores, "bob")
+      val hasBob = map_has (scores, "bob")
+      val hasAlice = map_has (scores, "alice")
+  in print_int (map_length (scores) * 100 + map_get (scores, "alice")
+                + (if hasAlice then 1 else 0)
+                + (if hasBob then 0 else 2))
+  end

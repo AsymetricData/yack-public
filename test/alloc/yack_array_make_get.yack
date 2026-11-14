@@ -1,0 +1,14 @@
+import yack/array
+
+fun main () =
+    let val ints = array.make (7, 3)
+        val number = array.get (borrow ints, 1)
+        val flags = array.make (true, 2)
+        val flag = array.get (borrow flags, 0)
+        val uninit = array.make_uninit (2)
+        val uninit = array.set_int (uninit, 0, 4)
+        val uninit = array.set_int (uninit, 1, 5)
+        val floats = array.make_float (1.5, 2)
+        val fraction = array.get_float (borrow floats, 0)
+    in print_int (number + array.sum_int (borrow uninit))
+    end

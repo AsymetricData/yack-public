@@ -1,0 +1,56 @@
+# NLL acceptance matrix.
+#
+# kind   name                        extra
+# accept : must check, build and run in heap and stack; stdout matches
+#          test/nll/accept/<name>.out
+# xfail  : accepted by NLL but still rejected by the lexical pass; the run
+#          fails when such a case starts passing, so the expectation is
+#          flipped in the same change
+# reject : must be rejected with the given diagnostic code
+accept	local_named_borrow
+accept	local_wildcard_borrow
+accept	field_borrow_then_move
+accept	container_borrow_then_mutate
+accept	alias_then_move
+accept	branch_borrow_join
+accept	move_unused_borrow_list
+accept	mutate_container_after_read
+accept	branch_move_after_unused_borrow
+accept	branch_loan_unused
+accept	move_record_after_unused_borrow
+accept	move_field_after_unused_borrow
+accept	double_mut_unused
+accept	shared_then_mut_unused
+accept	map_borrow_unused_then_mutate
+accept	map_borrow_then_mutate
+accept	close_after_named_borrow
+accept	field_mut_conflict_unused
+accept	tuple_borrow_then_move
+accept	block_alias_then_move
+accept	branch_then_move
+accept	case_pattern_then_move
+accept	datatype_borrow_then_move
+accept	nested_call_provenance
+accept	alias_chain
+accept	two_creations_distinct_ends
+accept	sibling_field_move
+accept	block_result_consumed
+accept	composite_return
+accept	indirect_borrow_return
+accept	view_borrow_then_mutate
+accept	arena_borrow_then_move
+accept	case_guard_then_move
+reject	borrow_used_after_move	E0501
+reject	mutable_conflict_live	E0502
+reject	double_mut_live	E0502
+reject	field_borrow_used_after_move	E0501
+reject	field_mut_conflict_live	E0502
+reject	tuple_borrow_used_after_move	E0501
+reject	case_pattern_borrow_used_after_move	E0501
+reject	datatype_borrow_used_after_move	E0501
+reject	nested_call_wrong_source	E0501
+reject	mutate_before_borrow_use	E0502
+reject	map_remove_before_borrow_use	E0502
+reject	store_borrow_container	E0515
+reject	return_owned_borrow	E0503
+reject	temp_survives_later_arg	E0501

@@ -1,0 +1,6 @@
+fun main () =
+    let val t = new_token ()
+    in case 3 of
+           n if n > 2 => consume_token (t)
+         | _ => ()
+    end

@@ -1,0 +1,11 @@
+fun get (values : borrow (int map)) : int =
+    map_get_copy_borrow (values, "k")
+
+fun main () =
+    let val values : int map = map_new ()
+        val _ = map_set (values, "k", 7)
+        val n = get (borrow values)
+        val _ = map_set (values, "x", 1)
+    in
+        print_int (n + 1)
+    end

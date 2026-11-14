@@ -1,0 +1,11 @@
+fun fact (0) : int = 1
+fun fact (n) : int = n * fact (n - 1)
+
+fun first (Cons (value, _)) : int = value
+fun first (Nil) : int = 0
+
+fun choose (0, fallback) : int = fallback
+fun choose (value, _) : int = value
+
+fun main () =
+    print_int (fact (5) + first (Cons ((3, Nil))) + choose (0, 7))

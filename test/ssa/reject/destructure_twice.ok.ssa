@@ -1,0 +1,9 @@
+# The same graph, accepted: destructured once.
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string * string = tuple move %0.s, move %0.s
+    destructure %1.v! : string * string
+    %2 : unit = const ()
+    return %2!
+}

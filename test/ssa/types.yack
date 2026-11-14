@@ -1,0 +1,24 @@
+
+
+
+datatype cell : Copy = Cell of int
+datatype door : Linear = Door of token
+
+fun close (d : door) : unit =
+    case d of Door t => consume_token (t)
+
+fun first (p : borrow ((string * int) * string)) : int =
+    case p of ((_, n), _) => n
+
+fun split (p : (string * int) * string) : string =
+    case p of ((a, _), b) => a ^ b
+
+fun main () =
+    let val c = Cell (3)
+        val pair = (("x", 1), "y")
+        val n = first (borrow pair)
+        val s = split (pair)
+        val _ = close (Door (new_token ()))
+    in
+        case c of Cell k => print_int (k + n + string_length (borrow s))
+    end

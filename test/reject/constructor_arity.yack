@@ -1,0 +1,5 @@
+
+fun main () =
+    let val value = Some
+    in ()
+    end

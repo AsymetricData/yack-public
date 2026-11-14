@@ -1,0 +1,10 @@
+
+fun keep (value : int option) : int option =
+    case value of
+        None => None
+      | Some x => Some (x)
+
+fun main () =
+    case keep (Some (42)) of
+        None => ()
+      | Some x => print_int (x)

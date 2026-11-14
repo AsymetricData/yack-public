@@ -1,0 +1,7 @@
+type box : Linear = { token : token }
+
+fun main () =
+    let val token = new_token ()
+        val box : box = { token = token }
+    in ()
+    end

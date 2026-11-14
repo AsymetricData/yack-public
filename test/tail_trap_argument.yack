@@ -1,0 +1,37 @@
+
+
+
+
+
+
+
+
+type cell = { value : int }
+
+datatype holder = H of borrow cell
+
+fun make (item : borrow cell) : holder = H (item)
+
+fun loop (
+    previous : holder,
+    root : borrow cell,
+    n : int,
+    acc : int) : int =
+    if n <= 0 then
+        case previous of
+            H (item) => acc + item.value
+    else
+        let val local = { value = n }
+        in
+            loop (
+                let val root = borrow local in make (root) end,
+                root,
+                n - 1,
+                acc + 1)
+        end
+
+fun main () =
+    let val start = { value = 0 }
+        val held = H (borrow start)
+    in print_int (loop (held, borrow start, 100, 0))
+    end

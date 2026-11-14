@@ -1,0 +1,7 @@
+fun main () =
+    let
+        val f : consume string -> unit = (x => ())
+        val s = "hello" ^ " world"
+        val _ = f (s)
+    in ()
+    end

@@ -1,0 +1,4 @@
+fun main () =
+    let val t = new_token ()
+        val t = new_token ()
+    in consume_token (t) end

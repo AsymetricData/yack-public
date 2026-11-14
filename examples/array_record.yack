@@ -1,0 +1,9 @@
+type user : Affine = { name : string, age : int }
+
+fun main () =
+  let val users : user array = array_new ()
+      val _ = array_push (users, { name = "ada" ^ "!", age = 36 })
+      val _ = array_push (users, { name = "bob" ^ "!", age = 41 })
+      val _ = array_set (users, 1, { name = "cara", age = 29 })
+  in print_int (array_length (users))
+  end

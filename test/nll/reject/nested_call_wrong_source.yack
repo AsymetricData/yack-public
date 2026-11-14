@@ -1,0 +1,13 @@
+import yack/string
+
+
+
+fun pick_a (a : borrow string, b : borrow string) : borrow string from a = a
+
+fun outer (r : borrow string, s : string) : int =
+    string_length (r) + string_length (borrow s)
+
+fun nested (x : string, y : string) : int =
+    outer (pick_a (borrow x, borrow y), x)
+
+fun main () : unit = ()

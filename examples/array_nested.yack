@@ -1,0 +1,11 @@
+fun main () =
+  let val rows : (int array) array = array_new ()
+      val first = array_make (0, 2)
+      val second = array_make (0, 3)
+      val _ = array_set (first, 0, 4)
+      val _ = array_set (second, 2, 5)
+      val total = array_get (first, 0) + array_get (second, 2)
+      val _ = array_push (rows, first)
+      val _ = array_push (rows, second)
+  in print_int (total + array_length (rows))
+  end

@@ -1,0 +1,17 @@
+# The same graph, accepted: the joined borrow is read before either owner
+# is dropped.
+fun yack_f {
+  b0(%0.x : string, %1.y : string, %2.left : bool):
+    branch %2.left b1 b2
+  b1:
+    %4 : &string = borrow &%0.x
+    jump b3(%4)
+  b2:
+    %5 : &string = borrow &%1.y
+    jump b3(%5)
+  b3(%3.r : &string):
+    %6 : int = string.string_length %3.r
+    drop %0.x : string
+    drop %1.y : string
+    return %6
+}

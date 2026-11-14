@@ -1,0 +1,9 @@
+datatype answer = Yes | No
+
+fun main () =
+    let val value = Yes
+    in
+        case value of
+            Yes => print_int (1)
+          | No => print_int (0)
+    end

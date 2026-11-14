@@ -1,0 +1,10 @@
+datatype node = Node of { value : int, next : node option }
+
+fun build (n : int, acc : node option) : node option =
+    if n = 0 then acc
+    else build (n - 1, Some (Node ({ value = n, next = acc })))
+
+fun main () =
+    let val chain = build (1000000, None)
+    in print_int (case chain of Some _ => 1 | None => 0)
+    end

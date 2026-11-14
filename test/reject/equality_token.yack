@@ -1,0 +1,8 @@
+fun same (x, y) =
+    x = y
+
+fun main () =
+    let val token = new_token ()
+        val result = same (token, token)
+    in ()
+    end

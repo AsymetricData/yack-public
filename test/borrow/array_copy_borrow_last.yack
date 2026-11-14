@@ -1,0 +1,6 @@
+fun main () =
+    let val values : int array = array_make (7, 2)
+        val n = array_get_copy_borrow (borrow values, 1)
+    in
+        print_int (n)
+    end

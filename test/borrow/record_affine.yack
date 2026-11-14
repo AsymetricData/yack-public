@@ -1,0 +1,12 @@
+type pair : Affine = { a : int, b : string }
+
+fun use (p : borrow pair) : int =
+    case p of
+        { a = x, b = y } => x + string_length (y)
+
+fun main () =
+    let val p = { a = 40, b = "ab" }
+        val result = use (borrow p)
+    in
+        print_int (result)
+    end

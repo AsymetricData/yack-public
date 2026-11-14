@@ -1,0 +1,11 @@
+
+
+
+
+
+import yack/list
+
+fun main () =
+    let val values = Cons ((2147483647, Cons ((1, Cons ((-1, Nil))))))
+    in print_int (list.sum_int (values))
+    end

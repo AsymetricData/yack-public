@@ -1,0 +1,14 @@
+import yack/string
+
+type user : Affine = { name : string, tag : string }
+
+
+fun main () : unit =
+    let val user : user =
+            { name = string_copy (borrow "name")
+            , tag = string_copy (borrow "tag")
+            }
+        val name = user.name
+        val n = string_length (borrow name)
+    in print_int (n)
+    end

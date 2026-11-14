@@ -1,0 +1,9 @@
+datatype handler : Copy = Handler of int -> int
+
+fun identity (value : int) : int = value
+
+fun main () =
+    let val handlers : handler array = array_new ()
+        val _ = array_push (handlers, Handler (identity))
+    in ()
+    end

@@ -1,0 +1,9 @@
+# expect: consumes `h` (%0) twice (already consumed)
+# Closing a Linear handle twice: no memory is freed twice, the protocol
+# is broken all the same.
+fun yack_f {
+  b0(%0.h : linear { fd : int }):
+    %1 : unit = call yack_close move %0.h
+    %2 : unit = call yack_close move %0.h
+    return %2
+}

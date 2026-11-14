@@ -1,0 +1,4 @@
+fun multiply (x : int, y : int) : int = x * y
+
+fun main () =
+    print_int (multiply (100000, 100000))

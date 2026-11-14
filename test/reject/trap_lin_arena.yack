@@ -1,0 +1,4 @@
+fun main () =
+    arena
+        val t = new_token ()
+    in () end

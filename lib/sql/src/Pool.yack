@@ -1,0 +1,180 @@
+import sql/Sql
+import sql/Sqlite
+import yack/string
+
+(* sql/Pool : pool SQLite 1 writer / N readers.
+
+   SQLite n'a qu'un seul writer utile. Les readers ouvrent la même base en
+   lecture seule (`query_only`) et se partagent le WAL. Le pool est Linear :
+   une opération rend un nouveau pool, et `close` ferme toutes ses
+   connexions. L'oublier est rejeté à la compilation (E0403).
+
+   Le pool lui-même n'est pas partagé entre threads. `acquire_reader` sort
+   une connexion du pool dans un `reader` Linear ; `release_reader` la rend.
+   Tant qu'un `reader` est dehors, aucun autre appel ne peut l'obtenir, ce
+   qui donne à chaque thread une connexion exclusive. *)
+type pool : Linear =
+    { writer : Sqlite.db
+    , readers : Sqlite.db list
+    , size : int
+    }
+
+(* `handle` caches the raw handle of `db`, for `reader_handle`. *)
+type reader : Linear = { db : Sqlite.db, handle : int64 }
+
+fun close_readers (readers : Sqlite.db list) : unit =
+    case readers of
+        Nil => ()
+      | Cons (db, rest) =>
+            let val _ = Sqlite.close (db)
+            in
+                close_readers (rest)
+            end
+
+fun append_reader (readers : Sqlite.db list, db : Sqlite.db) : Sqlite.db list =
+    case readers of
+        Nil => Cons ((db, Nil))
+      | Cons (first, rest) => Cons ((first, append_reader (rest, db)))
+
+fun configure_writer (db : borrow Sqlite.db) : unit result =
+    case Sqlite.exec (db, "pragma journal_mode = wal;") of
+        Error message => Error (message)
+      | Ok _ =>
+            case Sqlite.exec (db, "pragma busy_timeout = 5000;") of
+                Error message => Error (message)
+              | Ok _ => Sqlite.exec (db, "pragma synchronous = normal;")
+
+fun configure_reader (db : borrow Sqlite.db) : unit result =
+    case Sqlite.exec (db, "pragma busy_timeout = 5000;") of
+        Error message => Error (message)
+      | Ok _ => Sqlite.exec (db, "pragma query_only = on;")
+
+fun open_readers (
+    path : string,
+    remaining : int,
+    readers : Sqlite.db list
+) : Sqlite.db list result =
+    if remaining <= 0 then Ok (readers)
+    else
+        let val open_path = string.copy (borrow path)
+            val next_path = string.copy (borrow path)
+        in
+            case Sqlite.open (open_path) of
+                Error message =>
+                    let val _ = close_readers (readers)
+                    in Error (message)
+                    end
+              | Ok db =>
+                    (case configure_reader (borrow db) of
+                         Error message =>
+                             let val _ = Sqlite.close (db)
+                                 val _ = close_readers (readers)
+                             in Error (message)
+                             end
+                       | Ok _ =>
+                             open_readers
+                                 (next_path, remaining - 1, Cons ((db, readers))))
+        end
+
+fun open (path : string, reader_count : int) : pool result =
+    if reader_count <= 0 then Error ("pool needs at least one reader")
+    else
+        let val writer_path = string.copy (borrow path)
+            val readers_path = string.copy (borrow path)
+        in
+            case Sqlite.open (writer_path) of
+                Error message => Error (message)
+              | Ok writer =>
+                    (case configure_writer (borrow writer) of
+                         Error message =>
+                             let val _ = Sqlite.close (writer)
+                             in Error (message)
+                             end
+                       | Ok _ =>
+                             case open_readers (readers_path, reader_count, Nil) of
+                                 Error message =>
+                                     let val _ = Sqlite.close (writer)
+                                     in Error (message)
+                                     end
+                               | Ok readers =>
+                                     Ok
+                                         ({
+                                             writer = writer,
+                                             readers = readers,
+                                             size = reader_count
+                                         }))
+        end
+
+(* Closes the writer and every reader still in the pool.  A reader that is
+   out (acquired, not released) must be given back first: `close` cannot
+   reach it, and the Linear `reader` makes forgetting it a compile error. *)
+fun close (pool : pool) : unit =
+    case pool of
+        { writer = writer, readers = readers, size = _ } =>
+            let val _ = close_readers (readers)
+            in
+                Sqlite.close (writer)
+            end
+
+fun reader_count (pool : borrow pool) : int = pool.size
+
+(* Takes the next reader out of the pool, round-robin.  `None` when every
+   reader is already out. *)
+fun acquire_reader (pool : pool) : reader option * pool =
+    case pool of
+        { writer = writer, readers = readers, size = size } =>
+            (case readers of
+                 Nil =>
+                     (None, { writer = writer, readers = Nil, size = size })
+               | Cons (db, rest) =>
+                     let val handle = Sqlite.handle (borrow db)
+                     in
+                         ( Some ({ db = db, handle = handle })
+                         , { writer = writer, readers = rest, size = size }
+                         )
+                     end)
+
+(* Puts a reader back at the end of the queue. *)
+fun release_reader (pool : pool, reader : reader) : pool =
+    case reader of
+        { db = db, handle = _ } =>
+            (case pool of
+                 { writer = writer, readers = readers, size = size } =>
+                     { writer = writer
+                     , readers = append_reader (readers, db)
+                     , size = size
+                     })
+
+(* Raw handle of the reader's connection, for `sys.thread_spawn`.  Unchecked
+   (see `Sqlite.handle`): keep the `reader` out of the pool, and do not
+   release it, until the worker that got the handle is joined. *)
+fun reader_handle (reader : borrow reader) : int64 = reader.handle
+
+fun query_reader (pool : pool, sql : string) : Sql.result result * pool =
+    case acquire_reader (pool) of
+        (None, pool) =>
+            (case pool of
+                 { writer = writer, readers = readers, size = size } =>
+                     let val result = Sqlite.query (borrow writer, sql)
+                     in
+                         ( result
+                         , { writer = writer, readers = readers, size = size }
+                         )
+                     end)
+      | (Some reader, pool) =>
+            let val result = Sqlite.query (borrow reader.db, sql)
+            in
+                (result, release_reader (pool, reader))
+            end
+
+fun query_writer (pool : pool, sql : string) : Sql.result result * pool =
+    let val result = Sqlite.query (borrow pool.writer, sql)
+    in
+        (result, pool)
+    end
+
+fun exec_writer (pool : pool, sql : string) : unit result * pool =
+    let val result = Sqlite.exec (borrow pool.writer, sql)
+    in
+        (result, pool)
+    end

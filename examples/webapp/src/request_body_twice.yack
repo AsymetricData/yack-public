@@ -1,0 +1,14 @@
+import web/Request
+
+
+
+
+fun main () =
+    let val raw =
+            "POST /sum HTTP/1.1\r\nHost: localhost\r\nContent-Length: 17\r\n\r\n{\"items\":[1,2,3]}"
+        val request = Request.parse (raw)
+        val first = Request.body (borrow request)
+        val second = Request.body (borrow request)
+    in
+        print_string (first ^ "|" ^ second)
+    end

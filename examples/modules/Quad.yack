@@ -1,0 +1,4 @@
+import modules/Math
+
+fun quad (x : int) : int =
+    Math.double (Math.double (x))

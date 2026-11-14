@@ -1,0 +1,18 @@
+/yack
+/yack-dev
+/src/build_info.sml
+__pycache__/
+*.pyc
+*.ll
+*.llvm
+*.o
+*.out
+.yack/
+graft/
+/testcl
+/.commandcode/
+
+# NLL reference artifacts are meant to be reviewed and diffed.
+!test/nll/ref/*.ll
+!test/nll/accept/*.out
+!test/arena_report/*.out

@@ -1,0 +1,6 @@
+fun classify (n : int) : int = 0
+fun classify (0) : int = 42
+fun classify (1) : int = 7
+
+fun main () =
+    print_int (classify (0) + classify (1) + classify (2))

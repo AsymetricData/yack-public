@@ -1,0 +1,147 @@
+import sql/Sql
+import yack/list
+
+(* sql/Sqlite : adaptateur SQLite minimal au-dessus des builtins sqlite_*.
+
+`db` et `statement` sont Linear : une connexion se termine par `close`, une
+requête préparée par `finalize`, sur chaque chemin. Fermer deux fois,
+utiliser après `close` ou oublier `close` est rejeté à la compilation. Un
+statement préparé emprunte sa base : `close` est refusé tant qu'il vit.
+Les opérations qui ne ferment pas empruntent la connexion (`borrow db`).
+
+Exemple :
+
+case Sqlite.open (":memory:") of
+    Error message => print_string (message)
+  | Ok db =>
+      let val _ = Sqlite.exec (borrow db, "create table t(x integer)")
+          val rows = Sqlite.query (borrow db, "select x from t")
+          val _ = Sqlite.close (db)
+      in ...
+      end
+*)
+type db : Linear = { handle : int64 }
+
+type statement : Linear = { handle : int64, owner : (borrow db) option }
+
+fun error_message (handle : int64) : string = sqlite_errmsg (handle)
+
+fun open (path : string) : db result =
+    let val (code, handle) = sqlite_open (path)
+    in
+        if code = 0 then
+            Ok ({ handle = handle })
+        else
+            let val message =
+                    if handle = 0 then "sqlite_open failed"
+                    else error_message (handle)
+                val _ =
+                    if handle = 0 then 0
+                    else sqlite_close (handle)
+            in
+                Error (message)
+            end
+    end
+
+fun close (db : db) : unit =
+    case db of
+        { handle = handle } =>
+            let val _ = sqlite_close (handle)
+            in
+                ()
+            end
+
+fun exec (db : borrow db, sql : string) : unit result =
+    let val code = sqlite_exec (db.handle, sql)
+    in
+        if code = 0 then Ok (()) else Error (error_message (db.handle))
+    end
+
+fun changes (db : borrow db) : int = sqlite_changes (db.handle)
+
+fun prepare (db : borrow db, sql : string) : statement result =
+    let val handle = sqlite_prepare (db.handle, sql)
+    in
+        if handle = 0 then
+            Error (error_message (db.handle))
+        else
+            Ok ({ handle = handle, owner = Some (db) })
+    end
+
+fun finalize (statement : statement) : unit =
+    case statement of
+        { handle = handle, owner = owner } =>
+            let val _ = owner
+                val _ = sqlite_finalize (handle)
+            in
+                ()
+            end
+
+fun value_at (statement : borrow statement, index : int) : Sql.value =
+    let val column_type = sqlite_column_type (statement.handle, index)
+    in
+        if column_type = 1 then
+            Sql.Int (sqlite_column_int (statement.handle, index))
+        else if column_type = 5 then
+            Sql.Null
+        else
+            Sql.Text (sqlite_column_text (statement.handle, index))
+    end
+
+fun row_from (
+    statement : borrow statement,
+    index : int,
+    count : int,
+    acc : (string, Sql.value) list
+) : Sql.row =
+    if index >= count then
+        list.reverse (acc)
+    else
+        let val name = sqlite_column_name (statement.handle, index)
+            val value = value_at (statement, index)
+        in
+            row_from (statement, index + 1, count, Cons (((name, value), acc)))
+        end
+
+fun rows_from (statement : borrow statement, acc : Sql.row list) : Sql.result result =
+    let val code = sqlite_step (statement.handle)
+    in
+        if code = 100 then
+            let val count = sqlite_column_count (statement.handle)
+                val row = row_from (statement, 0, count, [])
+            in
+                rows_from (statement, Cons ((row, acc)))
+            end
+        else if code = 101 then
+            Ok (list.reverse (acc))
+        else
+            Error ("sqlite_step failed: " ^ int_to_string (code))
+    end
+
+(* Unchecked raw-handle surface, for `sys.thread_spawn` only: its payload
+   is an `int64`, so a connection lent to a worker thread travels as its raw
+   handle.  Nothing ties the handle to the `db` it came from: the owner must
+   keep the `db` open (not `close` it) until the worker is joined, and only
+   one thread may use a connection at a time.  The worker can query through
+   the handle but cannot close it. *)
+fun handle (db : borrow db) : int64 = db.handle
+
+fun query_handle (handle : int64, sql : string) : Sql.result result =
+    let val raw = sqlite_prepare (handle, sql)
+    in
+        if raw = 0 then
+            Error (error_message (handle))
+        else
+            let val statement : statement = { handle = raw, owner = None }
+                val result =
+                    (let val rows = rows_from (borrow statement, [])
+                     in rows
+                     end)
+                val _ = finalize (statement)
+            in
+                result
+            end
+    end
+
+fun query (db : borrow db, sql : string) : Sql.result result =
+    query_handle (db.handle, sql)

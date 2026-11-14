@@ -1,0 +1,4 @@
+fun main () =
+    let val same = 1.5 = 2.5
+    in print_bool (same)
+    end

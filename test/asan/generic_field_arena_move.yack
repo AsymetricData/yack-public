@@ -1,0 +1,46 @@
+
+
+
+
+
+
+type payload = { tags : string array, items : string list }
+type 'a holder = { value : 'a, label : string }
+
+fun make () : payload =
+    arena
+        val tags : string array = array_new ()
+        val _ = array_push (tags, "al" ^ "pha")
+        val head = "ga" ^ "mma"
+        val items = Cons ((head, Nil))
+    in { tags = tags, items = items }
+    end
+
+fun take (box : 'a holder) : 'a =
+    let val label = box.label
+        val value = box.value
+        val _ = print_string (label)
+    in value
+    end
+
+fun expect (text : string, expected : borrow string) : unit =
+    if string_eq (borrow text, expected) then () else os.exit (1)
+
+fun main () =
+    let val box = { value = make (), label = "la" ^ "bel" }
+        val payload = take (box)
+        val _ = arena
+                    val junk_a = "ZZZZZZZZZZ" ^ "ZZZZZZZZZZ"
+                    val junk_b = "YYYYYYYYYY" ^ "YYYYYYYYYY"
+                    val junk = (junk_a, junk_b)
+                in ()
+                end
+        val expected_tag = "alpha"
+        val expected_item = "gamma"
+        val tag = string_copy (array_get_borrow (payload.tags, 0))
+        val _ = expect (tag, borrow expected_tag)
+    in
+        case payload.items of
+            Cons (item, _) => expect (item, borrow expected_item)
+          | Nil => os.exit (1)
+    end

@@ -1,0 +1,7 @@
+fun main () =
+    let val _written = io.write_file "/tmp/yack_io_roundtrip.txt" "hello from io"
+        val result = io.read_file "/tmp/yack_io_roundtrip.txt"
+    in case result of
+         Ok content => print_string (content)
+       | Error message => print_string (message)
+    end

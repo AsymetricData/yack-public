@@ -1,0 +1,9 @@
+type user : Affine = { name : int }
+
+fun bad (values : (borrow user) map, user : user) : unit =
+    let val borrowed = borrow user
+        val _ = map_set (values, "x", borrowed)
+    in ()
+    end
+
+fun main () = ()

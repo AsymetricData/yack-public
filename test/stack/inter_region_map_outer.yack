@@ -1,0 +1,8 @@
+fun main () =
+    let val values : string map = map_new ()
+        val _ = arena
+                    val text = "mapped"
+                    val _ = map_set (values, "k", text)
+                in ()
+                end
+    in print_string (string_copy (map_get_borrow (values, "k"))) end

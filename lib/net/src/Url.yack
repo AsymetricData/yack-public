@@ -1,0 +1,259 @@
+type query_param : Affine = { name : string, value : string }
+
+type url : Affine =
+    { scheme : string
+    , authority : string
+    , path : string
+    , query : string
+    , fragment : string
+    }
+
+fun hex_value (code : int) : int =
+    if code >= 48 then
+        if code <= 57 then code - 48
+        else if code >= 65 then
+            if code <= 70 then code - 55
+            else if code >= 97 then
+                if code <= 102 then code - 87
+                else -1
+            else -1
+        else -1
+    else -1
+
+fun decode_from (text : borrow string, index : int, length : int, acc : string) : string =
+    if index >= length then acc
+    else
+        let val code = string_char_at_unchecked (text, index)
+        in
+            if code = 37 then
+                if index + 2 < length then
+                    let val high = hex_value (string_char_at_unchecked (text, index + 1))
+                        val low = hex_value (string_char_at_unchecked (text, index + 2))
+                    in
+                        if high < 0 then
+                            decode_from (text, index + 1, length, acc ^ string_of_char (code))
+                        else if low < 0 then
+                            decode_from (text, index + 1, length, acc ^ string_of_char (code))
+                        else
+                            decode_from (text, index + 3, length,
+                                acc ^ string_of_char (high * 16 + low))
+                    end
+                else decode_from (text, index + 1, length, acc ^ string_of_char (code))
+            else if code = 43 then
+                decode_from (text, index + 1, length, acc ^ " ")
+            else
+                decode_from (text, index + 1, length, acc ^ string_of_char (code))
+        end
+
+fun percent_decode (text : string) : string =
+    let val length = string_length (borrow text)
+        val encoded = string_find_char (borrow text, 37)
+        val plus = string_find_char (borrow text, 43)
+    in
+        if encoded < 0 then
+            if plus < 0 then text
+            else decode_from (borrow text, 0, length, "")
+        else decode_from (borrow text, 0, length, "")
+    end
+
+fun parse_pair (query : borrow string, start : int, stop : int) : query_param =
+    let val equal = string_find_char_from (query, start, 61)
+    in
+        if equal < 0 then
+            { name = percent_decode (string_slice (query, start, stop))
+            , value = ""
+            }
+        else if equal >= stop then
+            { name = percent_decode (string_slice (query, start, stop))
+            , value = ""
+            }
+        else
+            { name = percent_decode (string_slice (query, start, equal))
+            , value = percent_decode (string_slice (query, equal + 1, stop))
+            }
+    end
+
+fun parse_pairs_from (query : borrow string, start : int, length : int) : query_param list =
+    if start >= length then Nil
+    else
+        let val amp = string_find_char_from (query, start, 38)
+            val stop = if amp < 0 then length else amp
+            val pair = parse_pair (query, start, stop)
+        in
+            if amp < 0 then Cons ((pair, Nil))
+            else Cons ((pair, parse_pairs_from (query, amp + 1, length)))
+        end
+
+fun parse_query (query : borrow string) : query_param list =
+    parse_pairs_from (query, 0, string_length (query))
+
+fun find_param_in (name : borrow string, params : query_param list) : string =
+    case params of
+        Nil => ""
+      | Cons (param, rest) =>
+            case param of
+                { name = key, value = value } =>
+                    if string_eq (name, borrow key) then value
+                    else find_param_in (name, rest)
+
+fun find_pair_from (text : borrow string, start : int, stop : int, name : borrow string) : string =
+    if start >= stop then ""
+    else
+        let val amp = string_find_char_from (text, start, 38)
+            val pair_stop = if amp < 0 then stop else if amp >= stop then stop else amp
+            val equal = string_find_char_from (text, start, 61)
+            val key_stop = if equal < 0 then pair_stop else if equal >= pair_stop then pair_stop else equal
+            val key = percent_decode (string_slice (text, start, key_stop))
+        in
+            if string_eq (name, borrow key) then
+                let val value_start = if equal < 0 then pair_stop else if equal >= pair_stop then pair_stop else equal + 1
+                in percent_decode (string_slice (text, value_start, pair_stop))
+                end
+            else if amp < 0 then ""
+            else if amp >= stop then ""
+            else find_pair_from (text, amp + 1, stop, name)
+        end
+
+fun find_pair_from_option
+    (text : borrow string, start : int, stop : int, name : borrow string)
+    : string option =
+    if start >= stop then None
+    else
+        let val amp = string_find_char_from (text, start, 38)
+            val pair_stop = if amp < 0 then stop else if amp >= stop then stop else amp
+            val equal = string_find_char_from (text, start, 61)
+            val key_stop = if equal < 0 then pair_stop else if equal >= pair_stop then pair_stop else equal
+            val key = percent_decode (string_slice (text, start, key_stop))
+        in
+            if string_eq (name, borrow key) then
+                let val value_start = if equal < 0 then pair_stop else if equal >= pair_stop then pair_stop else equal + 1
+                in Some (percent_decode (string_slice (text, value_start, pair_stop)))
+                end
+            else if amp < 0 then None
+            else if amp >= stop then None
+            else find_pair_from_option (text, amp + 1, stop, name)
+        end
+
+fun query_value_in_range_option
+    (text : borrow string, start : int, stop : int, name : borrow string)
+    : string option =
+    let val question = string_find_char_from (text, start, 63)
+    in
+        if question < 0 then None
+        else if question >= stop then None
+        else find_pair_from_option (text, question + 1, stop, name)
+    end
+
+fun has_scheme_in_range (text : borrow string, start : int, stop : int) : bool =
+    let val colon = string_find_char_from (text, start, 58)
+    in
+        if colon < start then false
+        else if colon + 2 >= stop then false
+        else if string_char_at_unchecked (text, colon + 1) = 47 then
+            string_char_at_unchecked (text, colon + 2) = 47
+        else false
+    end
+
+(* Path d'une cible de requête, sans allouer scheme/authority/query. *)
+fun path_in_range (text : borrow string, start : int, stop : int) : string =
+    let val absolute = has_scheme_in_range (text, start, stop)
+        val colon = string_find_char_from (text, start, 58)
+        val rest_start =
+            if absolute then
+                let val slash = string_find_char_from (text, colon + 3, 47)
+                in if slash < 0 then stop else slash
+                end
+            else start
+        val question = string_find_char_from (text, rest_start, 63)
+        val hash = string_find_char_from (text, rest_start, 35)
+        val question = if question < 0 then stop else if question > stop then stop else question
+        val hash = if hash < 0 then stop else if hash > stop then stop else hash
+        val path_stop = if question < hash then question else hash
+    in
+        string_slice (text, rest_start, path_stop)
+    end
+
+fun query_value_in_range (text : borrow string, start : int, stop : int, name : borrow string) : string =
+    let val question = string_find_char_from (text, start, 63)
+    in
+        if question < 0 then ""
+        else if question >= stop then ""
+        else find_pair_from (text, question + 1, stop, name)
+    end
+
+fun query_value (name : borrow string, value : url) : string =
+    case value of
+        { scheme = scheme
+        , authority = authority
+        , path = path
+        , query = query
+        , fragment = fragment
+        } =>
+            find_pair_from (borrow query, 0, string_length (borrow query), name)
+
+fun has_scheme (target : borrow string) : bool =
+    let val colon = string_find_char_from (target, 0, 58)
+        val length = string_length (target)
+    in
+        if colon < 0 then false
+        else if colon + 2 >= length then false
+        else if string_char_at_unchecked (target, colon + 1) = 47 then
+            if string_char_at_unchecked (target, colon + 2) = 47 then true
+            else false
+        else false
+    end
+
+fun parse_url (target : borrow string) : url =
+    let val length = string_length (target)
+        val absolute = has_scheme (target)
+        val colon = string_find_char_from (target, 0, 58)
+        val authority_start = colon + 3
+        val slash = if absolute then string_find_char_from (target, authority_start, 47) else -1
+        val scheme = if absolute then string_slice (target, 0, colon) else ""
+        val authority =
+            if absolute then
+                if slash < 0 then string_slice (target, authority_start, length)
+                else string_slice (target, authority_start, slash)
+            else ""
+        val rest_start = if absolute then (if slash < 0 then length else slash) else 0
+        val question = string_find_char_from (target, rest_start, 63)
+        val hash = string_find_char_from (target, rest_start, 35)
+    in
+        if question >= 0 then
+            if hash >= 0 then
+                if question < hash then
+                    { scheme = scheme
+                    , authority = authority
+                    , path = string_slice (target, rest_start, question)
+                    , query = string_slice (target, question + 1, hash)
+                    , fragment = string_slice (target, hash + 1, length)
+                    }
+                else
+                    { scheme = scheme
+                    , authority = authority
+                    , path = string_slice (target, rest_start, hash)
+                    , query = ""
+                    , fragment = string_slice (target, hash + 1, length)
+                    }
+            else
+                { scheme = scheme
+                , authority = authority
+                , path = string_slice (target, rest_start, question)
+                , query = string_slice (target, question + 1, length)
+                , fragment = ""
+                }
+        else if hash >= 0 then
+            { scheme = scheme
+            , authority = authority
+            , path = string_slice (target, rest_start, hash)
+            , query = ""
+            , fragment = string_slice (target, hash + 1, length)
+            }
+        else
+            { scheme = scheme
+            , authority = authority
+            , path = string_slice (target, rest_start, length)
+            , query = ""
+            , fragment = ""
+            }
+    end

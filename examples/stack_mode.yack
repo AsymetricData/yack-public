@@ -1,0 +1,13 @@
+fun build (n : int) : int list =
+    if n = 0 then Nil
+    else Cons ((n, build (n - 1)))
+
+fun total (xs : int list) : int =
+    case xs of
+        Nil => 0
+      | Cons (head, tail) => head + total (tail)
+
+fun main () =
+    let val xs = build (8)
+    in print_int (total (xs))
+    end

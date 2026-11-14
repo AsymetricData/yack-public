@@ -1,0 +1,11 @@
+# The same graph, accepted: the borrow comes before the drop.
+fun yack_main {
+  b0:
+    %0.s : string = view const "x"
+    %1.v : string = concat %0.s, %0.s
+    %2.r : &string = borrow &%1.v
+    %3.n : int = string.string_length %2.r!
+    drop %1.v! : string
+    %4 : unit = call print_int %3.n!
+    return %4!
+}

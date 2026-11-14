@@ -1,0 +1,13 @@
+
+
+fun bad (value : string) : int =
+    let val shared = borrow value
+        val exclusive = borrow mut value
+    in 0
+    end
+
+fun main () : unit =
+    let val s = "hello"
+        val n = bad (s)
+    in print_int (n)
+    end

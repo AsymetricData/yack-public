@@ -1,0 +1,10 @@
+fun main () =
+  let val values = array_make (0, 3)
+      val _ = array_set (values, 0, 10)
+      val _ = array_set (values, 1, 20)
+      val _ = array_push (values, 30)
+      val first = array_get (values, 0)
+      val last = array_get (values, 3)
+      val length = array_length (values)
+  in print_int (first + last + length)
+  end

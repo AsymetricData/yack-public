@@ -1,0 +1,9 @@
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), 1)
+        val values = array.set_int (values, 0, 2)
+        val values = array.set_int_unchecked (values, 0, 3)
+        val values = array.set (values, 0, 4)
+    in print_int (array.get_int (borrow values, 0))
+    end

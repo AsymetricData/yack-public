@@ -1,0 +1,8 @@
+fun even (n) =
+    if n = 0 then true else odd (n - 1)
+
+fun odd (n) =
+    if n = 0 then false else even (n - 1)
+
+fun main () =
+    print_bool (even (10))

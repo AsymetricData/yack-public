@@ -1,0 +1,8 @@
+import net/Http
+
+fun main () =
+    let val requestText = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        val request = Http.parse_request (requestText)
+    in
+        print_string (Http.request_line (request))
+    end

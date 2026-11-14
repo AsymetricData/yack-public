@@ -1,0 +1,10 @@
+fun apply (f : consume string -> unit, text : string) : unit = f (text)
+
+fun sink (text : string) : unit = ()
+
+fun main () =
+    let val s = "a" ^ "b"
+        val _ = apply (x => print_string (x), s)
+        val _ = apply (sink, "c" ^ "d")
+    in ()
+    end

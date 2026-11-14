@@ -1,0 +1,8 @@
+fun id (x) = x
+
+fun main () =
+    let val number = id (42)
+        val boolean = id (true)
+        val printed = print_int (number)
+    in print_bool (boolean)
+    end

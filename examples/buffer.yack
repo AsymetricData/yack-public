@@ -1,0 +1,31 @@
+type buffer : Affine = { data : int8 array, length : int, capacity : int }
+
+fun buffer_new (capacity : int) : buffer =
+    let val data : int8 array = array_make (0, capacity)
+    in { data = data, length = 0, capacity = capacity }
+    end
+
+fun buffer_append (b : buffer, value : int8) : buffer =
+    case b of
+        { data = data, length = length, capacity = capacity } =>
+            if length < capacity then
+                let val _ = array_set_unchecked (data, length, value)
+                in { data = data, length = length + 1, capacity = capacity }
+                end
+            else { data = data, length = length, capacity = capacity }
+
+fun buffer_string (b : buffer) : string =
+    case b of
+        { data = data, length = length, capacity = capacity } =>
+            bytes_to_string_range (data, 0, length)
+
+fun main () =
+    let val b = buffer_new (8)
+        val b = buffer_append (b, 104)
+        val b = buffer_append (b, 101)
+        val b = buffer_append (b, 108)
+        val b = buffer_append (b, 108)
+        val b = buffer_append (b, 111)
+        val text = buffer_string (b)
+    in print_string (text)
+    end

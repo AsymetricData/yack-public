@@ -1,0 +1,4 @@
+fun main () =
+    let val s = "a" ^ "b"
+        val u = s ^ s
+    in print_string (u) end

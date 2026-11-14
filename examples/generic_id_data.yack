@@ -1,0 +1,7 @@
+
+fun id (value) = value
+
+fun main () =
+    case id (Some (42)) of
+        None => ()
+      | Some x => print_int (x)

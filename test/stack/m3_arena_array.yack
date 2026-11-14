@@ -1,0 +1,15 @@
+fun make () : int array =
+    arena
+        val values : int array = array_new ()
+        val _ = array_push (values, 1)
+        val _ = array_push (values, 2)
+    in values
+    end
+
+fun main () =
+    let val values = make ()
+        val _ = arena
+                    val junk : int array = array_make (9, 100)
+                in ()
+                end
+    in print_int (array_get (values, 1)) end

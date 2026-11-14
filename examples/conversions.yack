@@ -1,0 +1,27 @@
+fun parse_or_zero (text : borrow string) : int =
+    case string_to_int (text) of
+        None => 0
+      | Some (value) => value
+
+fun main () =
+    let val positive = "456"
+        val negative = "-78"
+        val invalid = "4x6"
+        val empty = ""
+        val tooBig = "9999999999"
+        val rendered = int_to_string (123)
+        val renderedNeg = int_to_string (0 - 45)
+        val positiveValue = parse_or_zero (borrow positive)
+        val negativeValue = parse_or_zero (borrow negative)
+        val invalidValue = parse_or_zero (borrow invalid)
+        val emptyValue = parse_or_zero (borrow empty)
+        val tooBigValue = parse_or_zero (borrow tooBig)
+        val some = option_is_some (string_to_int (borrow positive))
+    in
+        print_int (string_length (borrow rendered) * 10000000
+                   + string_length (borrow renderedNeg) * 1000000
+                   + (0 - negativeValue) * 10000
+                   + positiveValue * 10
+                   + invalidValue + emptyValue + tooBigValue
+                   + (if some then 1 else 0))
+    end

@@ -1,0 +1,10 @@
+type point = { x : int, y : int }
+
+fun main () =
+    let val (a, b) = (20, 22)
+        val p = { x = a, y = b }
+        val { x = px, y = py } = p
+        val (total, _) = (px + py, 0)
+    in
+        print_int (total)
+    end

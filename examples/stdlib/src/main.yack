@@ -1,0 +1,55 @@
+import yack/int
+
+import yack/string
+
+import yack/list
+
+import yack/json
+
+import yack/sort
+
+import yack/array
+
+fun main () =
+    let
+        val text = "{\"name\":\"yack\",\"count\":42}"
+        val parsed = json.parse (borrow text)
+    in
+        case parsed of
+            Error message => print_string (message)
+          | Ok value =>
+              case json.as_object (value) of
+                  Error message => print_string (message)
+                | Ok fields =>
+                    let
+                        val nameKey = "name"
+                        val name = json.field_string (borrow nameKey, fields)
+                    in
+                        case name of
+                            Error message => print_string (message)
+                          | Ok actual =>
+                              let
+                                  val answer = "answer"
+                                  val rendered =
+                                      json.to_string (
+                                          json.object (
+                                              Cons (
+                                                  (
+                                                      json.entry (
+                                                          answer,
+                                                          json.string (
+                                                              string.to_upper (
+                                                                  borrow actual
+                                                              )
+                                                          )
+                                                      ),
+                                                      Nil
+                                                  )
+                                              )
+                                          )
+                                      )
+                              in
+                                  print_string (rendered)
+                              end
+                    end
+    end

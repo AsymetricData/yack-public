@@ -1,0 +1,4 @@
+type Value = int
+type Value = string
+
+fun main () = print_int (0)

@@ -1,0 +1,12 @@
+fun make () : int array =
+    array_make (7, 3)
+
+fun grow (values : int array, count : int) : int array =
+    if count = 0 then values
+    else
+        let val _ = array_push (values, count)
+        in grow (values, count - 1) end
+
+fun main () =
+    let val values = grow (make (), 100)
+    in print_int (array_get (values, 0) + array_length (values)) end

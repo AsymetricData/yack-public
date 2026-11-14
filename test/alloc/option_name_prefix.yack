@@ -1,0 +1,16 @@
+
+
+
+
+datatype 'a optionz = Yes of 'a | No of string
+
+datatype chainz = Linkz of int * chainz optionz
+
+fun build (n : int, acc : chainz optionz) : chainz optionz =
+    if n = 0 then acc
+    else build (n - 1, Yes (Linkz ((n, acc))))
+
+fun main () =
+    let val chain = build (1000, No ("end"))
+    in print_int (case chain of Yes _ => 1 | No _ => 0)
+    end

@@ -1,0 +1,6 @@
+type ordered = { first : int, second : int, third : int }
+
+fun main () =
+    let val value : ordered = { third = 2, first = 40, second = 0 }
+    in print_int (value.first + value.second + value.third)
+    end

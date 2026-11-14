@@ -1,0 +1,9 @@
+fun inner_length (item : borrow string map) : int =
+    map_length_borrow (item)
+fun main () =
+    let val outer : string map map = map_new ()
+        val inner : string map = map_new ()
+        val _ = map_set (inner, "a", "b")
+        val _ = map_set (outer, "k", inner)
+    in print_int (inner_length (map_get_borrow_view (borrow outer, "k")))
+    end

@@ -1,0 +1,16 @@
+import yack/string
+
+
+
+fun choose (flag : bool, line : string) : string =
+    let val borrowed = borrow line
+        val size = string_length (borrowed)
+    in
+        if flag then line else line
+    end
+
+fun main () : unit =
+    let val s = string_copy (borrow "abc")
+        val out = choose (true, s)
+    in print_string (out)
+    end

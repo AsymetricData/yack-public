@@ -1,0 +1,10 @@
+fun apply (f : consume string -> unit, text : string) : unit = f (text)
+
+fun loop (n : int) : unit =
+    if n = 0 then ()
+    else
+        let val _ = apply (x => print_string (x), "a" ^ "aa")
+        in loop (n - 1)
+        end
+
+fun main () = loop (500)

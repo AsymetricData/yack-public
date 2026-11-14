@@ -1,0 +1,11 @@
+type inner : Affine = { name : string, tag : string }
+type outer : Affine = { inner : inner, other : string }
+
+fun main () =
+    let val o : outer =
+            { inner = { name = "a" ^ "aa", tag = "t" ^ "tt" }
+            , other = "o" ^ "oo"
+            }
+        val name = o.inner.name
+    in print_string (name)
+    end

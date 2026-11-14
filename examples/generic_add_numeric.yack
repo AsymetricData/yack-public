@@ -1,0 +1,7 @@
+fun add (x, y) = x + y
+
+fun main () =
+    let val integer = add (40, 2)
+        val real = add (1.5, 2.5)
+    in print_int (integer)
+    end

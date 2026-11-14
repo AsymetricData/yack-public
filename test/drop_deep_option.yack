@@ -1,0 +1,10 @@
+datatype chain = Link of int * chain option
+
+fun build (n : int, acc : chain option) : chain option =
+    if n = 0 then acc
+    else build (n - 1, Some (Link ((n, acc))))
+
+fun main () =
+    let val chain = build (1000000, None)
+    in print_int (case chain of Some _ => 1 | None => 0)
+    end

@@ -1,0 +1,14 @@
+fun main () =
+    let val a = 7 / 2
+        val b = 7 % 2
+        val c = 0 - 5
+        val d = 0 - 7 / 2
+        val e = 0 - 7 % 2
+        val ra = print_int (a)
+        val rb = print_int (b)
+        val rc = print_int (c)
+        val rd = print_int (d)
+        val re = print_int (e)
+    in
+        print_int (a + b + c + d + e)
+    end

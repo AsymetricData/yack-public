@@ -1,0 +1,10 @@
+type point : Copy = { x : int, y : int }
+
+fun touch (p : borrow mut point) : unit = ()
+
+fun main () =
+    let val p : point = { x = 1, y = 2 }
+        val m = borrow mut p
+        val x = p.x
+        val _ = touch (m)
+    in print_int (x) end

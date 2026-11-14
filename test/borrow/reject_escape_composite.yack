@@ -1,0 +1,10 @@
+type user : Affine = { name : int }
+
+fun bad () : (borrow user) list =
+    let val user = { name = 1 }
+        val borrowed = borrow user
+        val holder = Cons ((borrowed, Nil))
+    in holder
+    end
+
+fun main () = ()

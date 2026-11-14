@@ -1,0 +1,7 @@
+fun quotient (x : int8, y : int8) : int8 = x / y
+
+fun main () =
+    let val zero : int8 = 0
+        val q = quotient (42, zero)
+    in print_string (int8_to_string (q))
+    end

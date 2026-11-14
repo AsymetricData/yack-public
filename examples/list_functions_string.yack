@@ -1,0 +1,13 @@
+import yack/list
+
+fun string_size (s : string) : int = string_length (borrow s)
+fun add_pair (pair : int * int) : int =
+    case pair of
+        (acc, x) => acc + x
+
+fun main () =
+    let val values = Cons (("ab", Cons (("c", Nil))))
+        val sizes = list.map (string_size, values)
+        val total = list.foldl (add_pair, 0, sizes)
+    in print_int (total)
+    end

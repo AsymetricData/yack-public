@@ -1,0 +1,3 @@
+import Math.{triple}
+
+fun main () = print_int (triple (14))

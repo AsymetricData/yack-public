@@ -1,0 +1,14 @@
+type handle : Linear = { fd : int }
+
+fun handle_fd (value : borrow handle) : int =
+    value.fd
+
+fun close (value : handle) : unit =
+    case value of { fd = fd } => let val _ = fd in () end
+
+fun bad (value : handle) : unit =
+    let val _ = close (value)
+    in let val _ = handle_fd (borrow value) in () end
+    end
+
+fun main () = ()

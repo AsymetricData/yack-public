@@ -1,0 +1,85 @@
+import yack/ansi
+import yack/int
+import yack/io
+import yack/os
+import yack/string
+
+(* Lit une variable d'environnement entière, avec repli en cas d'absence ou d'erreur.
+   - `name` : nom de variable, consommé.
+   - `default` : valeur utilisée si la variable ne contient pas un entier valide.
+
+   Retourne la valeur analysée ou la valeur de repli; ne modifie pas l'environnement. *)
+fun env_int (name : string, default : int) : int =
+    case os.getenv (name) of
+        None => default
+      | Some (value) =>
+            (case int.parse (borrow value) of
+                 None => default
+               | Some (number) => number)
+
+(* Retourne la largeur du terminal depuis `COLUMNS`, ou 80 si indisponible ou trop
+   petite. *)
+fun width () : int =
+    let val value = env_int ("COLUMNS", 80)
+    in if value < 20 then 80 else value
+    end
+
+(* Retourne la hauteur du terminal depuis `LINES`, ou 24 si indisponible ou trop
+   petite. *)
+fun height () : int =
+    let val value = env_int ("LINES", 24)
+    in if value < 3 then 24 else value
+    end
+
+(* Estime si la sortie est un terminal à partir de `TERM`. Retourne faux si `TERM`
+   est absent ou vaut `dumb`; ce test est heuristique, car il ne vérifie pas
+   directement si la sortie est attachée à un TTY. *)
+fun is_tty () : bool =
+    let val dumb = "dumb"
+    in
+        case os.getenv ("TERM") of
+            None => false
+          | Some (term) =>
+                if string.equals (borrow term, borrow dumb) then false
+                else true
+    end
+
+(* Indique si les séquences couleur devraient être activées selon `is_tty`. *)
+fun color_enabled () : bool =
+    is_tty ()
+
+(* Écrit immédiatement du texte brut sur la sortie standard, sans ajouter de nouvelle
+   ligne.
+   - `value` : contenu à écrire, emprunté pendant l'appel; la chaîne locale est
+     rendue. Effet : émet des octets sur stdout. *)
+fun emit (value : string) : unit =
+    let val text = value
+    in io.print_raw (borrow text)
+    end
+
+(* Efface l'écran et replace le curseur au début; écrit une séquence ANSI sur stdout. *)
+fun clear_screen () : unit = emit (ansi.clear_screen ())
+
+(* Déplace le curseur à la position demandée et y écrit le texte.
+   - `row`, `column` : ligne et colonne absolues (indexées à partir de 1).
+   - `value` : texte à écrire, consommé.
+
+   Effet : déplace le curseur et écrit sur stdout, sans ajouter de nouvelle ligne. *)
+fun print_at (row : int, column : int, value : string) : unit =
+    emit (ansi.cursor_to (row, column) ^ value)
+
+(* Masque le curseur du terminal en écrivant une séquence ANSI sur stdout. *)
+fun hide_cursor () : unit = emit (ansi.hide_cursor ())
+
+(* Réaffiche le curseur du terminal en écrivant une séquence ANSI sur stdout. *)
+fun show_cursor () : unit = emit (ansi.show_cursor ())
+
+(* Active l'écran alternatif en écrivant une séquence ANSI sur stdout. *)
+fun alternate_screen () : unit = emit (ansi.alternate_screen ())
+
+(* Quitte l'écran alternatif en écrivant une séquence ANSI sur stdout. *)
+fun leave_alternate_screen () : unit = emit (ansi.leave_alternate_screen ())
+
+(* Point d'extension sans effet actuellement; ne vide pas de tampon de sortie. *)
+fun flush () : unit =
+    ()

@@ -1,0 +1,16 @@
+import yack/string
+
+
+
+
+
+
+
+fun walk (name : string, n : int) : int =
+    if n <= 0 then string_length (borrow name)
+    else walk (name, n - 1)
+
+fun main () =
+    let val name = string.copy (borrow "abc")
+    in print_int (walk (name, 1000000))
+    end

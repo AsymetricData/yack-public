@@ -1,0 +1,8 @@
+
+
+fun main () =
+    arena
+        val text = "fr" ^ "esh"
+    in
+        print_int (string_char_at_unchecked (borrow text, 0))
+    end

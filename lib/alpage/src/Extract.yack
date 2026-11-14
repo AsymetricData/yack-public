@@ -1,0 +1,62 @@
+import alpage/AppError
+import alpage/Ctx
+import alpage/Reply
+import alpage/Request
+
+fun find_param (name : borrow string, params : (string * string) list) : string option =
+    case params of
+        Nil => None
+      | pair :: rest =>
+            let val key = pair.0
+                val value = pair.1
+            in
+                if string_eq (name, borrow key) then Some (value)
+                else find_param (name, rest)
+            end
+
+fun json
+    (ctx : Ctx.t
+    , request : consume Request.t
+    , decoder : borrow string -> 'a result
+    , next : (Ctx.t, consume 'a) -> Reply.t
+    ) : Reply.t =
+    let val body = Request.body (borrow request)
+    in
+        case decoder (borrow body) of
+            Ok value => next (ctx, value)
+          | Error _message =>
+                Reply.fail (AppError.bad_request ("invalid JSON body"))
+    end
+
+fun path_int
+    (ctx : Ctx.t
+    , request : Request.t
+    , name : string
+    , next : (Ctx.t, int) -> Reply.t
+    ) : Reply.t =
+    let val params = Request.params (request)
+        val found = find_param (borrow name, params)
+    in
+        case found of
+            None => Reply.fail (AppError.bad_request ("missing path parameter"))
+          | Some value =>
+                (case string_to_int (borrow value) of
+                     Some parsed => next (ctx, parsed)
+                   | None => Reply.fail (AppError.bad_request ("invalid path parameter")))
+    end
+
+fun query_int
+    (ctx : Ctx.t
+    , request : Request.t
+    , name : string
+    , next : (Ctx.t, int) -> Reply.t
+    ) : Reply.t =
+    let val found = Request.query (borrow request, name)
+    in
+        case found of
+            None => Reply.fail (AppError.bad_request ("missing query parameter"))
+          | Some value =>
+                (case string_to_int (borrow value) of
+                     Some parsed => next (ctx, parsed)
+                   | None => Reply.fail (AppError.bad_request ("invalid query parameter")))
+    end

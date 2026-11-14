@@ -1,0 +1,13 @@
+
+
+
+import sql/Sqlite
+
+fun main () =
+    case Sqlite.open (":memory:") of
+        Error message => print_string (message)
+      | Ok db =>
+          let val _ = Sqlite.close (db)
+              val _ = Sqlite.exec (borrow db, "select 1;")
+          in ()
+          end

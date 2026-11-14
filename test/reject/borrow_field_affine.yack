@@ -1,0 +1,6 @@
+type box : Affine = { data : string }
+
+fun box_data (value : borrow box) : string =
+    value.data
+
+fun main () = ()

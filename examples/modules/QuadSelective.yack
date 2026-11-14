@@ -1,0 +1,4 @@
+import modules/Math.{double}
+
+fun quad (x : int) : int =
+    double (double (x))

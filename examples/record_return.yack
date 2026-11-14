@@ -1,0 +1,9 @@
+type pair = { left : int, right : int }
+
+fun make (x : int) : pair = { left = x, right = x + 1 }
+
+fun main () =
+    let val value = make (40)
+        val result = value.left + value.right
+    in print_int (result)
+    end

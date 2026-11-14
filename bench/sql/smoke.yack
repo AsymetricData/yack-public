@@ -1,0 +1,45 @@
+import sql/Sql
+import sql/Sqlite
+
+fun show_row (row : Sql.row) : unit =
+    case row of
+        [] => ()
+      | (name, value) :: rest =>
+          let
+              val _ =
+                  case value of
+                      Sql.Null => print_string (name ^ "=null")
+                    | Sql.Int number =>
+                        print_string (name ^ "=" ^ int_to_string (number))
+                    | Sql.Text text => print_string (name ^ "=" ^ text)
+          in
+              show_row (rest)
+          end
+
+fun show_rows (rows : Sql.result) : unit =
+    case rows of
+        [] => ()
+      | row :: rest =>
+          let val _ = show_row (row)
+          in
+              show_rows (rest)
+          end
+
+fun main () =
+    case Sqlite.open (":memory:") of
+        Error message => print_string (message)
+      | Ok db =>
+          let val _ = Sqlite.exec (borrow db, "create table t(id integer, name text);")
+              val _ = Sqlite.exec (borrow db, "insert into t values (1, 'alice');")
+              val _ = Sqlite.exec (borrow db, "insert into t values (2, 'bob');")
+              val result = Sqlite.query (borrow db, "select id, name from t order by id;")
+              val _ = Sqlite.close (db)
+          in
+              case result of
+                  Error message => print_string (message)
+                | Ok rows =>
+                    let val _ = show_rows (rows)
+                    in
+                        ()
+                    end
+          end

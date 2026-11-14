@@ -1,0 +1,10 @@
+type user : Affine = { name : string, age : int }
+
+fun name_of (value : user) : string = value.name
+
+fun main () =
+  let val value = { name = "a" ^ "b", age = 1 }
+      val field = value.name
+      val other = name_of ({ name = "c" ^ "d", age = 2 })
+  in print_string (field ^ other)
+  end

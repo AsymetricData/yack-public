@@ -1,0 +1,3 @@
+datatype bad : Affine = Box of token
+
+fun main () = ()

@@ -1,0 +1,11 @@
+# expect: leak
+# `drop skip 1` releases part 0; part 1 stays owned and is never moved.
+fun yack_main {
+  b0:
+    %0.a : string = view const "a"
+    %1.b : string = view const "b"
+    %2.p : string * string = tuple move %0.a, move %1.b
+    drop %2.p : string * string skip 1
+    %3 : unit = const ()
+    return %3!
+}

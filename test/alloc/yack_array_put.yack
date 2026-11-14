@@ -1,0 +1,9 @@
+import yack/array
+
+fun main () =
+    let val values = array.push (array.new (), "a" ^ "b")
+        val pair = array.take (values, 0)
+        val values = array.put (pair.0, 0, "c" ^ "d")
+        val text = array.get_borrow (borrow values, 0)
+    in print_int (string_length (text))
+    end

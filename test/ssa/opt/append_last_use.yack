@@ -1,0 +1,45 @@
+
+
+
+
+datatype box = Box of string | Empty
+
+
+fun repeat (acc : string, piece : string, n : int) : string =
+    if n = 0 then acc
+    else repeat (acc ^ string_copy (borrow piece), piece, n - 1)
+
+
+fun unbox (b : box) : string =
+    case b of
+        Box s => s ^ "<"
+      | Empty => "none"
+
+
+fun peek (b : borrow box) : int =
+    case b of
+        Box s => string_length (s)
+      | Empty => 0
+
+
+fun lit (s : string) : string = "lit:" ^ s
+
+
+fun boxed (n : int) : int =
+    arena
+        val a = repeat ("", "ab", n)
+        val b = a ^ "!"
+    in string_length (borrow b) end
+
+
+fun two (x : string, y : string) : string = x ^ y
+
+fun main () =
+    let val _ = print_string (repeat ("s", "xy", 5))
+        val b = Box (repeat ("", "q", 3))
+        val _ = print_int (peek (borrow b))
+        val _ = print_string (unbox (b))
+        val _ = print_string (lit (repeat ("", "m", 2)))
+        val _ = print_int (boxed (40))
+        val _ = print_string (two (repeat ("", "u", 2), repeat ("", "v", 2)))
+    in print_string (repeat ("", "z", 300) ^ "|") end

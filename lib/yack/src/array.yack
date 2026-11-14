@@ -1,0 +1,354 @@
+(* Longueur logique du tableau (nombre d'éléments initialisés).
+   - `values` : tableau emprunté, non consommé. *)
+fun length (values : borrow 'a array) : int = array_kernel_length (values)
+
+(* Capacité allouée du tableau (nombre d'éléments avant réallocation).
+   - `values` : tableau emprunté, non consommé. *)
+fun capacity (values : borrow 'a array) : int = array_kernel_capacity (values)
+
+(* Arrête le programme avec le message de bornes du runtime.
+   - `index` : indice fautif.
+   - `size` : longueur du tableau au moment du contrôle. *)
+fun internal_bounds_fail (index : int, size : int) : unit =
+    array_kernel_bounds_abort (index, size)
+
+(* Contrôle qu'un indice appartient à `[0, size)`, et arrête le programme
+   sinon. C'est le seul test de bornes des accès ci-dessous.
+   - `values` : tableau emprunté, non consommé.
+   - `index` : indice à contrôler. *)
+fun internal_check (values : borrow 'a array, index : int) : unit =
+    let val size = length (values) in
+        if index < 0 then internal_bounds_fail (index, size)
+        else if index >= size then internal_bounds_fail (index, size)
+        else ()
+    end
+
+(* Crée un tableau vide, sans allocation de données.
+   Aucun paramètre. *)
+fun new () : 'a array = array_kernel_new (0)
+
+(* Lit l'entier d'un indice vérifié. Réservé aux éléments Copy.
+   - `values` : tableau emprunté, non consommé.
+   - `index` : indice vérifié. *)
+fun get_int (values : borrow int array, index : int) : int =
+    let val _ = internal_check (values, index) in
+        array_kernel_load (values, index)
+    end
+
+(* Lit un élément Copy d'un indice vérifié. Les types d'égalité (`''a`)
+   couvrent int, int8, int64 et bool ; `float` et les types avec pointeurs
+   passent par `get_float` ou `get_borrow`.
+   - `values` : tableau emprunté, non consommé.
+   - `index` : indice vérifié. *)
+fun get (values : borrow ''a array, index : int) : ''a =
+    let val _ = internal_check (values, index) in
+        array_kernel_load (values, index)
+    end
+
+(* Lit un flottant d'un indice vérifié (`float` n'est pas un type d'égalité).
+   - `values` : tableau emprunté, non consommé.
+   - `index` : indice vérifié. *)
+fun get_float (values : borrow float array, index : int) : float =
+    let val _ = internal_check (values, index) in
+        array_kernel_load (values, index)
+    end
+
+(* Remplit une tranche déjà dimensionnée avec la même valeur Copy.
+   - `values` : tableau possédé, rempli et rendu.
+   - `value` : valeur Copy recopiée dans chaque slot.
+   - `index` : premier indice à écrire.
+   - `count` : borne exclusive. *)
+fun fill_from
+        (values : ''a array, value : ''a, index : int, count : int)
+        : ''a array =
+    if index >= count then values
+    else
+        let val _ = array_kernel_write (values, index, value)
+        in fill_from (values, value, index + 1, count) end
+
+(* Crée un tableau de `count` copies de `value` (éléments Copy).
+   - `value` : valeur Copy recopiée.
+   - `count` : nombre d'éléments. *)
+fun make (value : ''a, count : int) : ''a array =
+    let val safeCount = if count < 0 then 0 else count
+        val capacity = if safeCount < 4 then 4 else safeCount
+        val values = array_kernel_new (capacity)
+        val _ = array_kernel_set_length (values, safeCount)
+    in fill_from (values, value, 0, safeCount) end
+
+(* Crée un tableau de `count` slots non initialisés (éléments primitifs).
+   Les slots doivent être écrits avant toute lecture.
+   - `count` : nombre d'éléments. *)
+fun make_uninit (count : int) : ''a array =
+    let val safeCount = if count < 0 then 0 else count
+        val capacity = if safeCount < 4 then 4 else safeCount
+        val values = array_kernel_new (capacity)
+        val _ = array_kernel_set_length (values, safeCount)
+    in values end
+
+(* Remplit une tranche de flottants déjà dimensionnée.
+   - `values` : tableau possédé, rempli et rendu.
+   - `value` : valeur recopiée dans chaque slot.
+   - `index` : premier indice à écrire.
+   - `count` : borne exclusive. *)
+fun fill_float_from
+        (values : float array, value : float, index : int, count : int)
+        : float array =
+    if index >= count then values
+    else
+        let val _ = array_kernel_write (values, index, value)
+        in fill_float_from (values, value, index + 1, count) end
+
+(* Crée un tableau de `count` flottants identiques.
+   - `value` : valeur recopiée.
+   - `count` : nombre d'éléments. *)
+fun make_float (value : float, count : int) : float array =
+    let val safeCount = if count < 0 then 0 else count
+        val capacity = if safeCount < 4 then 4 else safeCount
+        val values = array_kernel_new (capacity)
+        val _ = array_kernel_set_length (values, safeCount)
+    in fill_float_from (values, value, 0, safeCount) end
+
+(* Emprunte l'élément d'un indice vérifié, sans le déplacer.
+   - `values` : tableau emprunté, non consommé.
+   - `index` : indice vérifié. *)
+fun get_borrow (values : borrow 'a array, index : int) : borrow 'a from 1 =
+    let val _ = internal_check (values, index) in
+        array_kernel_borrow (values, index)
+    end
+
+(* Remplace l'élément d'un indice vérifié ; l'ancienne valeur est détruite.
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `index` : indice vérifié.
+   - `value` : nouvelle valeur, transférée au tableau. *)
+fun set (values : 'a array, index : int, value : 'a) : 'a array =
+    let val _ = internal_check (borrow values, index)
+        val old = array_kernel_take (values, index)
+        val _ = array_kernel_write (values, index, value)
+    in values end
+
+(* Remplace l'entier d'un indice vérifié et rend le tableau.
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `index` : indice vérifié.
+   - `value` : nouvel entier. *)
+fun set_int (values : int array, index : int, value : int) : int array =
+    let val _ = internal_check (borrow values, index)
+        val _ = array_kernel_write (values, index, value)
+    in values end
+
+(* Variante historique de `set_int` : les bornes sont vérifiées de la même
+   façon, le suffixe ne change plus rien pour les accès.
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `index` : indice vérifié.
+   - `value` : nouvel entier. *)
+fun set_int_unchecked (values : int array, index : int, value : int) : int array =
+    set_int (values, index, value)
+
+(* Déplace l'élément d'un indice vérifié hors du tableau et laisse un trou.
+   - `values` : tableau rendu avec l'élément retiré.
+   - `index` : indice vérifié. *)
+fun take (values : 'a array, index : int) : 'a array * 'a =
+    let val _ = internal_check (borrow values, index)
+        val element = array_kernel_take (values, index)
+    in (values, element) end
+
+(* Écrit un élément sans détruire le contenu du slot (trou ou valeur neuve).
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `index` : indice vérifié.
+   - `value` : valeur transférée au tableau. *)
+fun put (values : 'a array, index : int, value : 'a) : 'a array =
+    let val _ = internal_check (borrow values, index)
+        val _ = array_kernel_write (values, index, value)
+    in values end
+
+(* Ajoute un élément à la fin du tableau et rend le tableau modifié.
+   La capacité est vérifiée ici : elle double (ou passe à 4) avant l'écriture.
+   - `values` : tableau Affine, consommé puis rendu après mutation.
+   - `value` : élément ajouté, transféré au tableau. *)
+fun push (values : 'a array, value : 'a) : 'a array =
+    let
+        val size = length (borrow values)
+        val room = capacity (borrow values)
+        val _ =
+            if size >= room then
+                array_kernel_reserve (
+                    values,
+                    if room = 0 then 4 else room * 2)
+            else ()
+        val _ = array_kernel_write (values, size, value)
+        val _ = array_kernel_set_length (values, size + 1)
+    in
+        values
+    end
+
+(* Ajoute un élément à la fin sans croître : s'arrête si le tableau est plein.
+   - `values` : tableau Affine consommé puis rendu après mutation.
+   - `value` : élément ajouté, transféré au tableau. *)
+fun push_unchecked (values : 'a array, value : 'a) : 'a array =
+    let
+        val size = length (borrow values)
+        val room = capacity (borrow values)
+        val _ = if size >= room then internal_bounds_fail (size, room) else ()
+        val _ = array_kernel_write (values, size, value)
+        val _ = array_kernel_set_length (values, size + 1)
+    in
+        values
+    end
+
+(* Inverse en place la portion entière délimitée par `left` et `right`, puis rend le
+   tableau.
+   - `values` : tableau Affine consommé et rendu à chaque étape récursive.
+   - `left` : borne gauche inclusive.
+   - `right` : borne droite inclusive. *)
+fun reverse_int_from (values : int array, left : int, right : int) : int array =
+    if left >= right then
+        values
+    else
+        let
+            val temporary = get_int (borrow values, left)
+            val replacement = get_int (borrow values, right)
+            val values = set_int (values, left, replacement)
+            val values = set_int (values, right, temporary)
+        in
+            reverse_int_from (values, left + 1, right - 1)
+        end
+
+(* Inverse en place tous les entiers du tableau et rend celui-ci.
+   - `values` : tableau Affine consommé puis rendu après mutation. *)
+fun reverse_int (values : int array) : int array =
+    let val size = length (borrow values) in
+        reverse_int_from (values, 0, size - 1)
+    end
+
+(* Copie les éléments à partir de `index` dans le tableau cible, puis rend la cible.
+   - `source` : tableau source emprunté pendant la copie.
+   - `target` : tableau cible Affine consommé, modifié en place et rendu.
+   - `index` : premier indice à copier.
+   - `size` : borne exclusive de la copie. *)
+fun copy_int_from (source : borrow int array, target : int array, index : int, size : int) : int array =
+    if index >= size then
+        target
+    else
+        let
+            val value = get_int (source, index)
+            val target = set_int (target, index, value)
+        in
+            copy_int_from (source, target, index + 1, size)
+        end
+
+(* Crée et rend une copie indépendante des entiers du tableau.
+   - `values` : tableau source emprunté ; ses valeurs sont recopiées dans un
+     nouveau tableau. *)
+fun copy_int (values : borrow int array) : int array =
+    let
+        val size = length (values)
+        val result : int array = make (0, size)
+    in
+        copy_int_from (values, result, 0, size)
+    end
+
+(* Additionne les éléments de la tranche à partir de `index` et renvoie le total avec
+   `acc`.
+   - `values` : tableau emprunté par le parcours.
+   - `index` : prochain indice à lire.
+   - `size` : borne exclusive du parcours.
+   - `acc` : somme accumulée jusque-là. *)
+fun sum_int_from (values : borrow int array, index : int, size : int, acc : int) : int =
+    if index >= size then
+        acc
+    else
+        sum_int_from (values, index + 1, size, acc + get_int (values, index))
+
+(* Calcule la somme des entiers du tableau.
+   - `values` : tableau emprunté ; il n'est pas rendu. *)
+fun sum_int (values : borrow int array) : int =
+    let val size = length (values) in
+        sum_int_from (values, 0, size, 0)
+    end
+
+(* Parcourt le reste du tableau et renvoie le maximum entre ses éléments et `best`.
+   - `values` : tableau emprunté par le parcours.
+   - `index` : prochain indice à lire.
+   - `size` : borne exclusive du parcours.
+   - `best` : meilleur entier rencontré jusque-là. *)
+fun max_int_from (values : borrow int array, index : int, size : int, best : int) : int =
+    if index >= size then
+        best
+    else
+        let val current = get_int (values, index) in
+            if current > best then
+                max_int_from (values, index + 1, size, current)
+            else
+                max_int_from (values, index + 1, size, best)
+        end
+
+(* Renvoie le maximum du tableau, ou `None` s'il est vide.
+   - `values` : tableau emprunté ; il n'est pas rendu. *)
+fun max_int (values : borrow int array) : int option =
+    let val size = length (values) in
+        if size = 0 then
+            None
+        else
+            let val first = get_int (values, 0) in
+                Some (max_int_from (values, 1, size, first))
+            end
+    end
+
+(* Parcourt le reste du tableau et renvoie le minimum entre ses éléments et `best`.
+   - `values` : tableau emprunté par le parcours.
+   - `index` : prochain indice à lire.
+   - `size` : borne exclusive du parcours.
+   - `best` : meilleur entier rencontré jusque-là. *)
+fun min_int_from (values : borrow int array, index : int, size : int, best : int) : int =
+    if index >= size then
+        best
+    else
+        let val current = get_int (values, index) in
+            if current < best then
+                min_int_from (values, index + 1, size, current)
+            else
+                min_int_from (values, index + 1, size, best)
+        end
+
+(* Renvoie le minimum du tableau, ou `None` s'il est vide.
+   - `values` : tableau emprunté ; il n'est pas rendu. *)
+fun min_int (values : borrow int array) : int option =
+    let val size = length (values) in
+        if size = 0 then
+            None
+        else
+            let val first = get_int (values, 0) in
+                Some (min_int_from (values, 1, size, first))
+            end
+    end
+
+(* Cherche `needle` dans la portion restante et renvoie son indice, ou `-1` si
+   absent.
+   - `values` : tableau emprunté par le parcours.
+   - `needle` : entier recherché.
+   - `index` : prochain indice à examiner.
+   - `size` : borne exclusive de la recherche. *)
+fun index_of_int_from (values : borrow int array, needle : int, index : int, size : int) : int =
+    if index >= size then
+        -1
+    else if get_int (values, index) = needle then
+        index
+    else
+        index_of_int_from (values, needle, index + 1, size)
+
+(* Renvoie l'indice de la première occurrence de `needle`, ou `-1` si elle est
+   absente.
+   - `values` : tableau emprunté ; il n'est pas rendu.
+   - `needle` : entier recherché. *)
+fun index_of_int (values : borrow int array, needle : int) : int =
+    let
+        val size = length (values)
+    in
+        index_of_int_from (values, needle, 0, size)
+    end
+
+(* Indique si le tableau contient `needle`.
+   - `values` : tableau emprunté ; il n'est pas rendu.
+   - `needle` : entier recherché. *)
+fun contains_int (values : borrow int array, needle : int) : bool =
+    index_of_int (values, needle) >= 0

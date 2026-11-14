@@ -1,0 +1,4 @@
+fun cb (text : borrow string, acc : borrow string) : borrow string =
+    text
+
+fun main () = ()

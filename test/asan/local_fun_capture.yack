@@ -1,0 +1,5 @@
+fun main () =
+    let val text = "Coucou"
+        fun length_with (extra) = string_length (borrow text) + extra
+    in print_int (length_with (0))
+    end

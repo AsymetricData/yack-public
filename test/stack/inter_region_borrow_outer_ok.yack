@@ -1,0 +1,11 @@
+fun length_of (text : borrow string) : int = string_length (text)
+
+fun main () =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "outer")
+        val n = arena
+                    val label = "scope"
+                    val result = length_of (array_get_borrow (values, 0))
+                in result
+                end
+    in print_int (n) end

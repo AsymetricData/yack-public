@@ -1,0 +1,3 @@
+datatype bad : Copy = Box of token
+
+fun main () = ()

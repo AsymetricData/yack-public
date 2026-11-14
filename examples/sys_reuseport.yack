@@ -1,0 +1,19 @@
+fun main () =
+    let val first = sys.socket_tcp ()
+        val second = sys.socket_tcp ()
+        val _ = sys.reuseaddr (first)
+        val _ = sys.reuseaddr (second)
+        val _ = sys.reuseport (first)
+        val _ = sys.reuseport (second)
+        val first_bound = sys.bind_loopback (first, 0)
+        val port = sys.local_port (first)
+        val second_bound = sys.bind_loopback (second, port)
+        val _ = sys.close (first)
+        val _ = sys.close (second)
+    in
+        if first_bound = 0 then
+            if second_bound = 0 then print_string ("0 0")
+            else print_string ("second bind failed")
+        else
+            print_string ("first bind failed")
+    end

@@ -1,0 +1,83 @@
+type yack_data_cell copy
+type yack_data_door linear
+fun yack_main {
+  b0:
+    %0 : int = const 3
+    %1.c : yack_data_cell = ctor Cell %0!
+    %2 : string = view const "x"
+    %3 : int = const 1
+    %4 : string * int = tuple move %2!, %3!
+    %5 : string = view const "y"
+    %6.pair : (string * int) * string = tuple move %4!, move %5!
+    %7 : &((string * int) * string) = borrow &%6.pair  # at 19:31
+    %8.n : int = call yack_first %7!  # at 19:31
+    %9.s : string = call yack_split move %6.pair!  # at 20:24
+    %10 : token = call new_token
+    %11 : yack_data_door = ctor Door move %10!
+    %12 : unit = call yack_close move %11!
+    %14 : bool = test _ %12!
+    branch %14 b2 b3
+  b1(%13 : unit):
+    drop %9.s! : string  # at 20:9
+    drop %1.c! : yack_data_cell  # at 17:9
+    return %13!
+  b2:
+    %15 : yack_data_cell = copy %1.c  # at 23:14
+    %17 : bool = test Cell (k) %15  # at 23:14
+    branch %17 b5 b6
+  b3:
+    unreachable
+  b4(%16 : unit):
+    jump b1(%16!)
+  b5:
+    %18.k : int = view bind 0 %15!  # at 23:14
+    %19 : int = + %18.k!, %8.n!  # at 23:44
+    %20 : &string = borrow &%9.s  # at 23:70
+    %21 : int = string.string_length %20!  # at 23:70
+    %22 : int = + %19!, %21!  # at 23:70
+    %23 : unit = call print_int %22!  # at 23:70
+    jump b4(%23!)
+  b6:
+    unreachable
+}
+fun yack_close {
+  b0(%0.d : yack_data_door):
+    %2 : bool = test Door (t) %0.d  # at 8:10
+    branch %2 b2 b3
+  b1(%1 : unit):
+    return %1!
+  b2:
+    %3.t : token = bind 0 move.0 %0.d  # at 8:10
+    destructure %0.d! : yack_data_door  # at 8:10
+    %4 : unit = call consume_token move %3.t!  # at 8:40
+    jump b1(%4!)
+  b3:
+    unreachable
+}
+fun yack_split {
+  b0(%0.p : (string * int) * string):
+    %2 : bool = test ((a, _), b) %0.p  # at 14:10
+    branch %2 b2 b3
+  b1(%1 : string):
+    return move %1!
+  b2:
+    %3.a : string = bind 0.0 move.0.0 %0.p  # at 14:10
+    %4.b : string = bind 1 move.1 %0.p  # at 14:10
+    destructure %0.p! : (string * int) * string  # at 14:10
+    %5 : string = concat move %3.a!, move %4.b!  # at 14:34
+    jump b1(move %5!)
+  b3:
+    unreachable
+}
+fun yack_first {
+  b0(%0.p : &((string * int) * string)):
+    %2 : bool = test ((_, n), _) %0.p  # at 11:10
+    branch %2 b2 b3
+  b1(%1 : int):
+    return %1!
+  b2:
+    %3.n : int = view bind 0.1 %0.p!  # at 11:10
+    jump b1(%3.n!)
+  b3:
+    unreachable
+}

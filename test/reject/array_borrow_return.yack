@@ -1,0 +1,7 @@
+fun first (values : string array) : borrow string =
+    array_get_borrow (values, 0)
+
+fun main () =
+  let val values : string array = array_new ()
+  in print_int (array_length (values))
+  end

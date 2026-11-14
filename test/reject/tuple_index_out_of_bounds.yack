@@ -1,0 +1,4 @@
+fun main () =
+    let val pair = (1, 2)
+    in print_int (pair.3)
+    end

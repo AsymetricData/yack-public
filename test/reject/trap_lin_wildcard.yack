@@ -1,0 +1,3 @@
+fun main () =
+    case (new_token (), 1) of
+        (_, n) => print_int (n)

@@ -1,0 +1,10 @@
+
+
+
+fun inspect (body : consume string) : unit =
+    let val length = string_length (borrow body)
+    in
+        if length = 5 then () else os.exit (1)
+    end
+
+fun main () = inspect ("hel" ^ "lo")

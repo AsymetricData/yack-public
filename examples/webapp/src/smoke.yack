@@ -1,0 +1,61 @@
+import web/Cookie
+import web/Html
+import web/Request
+import web/Response
+import web/Router
+import web/Session
+import yack/io
+import yack/list
+
+fun hello (request : consume Request.t, params : consume (string, string) list) : Response.t =
+    case Request.query (borrow request, "name") of
+        None => Response.text ("anonymous")
+      | Some name =>
+          let val body = Html.h1 (Nil, Cons ((Html.text (name), Nil)))
+          in
+              Response.html (Html.render_page ("smoke", body))
+          end
+
+fun main () =
+    let val raw = "GET /hello?name=%3Calice%3E HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        val request = Request.parse (raw)
+        val app = Router.new () |> Router.get ("/hello", hello)
+        val dispatched = Router.dispatch (app, request)
+        val response = dispatched.0
+        val rendered = Response.render (response)
+        val cookie_header = "theme=dark; session=abc"
+        val cookies = Cookie.parse_header (borrow cookie_header)
+        val theme_name = "theme"
+        val theme = Cookie.find (borrow theme_name, cookies)
+        val empty = Session.empty ()
+        val store = Session.set (empty, "id-1", "user=alice")
+        val session_id = "id-1"
+        val loaded = Session.lookup (store, borrow session_id)
+        val _ = io.print_raw (borrow rendered)
+    in
+        case theme of
+            None =>
+                let val message = "cookie missing"
+                in
+                    io.print_line (borrow message)
+                end
+          | Some value =>
+              (case loaded of
+                  (data, rest) =>
+                      let val user_name = "user"
+                          val found = Session.get (borrow data, borrow user_name)
+                          val _ = Session.remove (rest, borrow session_id)
+                      in
+                          case found of
+                              None =>
+                                  let val message = "session missing"
+                                  in
+                                      io.print_line (borrow message)
+                                  end
+                            | Some user =>
+                                let val message = "session user: " ^ user
+                                in
+                                    io.print_line (borrow message)
+                                end
+                      end)
+    end

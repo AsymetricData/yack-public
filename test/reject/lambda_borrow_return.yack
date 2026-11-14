@@ -1,0 +1,7 @@
+fun main () =
+    let
+        val f = (s : consume string) => borrow s
+        val b = f ("hello" ^ " world")
+    in
+        print_string (b)
+    end

@@ -1,0 +1,11 @@
+type holder : Affine = { table : string map }
+
+fun inspect (m : borrow (string map)) : int =
+    0
+
+fun main () =
+    let val h : holder = { table = map_new () }
+        val _ = map_set (h.table, "a", "1")
+        val n = inspect (borrow h.table)
+    in print_int (n)
+    end

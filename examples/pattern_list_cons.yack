@@ -1,0 +1,17 @@
+fun describe (values : int list) : string =
+    case values of
+        first :: second :: third :: tail =>
+            "three " ^ int_to_string (first + second + third) ^
+            " rest " ^ int_to_string (list_length (tail))
+      | first :: second :: [] =>
+            "two " ^ int_to_string (first + second)
+      | first :: [] => "one " ^ int_to_string (first)
+      | [] => "none"
+
+fun main () =
+    let val a = describe ([1, 2, 3, 4, 5])
+        val b = describe ([10, 20])
+        val c = describe ([7])
+        val d = describe ([])
+    in print_string (a ^ "|" ^ b ^ "|" ^ c ^ "|" ^ d)
+    end

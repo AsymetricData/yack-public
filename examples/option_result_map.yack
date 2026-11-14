@@ -1,0 +1,17 @@
+import yack/option
+import yack/result
+
+fun inc (x : int) : int = x + 1
+fun times_two (x : int) : int option = Some (x * 2)
+fun mark (message : string) : string = message ^ "!"
+
+fun main () =
+    let val first = option.map (inc, Some (1))
+        val second = option.and_then (times_two, first)
+        val ok = result.map (inc, Ok (2))
+        val failed : int result = result.map_error (mark, Error ("boom"))
+        val text = result.error_or (failed, "none")
+    in print_int (option.unwrap_or (second, 0)
+                  + result.unwrap_or (ok, 0)
+                  + string_length (borrow text))
+    end

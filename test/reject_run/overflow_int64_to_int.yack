@@ -1,0 +1,5 @@
+
+fun main () =
+    let val big = int_to_int64 (2147483647) * int_to_int64 (2) + int_to_int64 (7)
+    in print_int (int64_to_int (big))
+    end

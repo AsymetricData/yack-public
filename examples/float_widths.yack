@@ -1,0 +1,7 @@
+fun add32 (x : float32, y : float32) : float32 =
+    x + y
+
+fun add64 (x : float64, y : float64) : float64 =
+    x + y
+
+fun main () = ()

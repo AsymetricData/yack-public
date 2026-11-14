@@ -1,0 +1,9 @@
+# expect: reads `p` (%0) after it was consumed
+# A record declared Affine (`type point : Affine = { x : int, y : int }`)
+# is moved even over int fields, never copied.
+fun yack_f {
+  b0(%0.p : { x : int, y : int }):
+    %1 : unit = call yack_sink move %0.p
+    %2 : unit = call yack_show %0.p
+    return %2
+}

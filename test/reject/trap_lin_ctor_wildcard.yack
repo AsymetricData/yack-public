@@ -1,0 +1,5 @@
+datatype door : Linear = Door of token
+
+fun main () =
+    case Door (new_token ()) of
+        Door _ => ()

@@ -1,0 +1,4 @@
+fun main () =
+    let val text = "abc"
+    in print_string (bytes_to_string (bytes_from_string (borrow text)))
+    end

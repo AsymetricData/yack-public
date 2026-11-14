@@ -1,0 +1,5 @@
+
+fun main () =
+    case Some (Some (42)) of
+        Some _ => ()
+      | None => ()

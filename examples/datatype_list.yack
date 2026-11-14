@@ -1,0 +1,7 @@
+fun sum (values : int list) : int =
+    case values of
+        Nil => 0
+      | Cons (head, tail) => head + sum (tail)
+
+fun main () =
+    print_int (sum (Cons ((40, Cons ((2, Nil))))))

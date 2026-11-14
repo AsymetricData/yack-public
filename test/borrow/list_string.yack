@@ -1,0 +1,13 @@
+fun total (values : borrow (string list), acc : int) : int =
+    case values of
+        Nil => acc
+      | Cons (head, rest) =>
+            total (rest, acc + string_length (head))
+
+fun main () =
+    let val values = Cons (("aa", Cons (("bbb", Nil))))
+        val size = total (borrow values, 0)
+        val length = list_length (values)
+    in
+        print_int (size + length)
+    end

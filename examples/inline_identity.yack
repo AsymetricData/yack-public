@@ -1,0 +1,10 @@
+import yack/list
+
+fun main () =
+    let val values = Cons ((1, Cons ((2, Nil))))
+        val same = list.map (x => x, values)
+        val total = list.foldl (pair =>
+                          case pair of
+                              (acc, x) => acc + x, 0, same)
+    in print_int (total)
+    end

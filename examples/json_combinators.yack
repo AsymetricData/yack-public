@@ -1,0 +1,29 @@
+import yack/json
+import yack/list
+
+fun positive (value : json.value) : int option =
+    case json.as_int (value) of
+        Ok number => if number > 0 then Some (number) else None
+      | Error _ => None
+
+fun add_pair (pair : int * int) : int =
+    case pair of
+        (acc, x) => acc + x
+
+fun main () =
+    let val text = "{\"xs\":[1,-2,3]}"
+        val key = "xs"
+    in case json.parse (borrow text) of
+           Error _ => print_int (0)
+         | Ok root =>
+               case json.as_object (root) of
+                   Error _ => print_int (0)
+                 | Ok fields =>
+                       case json.field_array (borrow key, fields) of
+                           Error _ => print_int (0)
+                         | Ok values =>
+                               let val positives =
+                                       json.array_filter_map (positive, values)
+                               in print_int (list.foldl (add_pair, 0, positives))
+                               end
+    end

@@ -1,0 +1,6 @@
+import yack/list
+
+fun main () =
+    let fun double (x) = x * 2
+    in print_int (list.length (list.map (double, [1, 2])))
+    end

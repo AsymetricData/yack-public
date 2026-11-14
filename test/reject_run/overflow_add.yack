@@ -1,0 +1,4 @@
+fun add (x : int, y : int) : int = x + y
+
+fun main () =
+    print_int (add (2147483647, 1))

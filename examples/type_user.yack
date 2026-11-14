@@ -1,0 +1,3 @@
+type user : Affine = { name : int, age : int }
+
+fun main () = ()

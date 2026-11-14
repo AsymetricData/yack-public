@@ -1,0 +1,4 @@
+fun main () =
+    let val value = &mut "yack"
+    in ()
+    end

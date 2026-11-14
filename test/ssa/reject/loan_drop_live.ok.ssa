@@ -1,0 +1,9 @@
+# The same graph, accepted: the borrow's last use is before the drop, so
+# the loan is dead when the owner goes (NLL: a loan ends at its last use).
+fun yack_f {
+  b0(%0.s : string):
+    %1.b : &string = borrow &%0.s
+    %2 : int = string.string_length %1.b
+    drop %0.s : string
+    return %2
+}

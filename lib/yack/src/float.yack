@@ -1,0 +1,97 @@
+(* Retourne la valeur absolue d'un flottant.
+   - `value` : flottant dont on veut la valeur absolue.
+
+   Retourne `value` s'il est positif ou nul, sinon son opposé. Aucun effet mémoire. *)
+fun abs (value : float) : float = if value < 0.0 then 0.0 - value else value
+
+(* Retourne le plus petit de deux flottants.
+   - `left` : premier flottant à comparer.
+   - `right` : second flottant à comparer.
+
+   Retourne l'opérande inférieur ou, en cas d'égalité, `left`. Aucun effet mémoire. *)
+fun min (left : float, right : float) : float = if left <= right then left else right
+
+(* Retourne le plus grand de deux flottants.
+   - `left` : premier flottant à comparer.
+   - `right` : second flottant à comparer.
+
+   Retourne l'opérande supérieur ou, en cas d'égalité, `left`. Aucun effet mémoire. *)
+fun max (left : float, right : float) : float = if left >= right then left else right
+
+(* Borne un flottant dans l'intervalle défini par ses deux limites.
+   - `value` : valeur à borner.
+   - `low` : limite inférieure.
+   - `high` : limite supérieure.
+
+   Retourne `low` si `value` lui est inférieur, `high` s'il lui est supérieur, sinon
+   `value`. Aucun effet mémoire. *)
+fun clamp (value : float, low : float, high : float) : float =
+    if value < low then low else if value > high then high else value
+
+(* Indique le signe d'un flottant par -1.0, 0.0 ou 1.0.
+   - `value` : flottant dont on veut déterminer le signe.
+
+   Retourne -1.0 pour une valeur négative, 1.0 pour une valeur positive et 0.0 sinon.
+   Aucun effet mémoire. *)
+fun sign (value : float) : float =
+    if value < 0.0 then 0.0 - 1.0 else if value > 0.0 then 1.0 else 0.0
+
+(* Détermine si un flottant est égal à zéro selon ses comparaisons numériques.
+   - `value` : flottant à tester.
+
+   Retourne `true` si `value` n'est ni inférieur ni supérieur à zéro, sinon `false`.
+   Aucun effet mémoire. *)
+fun is_zero (value : float) : bool =
+    if value < 0.0 then false else if value > 0.0 then false else true
+
+(* Calcule une puissance entière non négative par multiplications successives.
+   - `base` : base à multiplier.
+   - `exponent` : nombre de multiplications restantes ; une valeur inférieure ou
+     égale à zéro termine le calcul.
+   - `acc` : accumulateur initial du résultat.
+
+   Retourne l'accumulateur multiplié par `base` `exponent` fois au plus. Fonction
+   récursive sans effet mémoire. *)
+fun pow_from (base : float, exponent : int, acc : float) : float =
+    if exponent <= 0 then acc else pow_from (base, exponent - 1, acc * base)
+
+(* Élève un flottant à une puissance entière.
+   - `base` : base de la puissance.
+   - `exponent` : exposant entier, négatif ou non.
+
+   Retourne la puissance calculée par multiplications successives, ou son inverse si
+   l'exposant est négatif. Aucun effet mémoire. *)
+fun pow (base : float, exponent : int) : float =
+    if exponent < 0 then
+        1.0 / pow_from (base, 0 - exponent, 1.0)
+    else
+        pow_from (base, exponent, 1.0)
+
+(* Raffine une approximation de racine carrée par itérations de Newton.
+   - `value` : radicande positif.
+   - `guess` : approximation courante.
+   - `count` : nombre d'itérations déjà effectuées.
+
+   Retourne l'approximation après au plus 24 itérations. Fonction récursive sans
+   effet mémoire. *)
+fun sqrt_iter (value : float, guess : float, count : int) : float =
+    if count >= 24 then
+        guess
+    else
+        sqrt_iter (value, (guess + value / guess) / 2.0, count + 1)
+
+(* Approxime la racine carrée d'un flottant positif par la méthode de Newton.
+   - `value` : radicande à traiter.
+
+   Retourne zéro si `value` est inférieur ou égal à zéro, sinon une approximation
+   après au plus 24 étapes. Aucun effet mémoire. *)
+fun sqrt (value : float) : float =
+    if value <= 0.0 then 0.0 else sqrt_iter (value, value / 2.0, 0)
+
+(* Fournit une approximation flottante de la constante π. Aucun argument. Retourne
+   3.141592653589793 ; aucun effet mémoire. *)
+fun pi () : float = 3.141592653589793
+
+(* Fournit une approximation flottante de la constante e. Aucun argument. Retourne
+   2.718281828459045 ; aucun effet mémoire. *)
+fun e () : float = 2.718281828459045

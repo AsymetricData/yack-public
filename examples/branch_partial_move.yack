@@ -1,0 +1,19 @@
+type pair : Affine = { a : string, b : string }
+
+fun choose (cond : bool) : string =
+    let val p : pair = { a = "a" ^ "aa", b = "b" ^ "bb" }
+    in if cond then p.a else p.b
+    end
+
+fun pick (n : int) : string =
+    let val p : pair = { a = "c" ^ "cc", b = "d" ^ "dd" }
+    in case n of
+           0 => p.a
+         | _ => p.b
+    end
+
+fun main () =
+    let val first = choose (true)
+        val second = pick (1)
+    in print_string (first ^ second)
+    end

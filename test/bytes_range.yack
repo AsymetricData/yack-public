@@ -1,0 +1,15 @@
+import yack/bytes
+
+fun main () =
+    let val text = "abcdefgh"
+        val data = bytes.from_string (borrow text)
+        val middle = bytes_to_string_range (data, 2, 3)
+        val tail = bytes_to_string_range (data, 5, 3)
+        val all = bytes_to_string_range (data, 0, 8)
+    in
+        let val _ = print_string (middle)
+            val _ = print_string (tail)
+        in
+            print_string (all)
+        end
+    end

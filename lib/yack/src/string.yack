@@ -1,0 +1,800 @@
+import yack/char
+
+(* yack/string : chaînes d'octets, indexées par octet.
+
+Toutes les fonctions de lecture prennent `borrow string` et ne déplacent
+donc pas l'argument. Les fonctions qui construisent une chaîne retournent
+une chaîne possédée. L'UTF-8 est traité dans `yack/utf8`. *)
+(* Crée une copie possédée de la chaîne sans modifier la source.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun copy (text : borrow string) : string = string_slice (text, 0, string_length (text))
+
+(* Renvoie la longueur de la chaîne en octets.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun length (text : borrow string) : int = string_length (text)
+
+(* Indique si la chaîne ne contient aucun octet.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun is_empty (text : borrow string) : bool = string_length (text) = 0
+
+(* Lit un octet à un index et représente les indices hors limites par `None`.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index de l’octet à lire, à partir de zéro.
+
+   Retourne `None` si l’index est hors limites, sinon `Some` du code d’octet ; la
+   source reste empruntée. *)
+fun char_at (text : borrow string, index : int) : int option =
+    if index < 0 then
+        None
+    else if index >= string_length (text) then
+        None
+    else
+        Some (string_char_at_unchecked (text, index))
+
+(* Lit le code d’octet à un index supposé valide.
+   - `text` : chaîne source empruntée, indexée par octet.
+   - `index` : index valide de l’octet à lire, à partir de zéro.
+
+   Retourne le code d’octet à l’index valide demandé ; la source reste empruntée. *)
+fun char_at_unchecked (text : borrow string, index : int) : int =
+    string_char_at_unchecked (text, index)
+
+(* Lit le code d’octet à un index et rend `-1` hors limites, comme le builtin
+   `string_char_at`.
+   - `text` : chaîne source empruntée, indexée par octet.
+   - `index` : index de l’octet à lire, à partir de zéro.
+
+   Retourne `-1` si l’index est négatif ou supérieur à la longueur, sinon le
+   code d’octet ; la source reste empruntée. *)
+fun char_at_int (text : borrow string, index : int) : int =
+    if index < 0 then
+        -1
+    else if index >= string_length (text) then
+        -1
+    else
+        string_char_at_unchecked (text, index)
+
+(* Extrait une tranche en octets après avoir borné ses extrémités à la chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `start` : index inclusif de début en octets.
+   - `stop` : index exclusif de fin en octets.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun slice (text : borrow string, start : int, stop : int) : string =
+    let
+        val size = string_length (text)
+        val first = if start < 0 then 0 else if start > size then size else start
+        val last = if stop < 0 then 0 else if stop > size then size else stop
+    in
+        if last <= first then "" else string_slice (text, first, last)
+    end
+
+(* Compare deux chaînes octet par octet.
+   - `left` : première chaîne empruntée (emprunté, non consommé ni modifié en place).
+   - `right` : seconde chaîne empruntée (emprunté, non consommé ni modifié en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun equals (left : borrow string, right : borrow string) : bool =
+    string_eq (left, right)
+
+(* Compare lexicographiquement deux chaînes à partir d’un index en octets.
+   - `left` : première chaîne empruntée (emprunté, non consommé ni modifié en place).
+   - `right` : seconde chaîne empruntée (emprunté, non consommé ni modifié en place).
+   - `index` : index en octets où reprendre le traitement.
+
+   Retourne un entier négatif, nul ou positif selon l’ordre lexicographique en
+   octets. *)
+fun compare_from (left : borrow string, right : borrow string, index : int) : int =
+    let
+        val leftSize = string_length (left)
+        val rightSize = string_length (right)
+    in
+        if index >= leftSize then
+            if index >= rightSize then 0 else -1
+        else if index >= rightSize then
+            1
+        else
+            let
+                val a = string_char_at_unchecked (left, index)
+                val b = string_char_at_unchecked (right, index)
+            in
+                if a < b then
+                    -1
+                else if a > b then 1 else compare_from (left, right, index + 1)
+            end
+    end
+
+(* Compare lexicographiquement deux chaînes en octets.
+   - `left` : première chaîne empruntée (emprunté, non consommé ni modifié en place).
+   - `right` : seconde chaîne empruntée (emprunté, non consommé ni modifié en place).
+
+   Retourne un entier négatif, nul ou positif selon l’ordre lexicographique en
+   octets. *)
+fun compare (left : borrow string, right : borrow string) : int =
+    compare_from (left, right, 0)
+
+(* Vérifie si une séquence d’octets correspond à une position donnée.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+   - `start` : index inclusif de début en octets.
+   - `index` : index courant dans la sous-chaîne recherchée.
+   - `size` : nombre d’octets à comparer.
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun matches_at (
+    text : borrow string,
+    needle : borrow string,
+    start : int,
+    index : int,
+    size : int
+) : bool =
+    if index >= size then
+        true
+    else if string_char_at_unchecked (text, start + index) <>
+        string_char_at_unchecked (needle, index) then
+        false
+    else
+        matches_at (text, needle, start, index + 1, size)
+
+(* Teste si une chaîne commence par le préfixe indiqué.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `prefix` : préfixe emprunté à rechercher (emprunté, non consommé ni modifié en
+     place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun starts_with (text : borrow string, prefix : borrow string) : bool =
+    let
+        val prefixSize = string_length (prefix)
+    in
+        if prefixSize > string_length (text) then
+            false
+        else
+            matches_at (text, prefix, 0, 0, prefixSize)
+    end
+
+(* Teste si une chaîne se termine par le suffixe indiqué.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `suffix` : suffixe emprunté à rechercher (emprunté, non consommé ni modifié en
+     place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun ends_with (text : borrow string, suffix : borrow string) : bool =
+    let
+        val textSize = string_length (text)
+        val suffixSize = string_length (suffix)
+    in
+        if suffixSize > textSize then
+            false
+        else
+            matches_at (text, suffix, textSize - suffixSize, 0, suffixSize)
+    end
+
+(* Recherche la première occurrence d’une sous-chaîne à partir d’un index.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+   - `start` : index en octets où reprendre la recherche ou le découpage.
+
+   Retourne l’index trouvé en octets, ou `-1` en l’absence de correspondance. *)
+fun index_of_from (text : borrow string, needle : borrow string, start : int) : int =
+    let
+        val textSize = string_length (text)
+        val needleSize = string_length (needle)
+        val first = if start < 0 then 0 else start
+    in
+        if needleSize = 0 then
+            if first <= textSize then first else -1
+        else if first + needleSize > textSize then
+            -1
+        else if matches_at (text, needle, first, 0, needleSize) then
+            first
+        else
+            index_of_from (text, needle, first + 1)
+    end
+
+(* Recherche la première occurrence d’une sous-chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+
+   Retourne l’index trouvé en octets, ou `-1` en l’absence de correspondance. *)
+fun index_of (text : borrow string, needle : borrow string) : int =
+    index_of_from (text, needle, 0)
+
+(* Recherche une occurrence en remontant depuis un index candidat.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+   - `start` : index inclusif de début en octets.
+
+   Retourne l’index trouvé en octets, ou `-1` en l’absence de correspondance. *)
+fun last_index_of_from (text : borrow string, needle : borrow string, start : int) : int =
+    if start < 0 then
+        -1
+    else if matches_at (text, needle, start, 0, string_length (needle)) then
+        start
+    else
+        last_index_of_from (text, needle, start - 1)
+
+(* Recherche la dernière occurrence d’une sous-chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+
+   Retourne l’index trouvé en octets, ou `-1` en l’absence de correspondance. *)
+fun last_index_of (text : borrow string, needle : borrow string) : int =
+    let
+        val textSize = string_length (text)
+        val needleSize = string_length (needle)
+    in
+        if needleSize > textSize then
+            -1
+        else
+            last_index_of_from (text, needle, textSize - needleSize)
+    end
+
+(* Indique si une sous-chaîne apparaît dans une chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+
+   Retourne un booléen ; les arguments empruntés restent inchangés. *)
+fun contains (text : borrow string, needle : borrow string) : bool =
+    index_of (text, needle) >= 0
+
+(* Retire les espaces ASCII à gauche à partir d’un index.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index en octets où reprendre le traitement.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun trim_left_from (text : borrow string, index : int) : string =
+    let
+        val size = string_length (text)
+    in
+        if index >= size then
+            ""
+        else if char.is_space_code (string_char_at_unchecked (text, index)) then
+            trim_left_from (text, index + 1)
+        else
+            string_slice (text, index, size)
+    end
+
+(* Retire les espaces ASCII au début de la chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun trim_left (text : borrow string) : string = trim_left_from (text, 0)
+
+(* Calcule la fin exclusive après retrait des espaces ASCII à droite.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index du dernier octet candidat.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun trim_right_end (text : borrow string, index : int) : int =
+    if index < 0 then
+        0
+    else if char.is_space_code (string_char_at_unchecked (text, index)) then
+        trim_right_end (text, index - 1)
+    else
+        index + 1
+
+(* Retire les espaces ASCII à la fin de la chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun trim_right (text : borrow string) : string =
+    string_slice (text, 0, trim_right_end (text, string_length (text) - 1))
+
+(* Retire les espaces ASCII aux deux extrémités de la chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun trim (text : borrow string) : string =
+    let val right = trim_right (text) in trim_left (borrow right) end
+
+(* Ajoute plusieurs copies d’une chaîne à un accumulateur.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `count` : nombre de répétitions à effectuer ; une valeur non positive ne répète
+     rien.
+   - `acc` : chaîne possédée servant d’accumulateur.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun repeat_from (text : borrow string, count : int, acc : string) : string =
+    if count <= 0 then acc else repeat_from (text, count - 1, acc ^ copy (text))
+
+(* Répète une chaîne un nombre donné de fois.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `count` : nombre de répétitions à effectuer ; une valeur non positive ne répète
+     rien.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun repeat (text : borrow string, count : int) : string = repeat_from (text, count, "")
+
+(* Assemble une liste de chaînes avec un séparateur et un accumulateur.
+   - `separator` : séparateur emprunté (emprunté, non consommé ni modifié en place).
+   - `values` : liste possédée, consommée pendant le parcours.
+   - `first` : indique si l’élément courant est le premier.
+   - `acc` : chaîne possédée servant d’accumulateur.
+
+   Retourne une chaîne possédée ; la liste est consommée et l’accumulateur est rendu
+   complété. *)
+fun join_from (
+    separator : borrow string,
+    values : string list,
+    first : bool,
+    acc : string
+) : string =
+    case values of
+        Nil => acc
+      | Cons (value, rest) =>
+          let
+              val next =
+                  if first then
+                      copy (borrow value)
+                  else
+                      acc ^ copy (separator) ^ copy (borrow value)
+          in
+              join_from (separator, rest, false, next)
+          end
+
+(* Assemble les chaînes d’une liste en insérant un séparateur.
+   - `separator` : séparateur possédé, consommé par l’appel.
+   - `values` : liste possédée, consommée pendant le parcours.
+
+   Retourne une chaîne possédée après consommation du séparateur et de la liste
+   d’entrée. *)
+fun join (separator : string, values : string list) : string =
+    let val copied = copy (borrow separator)
+    in join_from (borrow copied, values, true, "")
+    end
+
+(* Découpe une chaîne à partir d’un index sur chaque octet séparateur.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `separator` : séparateur emprunté.
+   - `start` : index en octets où reprendre la recherche ou le découpage.
+   - `size` : borne exclusive de la tranche en octets.
+
+   Retourne une liste possédée ; les arguments empruntés restent inchangés et les
+   tranches sont copiées. *)
+fun split_from (text : borrow string, separator : int, start : int, size : int) : string list =
+    let
+        val found = string_find_char_from (text, start, separator)
+    in
+        if found < 0 then
+            Cons ((string_slice (text, start, size), Nil))
+        else
+            Cons (
+                (
+                    string_slice (text, start, found),
+                    split_from (text, separator, found + 1, size)
+                )
+            )
+    end
+
+(* Découpe une chaîne à chaque occurrence d’un octet séparateur.
+   - `separator` : code d’octet séparateur.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une liste possédée ; les arguments empruntés restent inchangés et les
+   tranches sont copiées. *)
+fun split (separator : int, text : borrow string) : string list =
+    split_from (text, separator, 0, string_length (text))
+
+(* Découpe une chaîne sur une sous-chaîne à partir d’un index.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `separator` : séparateur emprunté (emprunté, non consommé ni modifié en place).
+   - `start` : index en octets où reprendre la recherche ou le découpage.
+   - `size` : borne exclusive de la tranche en octets.
+
+   Retourne une liste possédée ; les arguments empruntés restent inchangés et les
+   tranches sont copiées. *)
+fun split_on_from (
+    text : borrow string,
+    separator : borrow string,
+    start : int,
+    size : int
+) : string list =
+    let
+        val found = index_of_from (text, separator, start)
+        val separatorSize = string_length (separator)
+    in
+        if found < 0 then
+            Cons ((string_slice (text, start, size), Nil))
+        else
+            Cons (
+                (
+                    string_slice (text, start, found),
+                    split_on_from (text, separator, found + separatorSize, size)
+                )
+            )
+    end
+
+(* Découpe une chaîne sur toutes les occurrences d’une sous-chaîne.
+   - `separator` : séparateur emprunté (emprunté, non consommé ni modifié en place).
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une liste possédée ; les arguments empruntés restent inchangés et les
+   tranches sont copiées. *)
+fun split_on (separator : borrow string, text : borrow string) : string list =
+    if string_length (separator) = 0 then
+        Cons ((copy (text), Nil))
+    else
+        split_on_from (text, separator, 0, string_length (text))
+
+(* Retire un octet retour chariot (`CR`) final d’une ligne.
+   - `line` : chaîne possédée, consommée pendant le traitement.
+
+   Retourne une chaîne possédée sans le `CR` final éventuel ; l’argument possédé est
+   consommé, sans mutation en place. *)
+fun strip_cr (line : string) : string =
+    let
+        val size = string_length (borrow line)
+        val copy = string_slice (borrow line, 0, size)
+    in
+        if size > 0 then
+            if string_char_at_unchecked (borrow copy, size - 1) = 13 then
+                string_slice (borrow copy, 0, size - 1)
+            else
+                string_slice (borrow copy, 0, size)
+        else
+            ""
+    end
+
+(* Retire un éventuel `CR` final de chaque chaîne d’une liste.
+   - `values` : liste possédée, consommée pendant le parcours.
+
+   Retourne une liste possédée ; les arguments empruntés restent inchangés et les
+   tranches sont copiées. *)
+fun strip_cr_all (values : string list) : string list =
+    case values of
+        Nil => Nil
+      | Cons (value, rest) => Cons ((strip_cr (value), strip_cr_all (rest)))
+
+(* Découpe le texte sur `LF` et retire les `CR` finaux des lignes.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une liste possédée ; les arguments empruntés restent inchangés et les
+   tranches sont copiées. *)
+fun lines (text : borrow string) : string list = strip_cr_all (split (10, text))
+
+(* Convertit les octets restants en majuscules ASCII et les ajoute à un accumulateur.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index en octets où reprendre le traitement.
+   - `size` : borne exclusive de la tranche en octets.
+   - `acc` : chaîne possédée servant d’accumulateur.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun to_upper_from (text : borrow string, index : int, size : int, acc : string) : string =
+    if index >= size then
+        acc
+    else
+        to_upper_from (
+            text,
+            index + 1,
+            size,
+            acc ^
+                string_of_char (
+                    char.to_upper_code (string_char_at_unchecked (text, index))
+                )
+        )
+
+(* Convertit les lettres ASCII de toute la chaîne en majuscules.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une nouvelle chaîne possédée ; seuls les octets ASCII correspondants sont
+   convertis. *)
+fun to_upper (text : borrow string) : string =
+    to_upper_from (text, 0, string_length (text), "")
+
+(* Convertit les octets restants en minuscules ASCII et les ajoute à un accumulateur.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index en octets où reprendre le traitement.
+   - `size` : borne exclusive de la tranche en octets.
+   - `acc` : chaîne possédée servant d’accumulateur.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun to_lower_from (text : borrow string, index : int, size : int, acc : string) : string =
+    if index >= size then
+        acc
+    else
+        to_lower_from (
+            text,
+            index + 1,
+            size,
+            acc ^
+                string_of_char (
+                    char.to_lower_code (string_char_at_unchecked (text, index))
+                )
+        )
+
+(* Convertit les lettres ASCII de toute la chaîne en minuscules.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une nouvelle chaîne possédée ; seuls les octets ASCII correspondants sont
+   convertis. *)
+fun to_lower (text : borrow string) : string =
+    to_lower_from (text, 0, string_length (text), "")
+
+(* Construit à rebours une chaîne dans un accumulateur.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index en octets où reprendre le traitement.
+   - `acc` : chaîne possédée servant d’accumulateur.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun reverse_from (text : borrow string, index : int, acc : string) : string =
+    if index < 0 then
+        acc
+    else
+        reverse_from (
+            text,
+            index - 1,
+            acc ^ string_of_char (string_char_at_unchecked (text, index))
+        )
+
+(* Inverse l’ordre des octets de la chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne une chaîne possédée dont l’ordre des octets est inversé, sans
+   regroupement des points de code UTF-8. *)
+fun reverse (text : borrow string) : string =
+    reverse_from (text, string_length (text) - 1, "")
+
+(* Remplace les occurrences suivantes d’une sous-chaîne et construit le résultat.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+   - `replacement` : sous-chaîne de remplacement, empruntée (emprunté, non consommé
+     ni modifié en place).
+   - `start` : index en octets où reprendre la recherche ou le découpage.
+   - `size` : borne exclusive de la tranche en octets.
+   - `fromSize` : longueur en octets de la sous-chaîne recherchée.
+   - `acc` : chaîne possédée servant d’accumulateur.
+
+   Retourne une chaîne possédée construite sans modifier les sources empruntées ; un
+   motif vide est ignoré par `replace`. *)
+fun replace_from (
+    text : borrow string,
+    needle : borrow string,
+    replacement : borrow string,
+    start : int,
+    size : int,
+    fromSize : int,
+    acc : string
+) : string =
+    let
+        val found = index_of_from (text, needle, start)
+    in
+        if found < 0 then
+            acc ^ string_slice (text, start, size)
+        else
+            replace_from (
+                text,
+                needle,
+                replacement,
+                found + fromSize,
+                size,
+                fromSize,
+                acc ^ string_slice (text, start, found) ^ copy (replacement)
+            )
+    end
+
+(* Remplace toutes les occurrences non chevauchantes d’une sous-chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+   - `replacement` : sous-chaîne de remplacement, empruntée (emprunté, non consommé
+     ni modifié en place).
+
+   Retourne une chaîne possédée construite sans modifier les sources empruntées ; un
+   motif vide est ignoré par `replace`. *)
+fun replace (text : borrow string, needle : borrow string, replacement : borrow string) : string =
+    if string_length (needle) = 0 then
+        copy (text)
+    else
+        replace_from (
+            text,
+            needle,
+            replacement,
+            0,
+            string_length (text),
+            string_length (needle),
+            ""
+        )
+
+(* Compte les occurrences non chevauchantes restantes d’une sous-chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+   - `start` : index inclusif de début en octets.
+   - `needleSize` : longueur en octets de la sous-chaîne recherchée.
+   - `acc` : nombre d’occurrences déjà comptées.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun count_from (
+    text : borrow string,
+    needle : borrow string,
+    start : int,
+    needleSize : int,
+    acc : int
+) : int =
+    let
+        val found = index_of_from (text, needle, start)
+    in
+        if found < 0 then
+            acc
+        else
+            count_from (text, needle, found + needleSize, needleSize, acc + 1)
+    end
+
+(* Compte les occurrences non chevauchantes d’une sous-chaîne.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `needle` : sous-chaîne recherchée, empruntée (emprunté, non consommé ni modifié
+     en place).
+
+   Retourne le nombre d’occurrences non chevauchantes ; une sous-chaîne vide donne
+   zéro. *)
+fun count (text : borrow string, needle : borrow string) : int =
+    if string_length (needle) = 0 then
+        0
+    else
+        count_from (text, needle, 0, string_length (needle), 0)
+
+(* Complète à gauche jusqu’à une largeur en octets avec le code fourni.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `width` : largeur minimale visée en octets.
+   - `fill` : code d’octet utilisé pour le remplissage.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun pad_left (text : borrow string, width : int, fill : int) : string =
+    let
+        val size = string_length (text)
+        val missing = width - size
+        val fillText = string_of_char (fill)
+    in
+        if missing <= 0 then
+            copy (text)
+        else
+            repeat (borrow fillText, missing) ^ copy (text)
+    end
+
+(* Complète à droite jusqu’à une largeur en octets avec le code fourni.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `width` : largeur minimale visée en octets.
+   - `fill` : code d’octet utilisé pour le remplissage.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun pad_right (text : borrow string, width : int, fill : int) : string =
+    let
+        val size = string_length (text)
+        val missing = width - size
+        val fillText = string_of_char (fill)
+    in
+        if missing <= 0 then
+            copy (text)
+        else
+            copy (text) ^ repeat (borrow fillText, missing)
+    end
+
+(* Utilitaires UTF-8 minimaux pour l'affichage : longueur en points de code et
+   découpe sur des frontières de points de code. Les caractères larges
+   (CJK, emoji) comptent pour 1, ce qui suffit au TUI ASCII/box-drawing. *)
+
+(* Compte les octets de tête UTF-8 rencontrés à partir d’un index.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index courant en octets.
+   - `size` : borne exclusive de la tranche en octets.
+   - `count` : nombre de points de code déjà comptés.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun utf8_length_from
+        (text : borrow string, index : int, size : int, count : int) : int =
+    if index >= size then count
+    else
+        let val code = string_char_at_unchecked (text, index)
+        in
+            if code >= 128 then
+                if code < 192 then
+                    utf8_length_from (text, index + 1, size, count)
+                else utf8_length_from (text, index + 1, size, count + 1)
+            else utf8_length_from (text, index + 1, size, count + 1)
+        end
+
+(* Compte les points de code UTF-8 selon leurs octets de tête.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun utf8_length (text : borrow string) : int =
+    utf8_length_from (text, 0, string_length (text), 0)
+
+(* Convertit un rang de point de code en décalage en octets.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `index` : index courant en octets.
+   - `size` : borne exclusive de la tranche en octets.
+   - `count` : nombre de points de code déjà comptés.
+   - `target` : rang cible en points de code.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun utf8_offset_from
+        (text : borrow string, index : int, size : int,
+         count : int, target : int) : int =
+    if index >= size then index
+    else if count >= target then index
+    else
+        let val code = string_char_at_unchecked (text, index)
+        in
+            if code >= 128 then
+                if code < 192 then
+                    utf8_offset_from (text, index + 1, size, count, target)
+                else utf8_offset_from (text, index + 1, size, count + 1, target)
+            else utf8_offset_from (text, index + 1, size, count + 1, target)
+        end
+
+(* Renvoie le décalage en octets correspondant à un rang de point de code.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `target` : rang cible en points de code.
+
+   Retourne un entier ; les arguments empruntés restent inchangés. *)
+fun utf8_offset (text : borrow string, target : int) : int =
+    utf8_offset_from (text, 0, string_length (text), 0, target)
+
+(* Extrait une tranche UTF-8 en utilisant des rangs de points de code.
+   - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
+     modifié en place).
+   - `start` : index inclusif de début en octets.
+   - `stop` : index exclusif de fin en octets.
+
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+fun utf8_slice
+        (text : borrow string, start : int, stop : int) : string =
+    let val first = utf8_offset (text, if start < 0 then 0 else start)
+        val last = utf8_offset (text, if stop < 0 then 0 else stop)
+    in if last <= first then "" else string_slice (text, first, last)
+    end

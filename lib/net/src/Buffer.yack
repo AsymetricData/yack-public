@@ -1,0 +1,58 @@
+import yack/array
+
+type buffer : Affine = { data : int8 array, length : int, capacity : int }
+
+fun buffer_new (capacity : int) : buffer =
+    let val data : int8 array = array.make (0, capacity)
+    in { data = data, length = 0, capacity = capacity }
+    end
+
+fun buffer_length (value : buffer) : int =
+    case value of
+        { data = data, length = length, capacity = capacity } => length
+
+fun buffer_capacity (value : buffer) : int =
+    case value of
+        { data = data, length = length, capacity = capacity } => capacity
+
+fun buffer_append (value : buffer, byte : int8) : buffer =
+    case value of
+        { data = data, length = length, capacity = capacity } =>
+            if length < capacity then
+                let val data = array.set (data, length, byte)
+                in { data = data, length = length + 1, capacity = capacity }
+                end
+            else
+                { data = data, length = length, capacity = capacity }
+
+fun buffer_to_string (value : buffer) : string =
+    case value of
+        { data = data, length = length, capacity = capacity } =>
+            bytes_to_string_range (data, 0, length)
+
+fun buffer_clear (value : buffer) : buffer =
+    case value of
+        { data = data, length = length, capacity = capacity } =>
+            { data = data, length = 0, capacity = capacity }
+
+fun buffer_recv (value : buffer, fd : int) : buffer * int result =
+    case value of
+        { data = data, length = length, capacity = capacity } =>
+            let val result = recv_into (fd, data, length, capacity - length)
+            in case result of
+                 Ok count =>
+                     ({ data = data
+                      , length = length + count
+                      , capacity = capacity
+                      }, Ok (count))
+               | Error message =>
+                     ({ data = data
+                      , length = length
+                      , capacity = capacity
+                      }, Error (message))
+            end
+
+fun buffer_send (value : buffer, fd : int) : int result =
+    case value of
+        { data = data, length = length, capacity = capacity } =>
+            send_from (fd, data, 0, length)

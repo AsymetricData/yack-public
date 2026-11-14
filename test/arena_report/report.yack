@@ -1,0 +1,14 @@
+fun label (n : int) : string =
+    "n=" ^ int_to_string (n)
+
+fun report (n : int) : string =
+    arena
+        val head = "total: " ^ int_to_string (n)
+        val tags = array_new ()
+        val _ = array_push (tags, label (n) ^ "!")
+    in
+        head ^ label (n)
+    end
+
+fun main () =
+    print_string (report (3))

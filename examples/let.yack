@@ -1,0 +1,6 @@
+fun main () =
+    let val x : int = 40
+        val y = x + 2
+    in
+        print_int (y)
+    end

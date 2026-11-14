@@ -1,0 +1,9 @@
+fun negate (x : int8) : int8 = -x
+
+fun main () =
+    let val maximum : int8 = 127
+        val zero : int8 = 0
+        val one : int8 = 1
+        val minimum = zero - maximum - one
+    in print_string (int8_to_string (negate (minimum)))
+    end

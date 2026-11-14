@@ -1,0 +1,7 @@
+type user : Affine = { name : int }
+
+fun main () =
+    let val user : user = { name = 1 }
+        val borrowed = borrow mut user
+    in ()
+    end

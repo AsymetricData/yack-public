@@ -1,0 +1,19 @@
+fun route (path : string) : string =
+    case path of
+        "/hello/" ^ name => "hello " ^ name
+      | "/hellu/" ^ name => "typo " ^ name
+      | "/api/" ^ rest => "api " ^ rest
+      | "/hello" => "exact hello"
+      | "" => "empty"
+      | _ => "other"
+
+fun main () =
+    let val first = route ("/hello/alice")
+        val second = route ("/hellu/world")
+        val third = route ("/api/users")
+        val fourth = route ("/hello")
+        val fifth = route ("")
+        val sixth = route ("/nope")
+        val all = first ^ "|" ^ second ^ "|" ^ third ^ "|" ^ fourth ^ "|" ^ fifth ^ "|" ^ sixth
+    in print_string (all)
+    end

@@ -1,0 +1,7 @@
+fun ignore (resource : resource) : unit =
+    ()
+
+fun main () =
+    let val resource = new_resource ()
+    in ignore (resource)
+    end

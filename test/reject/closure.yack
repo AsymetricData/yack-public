@@ -1,0 +1,5 @@
+fun add (n : int) : int -> int =
+    x => x + n
+
+fun main () =
+    print_int (0)

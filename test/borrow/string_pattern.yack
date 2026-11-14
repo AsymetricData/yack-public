@@ -1,0 +1,14 @@
+fun first (text : borrow string) : int =
+    case text of
+        "a" => 1
+      | _ => 0
+
+fun main () =
+    let val literal = "a"
+        val text = string_copy (borrow literal)
+        val n = first (borrow text)
+        val copy = string_copy (borrow text)
+        val length = string_length (borrow copy)
+    in
+        print_int (n + length)
+    end

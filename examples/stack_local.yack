@@ -1,0 +1,7 @@
+
+fun main () =
+    let val value = Some (42)
+    in case value of
+         None => ()
+       | Some x => print_int (x)
+    end

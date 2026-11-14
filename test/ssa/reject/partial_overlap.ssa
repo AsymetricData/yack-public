@@ -1,0 +1,14 @@
+# expect: moves path .0 of `p` (%2) after path .0 was consumed
+# Two partial moves of the same path: the second frees what the first took.
+fun yack_main {
+  b0:
+    %0.a : string = view const "a"
+    %1.b : string = view const "b"
+    %2.p : string * string = tuple move %0.a, move %1.b
+    %3.x : string = bind 0 move.0 %2.p
+    %4.y : string = bind 0 move.0 %2.p
+    %5 : string = concat move %3.x!, move %4.y!
+    drop %5! : string
+    %6 : unit = const ()
+    return %6!
+}

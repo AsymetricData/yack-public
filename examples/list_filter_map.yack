@@ -1,0 +1,15 @@
+import yack/list
+
+fun positive_int (text : string) : int option =
+    case string_to_int (borrow text) of
+        Some value => if value > 0 then Some (value) else None
+      | None => None
+
+fun main () =
+    let val values = Cons (("12", Cons (("-3", Cons (("7", Nil))))))
+        val numbers = list.filter_map (positive_int, values)
+        val total = list.foldl (pair =>
+                          case pair of
+                              (acc, x) => acc + x, 0, numbers)
+    in print_int (total)
+    end

@@ -1,0 +1,15 @@
+
+
+fun consume (line : string) : int = string_length (borrow line)
+
+fun unused_then_move (line : string) : int =
+    let val borrowed = borrow line
+        val moved = line
+    in consume (moved)
+    end
+
+fun main () : unit =
+    let val s = "abc"
+        val n = unused_then_move (s)
+    in print_int (n)
+    end

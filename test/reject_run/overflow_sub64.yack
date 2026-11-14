@@ -1,0 +1,7 @@
+fun subtract (x : int64, y : int64) : int64 = x - y
+
+fun main () =
+    let val maximum : int64 = 9223372036854775807
+        val minimum = 0 - maximum - 1
+    in print_int64 (subtract (minimum, 1))
+    end

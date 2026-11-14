@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Les idées derrière Yack : mémoire affine, linéaire et empruntée</title>
+    <meta name="description" content="Pourquoi Yack existe : types affines et linéaires, possession et emprunt sans ramasse-miettes, modes mémoire, threads et coût de l'expérience.">
+    <meta name="theme-color" content="#f7f5ef">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css">
+    <link rel="alternate" hreflang="en" href="ideas.html">
+    <link rel="alternate" hreflang="fr" href="idees.html">
+</head>
+<body>
+    <a class="skip-link" href="#content">Aller au contenu</a>
+
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="Yack, accueil">
+            <img src="favicon.svg" alt="" width="30" height="30">
+            <span>Yack</span>
+        </a>
+        <nav aria-label="Navigation principale">
+            <a href="index.html#language">Langage</a>
+            <a href="index.html#memory">Mémoire</a>
+            <a href="cli.html">CLI</a>
+            <a href="idees.html" aria-current="page">Idées</a>
+            <a href="alpage.html">Tutoriel Alpage</a>
+            <a href="index.html#quick-start">Démarrage</a>
+        </nav>
+        <a class="header-link" href="ideas.html" hreflang="en" lang="en">English</a>
+        <a class="header-link" href="https://github.com/AsymetricData/yack-public">GitHub <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="content">
+        <div class="tut-hero">
+            <p class="eyebrow">Notes de conception · Modèle mémoire · environ 20 minutes</p>
+            <h1>La possession, <span class="accent">sans ramasse-miettes.</span></h1>
+            <p class="lead">
+                Yack est une expérience : un petit langage de la famille ML, dont la syntaxe
+                plaît à son auteur par sa simplicité, compilé en code natif via LLVM. Les
+                types affines et linéaires, empruntés au modèle de possession de Rust,
+                remplacent le ramasse-miettes ; la seule cérémonie qui reste est celle que
+                les types imposent.
+            </p>
+            <ul class="from-langs" aria-label="Construit à partir de">
+                <li>la syntaxe de <strong>SML</strong> et <strong>OCaml</strong></li>
+                <li>les idées de possession de <strong>Rust</strong></li>
+                <li>la gestion manuelle de la mémoire en <strong>C</strong> et <strong>C++</strong></li>
+            </ul>
+        </div>
+
+        <div class="tut-layout">
+            <nav class="toc" aria-label="Sections de la page">
+                <p>Sections</p>
+                <ol>
+                    <li><a href="#question">Le point de départ</a></li>
+                    <li><a href="#properties">Trois propriétés</a></li>
+                    <li><a href="#affine">Affine en pratique</a></li>
+                    <li><a href="#linear">Ressources linéaires</a></li>
+                    <li><a href="#borrowing">Emprunt</a></li>
+                    <li><a href="#memory-modes">Modes mémoire</a></li>
+                    <li><a href="#threads">Threads</a></li>
+                    <li><a href="#advantages">Ce que cela apporte</a></li>
+                    <li><a href="#costs">Ce que cela coûte</a></li>
+                    <li><a href="#status">État et lectures</a></li>
+                </ol>
+            </nav>
+
+            <div class="tut-body">
+                <section class="step" id="question" aria-labelledby="question-title">
+                    <span class="step-num">01. Le point de départ</span>
+                    <h2 id="question-title">Un ML confortable, sans ramasse-miettes</h2>
+                    <p>
+                        Yack existe parce que son auteur voulait un langage dont la syntaxe lui
+                        plaît : sympathique, simple, celle de la famille ML, proche de SML et
+                        OCaml, avec <code>let</code> et <code>val</code>, <code>fun</code>,
+                        les datatypes, le filtrage par motifs, les modules et les pipes.
+                        L'objectif est un langage où l'on se sente comme chez soi, confortable à
+                        écrire, avec peu de cérémonie.
+                    </p>
+                    <p>
+                        Rust montre que la possession peut remplacer un ramasse-miettes : les
+                        types affines et linéaires, les déplacements et les emprunts font le
+                        travail qu'un collecteur à balayage ferait autrement. Sa syntaxe est
+                        toutefois ressentie comme plus verbeuse et plus lourde ; Yack garde les
+                        idées de possession et abandonne ce poids. Le modèle mémoire reste
+                        vérifié dans le frontend, sur une syntaxe qui reste petite.
+                    </p>
+                    <p>
+                        La seule cérémonie qui devrait rester est celle que les types imposent :
+                        un déplacement quand la possession est transférée, une annotation
+                        d'emprunt quand une valeur est lue sans être prise, un appel qui consomme
+                        une valeur linéaire. <a href="#borrowing">La section sur l'emprunt</a>
+                        montre les annotations, et <a href="#costs">Ce que cela coûte</a> indique
+                        où elles se font sentir. Yack est une expérience ; la version 0.2.0 est
+                        utilisable et testée, mais elle n'est pas présentée comme prête pour la
+                        production.
+                    </p>
+                    <div class="callout">
+                        <strong>Aucune collecte cachée à l'exécution.</strong>
+                        Les valeurs sont déplacées, empruntées et détruites selon la propriété
+                        déclarée. Il n'y a ni ramasse-miettes à balayage ni comptage de
+                        références ; le compilateur émet du code natif et les informations de
+                        possession sont vérifiées avant la génération de code.
+                    </div>
+                    <p>
+                        Le reste de cette page décrit le modèle tel qu'il existe dans le dépôt,
+                        y compris les parties encore rugueuses. Ce n'est pas la spécification
+                        d'un langage achevé.
+                    </p>
+                </section>
+
+                <section class="step" id="properties" aria-labelledby="properties-title">
+                    <span class="step-num">02. Trois propriétés</span>
+                    <h2 id="properties-title">Copy, Affine, Linear</h2>
+                    <p>
+                        Chaque type possède une propriété mémoire. Cette propriété détermine si
+                        une valeur peut être dupliquée, déplacée une seule fois, ou doit être
+                        consommée exactement une fois.
+                    </p>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>Propriété</th><th>Règle</th><th>Exemples dans Yack</th></tr></thead>
+                        <tbody>
+                            <tr>
+                                <td><code>Copy</code></td>
+                                <td>Peut être copiée librement. Le passage ne termine pas la liaison d'origine.</td>
+                                <td><code>int</code>, <code>bool</code>, <code>unit</code>, un record déclaré <code>: Copy</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>Affine</code></td>
+                                <td>Utilisée au plus une fois. Elle peut être déplacée ou détruite ; le compilateur insère la destruction quand le propriétaire sort de portée.</td>
+                                <td>Les types utilisateur par défaut, les records, les datatypes, <code>string</code>, les tableaux et les maps</td>
+                            </tr>
+                            <tr>
+                                <td><code>Linear</code></td>
+                                <td>Utilisée exactement une fois sur chaque chemin. Elle ne peut pas être détruite implicitement ; une valeur non consommée est une erreur de compilation.</td>
+                                <td><code>token</code>, <code>db</code> et <code>statement</code> SQLite, les listeners et les flux réseau</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <p>
+                        Une déclaration peut indiquer la propriété explicitement :
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">properties.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">type point : Copy = { x : int, y : int }
+type buffer : Affine = { size : int }
+type handle : Linear = { id : int }
+type default_affine = { value : int }
+
+fun main () = ()</code></pre>
+                    </div>
+                    <p>
+                        Ce bloc est un fichier complet et vérifié ; le <code>main</code> vide
+                        sert seulement à rendre les déclarations exécutables. Sans annotation,
+                        un type utilisateur est Affine. Un composite contenant un composant
+                        Linear devient effectivement Linear, et le vérificateur refuse un type
+                        déclaré <code>Copy</code> avec des champs non Copy (<code>E3015</code>)
+                        ou un type déclaré <code>Affine</code> avec un champ Linear
+                        (<code>E3016</code>). <code>yack types file.yack</code> affiche les
+                        propriétés déclarées et effectives.
+                    </p>
+                </section>
+
+                <section class="step" id="affine" aria-labelledby="affine-title">
+                    <span class="step-num">03. Affine en pratique</span>
+                    <h2 id="affine-title">Un déplacement est un transfert de possession</h2>
+                    <p>
+                        Affine est la discipline par défaut. Passer une valeur Affine à un
+                        paramètre de fonction la transfère : l'appelé en devient propriétaire.
+                        L'ancienne liaison est marquée comme déplacée, donc la relire n'est plus
+                        permis. Si l'appelé ne transmet pas la valeur, le compilateur place sa
+                        destruction à la fin de la portée.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">buffer.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">type buffer : Affine = { size : int }
+
+fun grow (buffer : buffer) : buffer =
+    { size = buffer.size * 2 }
+
+fun main () =
+    let val buffer : buffer = { size = 16 }
+        val larger = grow (buffer)
+    in print_int (larger.size)
+    end</code></pre>
+                    </div>
+                    <p>
+                        <code>buffer</code> est déplacé dans <code>grow</code>. Le paramètre
+                        appartient à <code>grow</code> ; la fonction lit son champ Copy et renvoie
+                        un nouveau record. L'ancien record est détruit par l'appelé, le nouveau
+                        par <code>main</code>. Aucun <code>free</code> explicite n'apparaît dans
+                        le source.
+                    </p>
+                    <p>
+                        Utiliser l'ancienne liaison après le transfert est refusé. Ici la valeur
+                        est un jeton Linear, mais la règle de déplacement est la même pour un
+                        record Affine :
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">use_after_move.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">fun main () =
+    let val ticket = new_token ()
+        val _ = consume_token (ticket)
+    in consume_token (ticket)
+    end</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">yack check</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="plain">error[E0402]: value `ticket` is used after being moved
+  --> use_after_move.yack:4:23
+  |
+4 |     in consume_token (ticket)
+  |                       ^^^^^^
+  = note: the value was already transferred to another owner
+  = hint: move the use before the transfer, or copy the value if its type is Copy</code></pre>
+                    </div>
+                    <p>
+                        Les déplacements partiels sont suivis eux aussi. Après le déplacement
+                        d'un champ de record, le parent existe encore mais cet emplacement n'est
+                        plus initialisé ; le réutiliser donne <code>E0402</code> avec le chemin
+                        du champ dans le message. Le backend ne détruit alors que les champs
+                        encore possédés.
+                    </p>
+                </section>
+
+                <section class="step" id="linear" aria-labelledby="linear-title">
+                    <span class="step-num">04. Ressources linéaires</span>
+                    <h2 id="linear-title">Certaines choses doivent être fermées exactement une fois</h2>
+                    <p>
+                        Affine signifie « au plus une fois ». Linear signifie « exactement une
+                        fois, sur chaque chemin ». Une valeur Affine peut être détruite
+                        silencieusement ; une valeur Linear non. C'est la propriété utilisée
+                        pour les ressources dont le nettoyage est observable : un jeton, une
+                        connexion SQLite, une requête préparée, une socket.
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">token_ok.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">fun main () =
+    let val ticket = new_token ()
+        val _ = consume_token (ticket)
+    in print_int (1)
+    end</code></pre>
+                    </div>
+                    <p>
+                        Oublier la consommation et le programme ne passe plus le typage.
+                        L'erreur nomme la valeur et suggère l'appel manquant :
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">unconsumed.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">fun main () =
+    let val ticket = new_token ()
+    in print_int (1)
+    end</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">yack check</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="plain">error[E0403]: linear value `ticket` is never consumed on this path
+  --> unconsumed.yack:2:9
+  |
+2 |     let val ticket = new_token ()
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: values with the Linear property must be consumed exactly once on every path
+  = note: leaving it alive is rejected instead of freeing it implicitly
+  = hint: consume it with `consume_token (ticket)`
+  = hint: or move the consumption after the `if`/`case` so every branch reaches it</code></pre>
+                    </div>
+                    <p>
+                        La linéarité est une propriété de type déclarée, pas un cas particulier
+                        réservé à deux primitives. Un record ou un datatype peut être déclaré
+                        <code>: Linear</code>, et le vérificateur le suit à travers les branches.
+                        La liaison SQLite de <code>lib/sql/src/Sqlite.yack</code> le fait pour
+                        <code>db</code> et <code>statement</code> :
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">lib/sql/src/Sqlite.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">(* excerpt from lib/sql/src/Sqlite.yack *)
+type db : Linear = { handle : int64 }
+type statement : Linear = { handle : int64, owner : (borrow db) option }
+
+fun main () = ()</code></pre>
+                    </div>
+                    <p>
+                        <code>close</code> consomme un <code>db</code> ; <code>finalize</code>
+                        consomme un <code>statement</code>. Oublier l'un ou l'autre sur un chemin
+                        donne <code>E0403</code> ; fermer deux fois ou utiliser une connexion
+                        fermée donne <code>E0402</code>. Une requête préparée détient aussi un
+                        emprunt de sa base, donc <code>close (db)</code> avant <code>finalize
+                        (statement)</code> donne <code>E0501</code>. Les pièges sont figés par
+                        <code>test/sql/forgot_finalize.yack</code>,
+                        <code>test/sql/forgot_close.yack</code>,
+                        <code>test/sql/close_twice.yack</code> et
+                        <code>test/sql/close_with_open_stmt.yack</code>, et documentés dans
+                        <code>docs/sql.md</code>.
+                    </p>
+                    <div class="callout warn">
+                        <strong>Pas de destructeurs automatiques.</strong>
+                        Le langage n'a pas de fermeture de style RAII. Le compilateur peut
+                        prouver qu'un <code>close</code> ou un <code>finalize</code> a été
+                        oublié, mais il ne les exécute pas automatiquement. La documentation
+                        SQLite énonce la même limite.
+                    </div>
+                    <p>
+                        Le paquet réseau utilise le même schéma pour <code>listener</code> et
+                        <code>stream</code> dans <code>lib/net/src/Net.yack</code> ; les
+                        fonctions sont <code>close_listener</code> et <code>close</code>. La
+                        linéarité est ici une discipline portée par des types de handles
+                        déclarés : la propriété est vérifiée par la même analyse de possession
+                        que les déplacements, pas par un mécanisme d'exécution séparé.
+                    </p>
+                </section>
+
+                <section class="step" id="borrowing" aria-labelledby="borrowing-title">
+                    <span class="step-num">05. Emprunt</span>
+                    <h2 id="borrowing-title">Lire sans prendre possession</h2>
+                    <p>
+                        Déplacer n'est pas toujours ce que l'on veut. Une fonction qui ne fait
+                        que lire un record ne devrait pas l'enlever à l'appelant. Yack dispose
+                        de <code>borrow</code> pour cela :
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">borrow.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">type account : Affine = { id : int, balance : int }
+
+fun balance_of (value : borrow account) : int =
+    value.balance
+
+fun main () =
+    let val account : account = { id = 7, balance = 42 }
+        val first = balance_of (borrow account)
+        val second = balance_of (&amp;account)
+        val moved = account
+    in print_int (first + second + moved.balance)
+    end</code></pre>
+                    </div>
+                    <p>
+                        <code>borrow account</code> est un emprunt partagé ; il est Copy, donc
+                        une fonction peut le recevoir sans consommer le propriétaire.
+                        <code>&amp;account</code> est la forme courte de la même expression, et
+                        les deux orthographes sont acceptées. Ici le prêt se termine à la
+                        dernière utilisation de la valeur empruntée, donc <code>account</code>
+                        peut être déplacé ensuite. Ce sont les durées de vie non lexicales
+                        (NLL).
+                    </p>
+                    <p>
+                        Les règles sont volontairement locales :
+                    </p>
+                    <ul>
+                        <li>Un opérande d'emprunt doit être un emplacement : une variable locale, ou une chaîne de champs de record et d'indices de tuple enracinée dans l'une d'elles. <code>borrow (f x)</code> donne <code>E0500</code>.</li>
+                        <li>Les emprunts partagés peuvent se chevaucher ; un <code>borrow mut</code> est exclusif et entre en conflit avec tout autre emprunt vivant d'un emplacement qui se chevauche (<code>E0502</code>).</li>
+                        <li>Déplacer le propriétaire pendant qu'un emprunt est encore vivant donne <code>E0501</code> ; un emprunt qui s'échappe du <code>let</code> propriétaire de sa source donne <code>E0507</code>.</li>
+                        <li>Une fonction qui renvoie un emprunt doit nommer sa provenance avec <code>from</code> (nom de paramètre ou indice à partir de 1) ; une origine absente ou ambiguë donne <code>E0503</code>.</li>
+                    </ul>
+                    <p>
+                        Deux limites comptent pour une image honnête. Lire un champ non Copy à
+                        travers un emprunt est actuellement refusé avec <code>E0508</code>
+                        (« cannot read non-Copy field <code>name</code> through a borrow »),
+                        donc un accesseur doit copier la valeur ou atteindre le champ par un
+                        autre chemin. Et bien que la syntaxe accepte <code>borrow mut</code>,
+                        les emprunts mutables restent des copies non aliasées : aucune opération
+                        du langage ne mute à travers un emprunt pour l'instant. Les
+                        vérifications et les règles de conflit existent ; la mutation à travers
+                        elles n'est pas implémentée.
+                    </p>
+                </section>
+
+                <section class="step" id="memory-modes" aria-labelledby="memory-modes-title">
+                    <span class="step-num">06. Modes mémoire</span>
+                    <h2 id="memory-modes-title">Tas, arènes et un mode pile expérimental</h2>
+                    <p>
+                        Yack possède deux modes d'allocation, choisis à la compilation avec
+                        <code>--memory=heap</code> (le défaut) ou <code>--memory=stack</code>.
+                        Le même source peut être compilé dans l'un ou l'autre ; le mode change
+                        l'exécution émise, pas un drapeau d'exécution.
+                    </p>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>Mode</th><th>Libération des valeurs</th><th>État</th></tr></thead>
+                        <tbody>
+                            <tr>
+                                <td>Heap</td>
+                                <td>La possession décide quand <code>free</code> est émis. Un bloc <code>arena</code> regroupe les chaînes temporaires.</td>
+                                <td>Défaut</td>
+                            </tr>
+                            <tr>
+                                <td><code>arena ... in ... end</code></td>
+                                <td>Ouvre une portée temporaire et la libère à <code>end</code>. En mode heap, seules les chaînes l'utilisent ; les tableaux et les maps gardent leur destruction normale.</td>
+                                <td>Disponible dans les deux modes</td>
+                            </tr>
+                            <tr>
+                                <td><code>--memory=stack</code></td>
+                                <td>Chaque activation reçoit une région à bump-pointer ; la région est détruite au retour, et <code>free</code> ne fait rien. Les valeurs qui s'échappent doivent être prouvées sûres, sinon le programme est refusé.</td>
+                                <td>Expérimental</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">arena.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">fun main () =
+    arena
+        val text = "hello" ^ " " ^ "world"
+    in
+        print_string (text)
+    end</code></pre>
+                    </div>
+                    <p>
+                        La version avec arène existe parce que les concaténations de courte
+                        durée sont fréquentes dans le traitement des requêtes. En mode heap,
+                        elle évite un <code>malloc</code> et un <code>free</code> par chaîne
+                        temporaire ; le bloc est recyclé à <code>end</code>. En mode stack,
+                        l'arène de requête fait partie du schéma de régions, et un emprunt dont
+                        le propriétaire vit dans une arène ne peut pas s'échapper du bloc
+                        (<code>E0703</code>).
+                    </p>
+                    <p>
+                        Le mode stack est la moitié la plus ambitieuse de l'expérience. Il
+                        n'émet aucun <code>malloc</code>, <code>calloc</code>,
+                        <code>realloc</code> ou <code>free</code> de la libc pour les valeurs
+                        Yack ; les allocations viennent d'une région réservée avec
+                        <code>mmap</code>. Le contrat veut que le compilateur prouve qu'une
+                        valeur ne survit pas à sa région et refuse le programme plutôt que de
+                        retomber sur le tas. Le vérificateur de régions est encore en cours
+                        d'achèvement : <code>E0702</code> couvre les stockages que l'analyse ne
+                        peut pas prouver, <code>E0703</code> un emprunt dont le propriétaire vit
+                        dans une arène fermée, et <code>E0701</code> (une valeur qui s'échappe
+                        de sa région) reste inachevé. Le README marque tout le mode comme
+                        expérimental pour cette raison.
+                    </p>
+                    <div class="callout warn">
+                        <strong>Expérimental veut dire expérimental.</strong>
+                        Le mode stack est testé différentiellement contre le mode heap et sous
+                        AddressSanitizer, mais l'analyse de régions garde des recoins
+                        conservateurs. Le mode heap reste le défaut pour une bonne raison.
+                    </div>
+                </section>
+
+                <section class="step" id="threads" aria-labelledby="threads-title">
+                    <span class="step-num">07. Threads</span>
+                    <h2 id="threads-title">La possession s'arrête à la frontière des threads</h2>
+                    <p>
+                        L'API de threads est volontairement petite :
+                    </p>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">threads.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">fun worker (id : int64) : unit =
+    print_string ("worker " ^ int_to_string (int64_to_int (id)))
+
+fun main () =
+    let val thread = sys.thread_spawn (worker, int_to_int64 (1))
+        val _ = sys.thread_join (thread)
+    in ()
+    end</code></pre>
+                    </div>
+                    <p>
+                        <code>sys.thread_spawn</code> prend une fonction statique de type
+                        <code>int64 -&gt; unit</code> et une charge utile <code>int64</code>.
+                        <code>sys.thread_join</code> renvoie <code>unit</code>. Il n'y a pas de
+                        closures capturantes, donc un worker n'a pas d'environnement ; la seule
+                        valeur qui traverse la frontière est l'<code>int64</code>.
+                    </p>
+                    <p>
+                        C'est aussi pourquoi il n'existe volontairement ni type
+                        <code>Send</code> ni type <code>Shared</code>. La frontière est déjà un
+                        <code>int64</code>, et aucun pointeur vers le tas Yack ne peut y être
+                        encodé. L'arène, l'arène de travail, la réserve racine et l'état
+                        d'enracinement du store sont tous locaux au thread, donc deux threads ne
+                        partagent pas d'allocateur. La décision est consignée dans
+                        <code>docs/threads.md</code>.
+                    </p>
+                    <p>
+                        Le chemin brut des handles SQLite dans <code>docs/sql.md</code> est
+                        l'exception qui confirme la règle : un handle de connexion est passé
+                        comme un <code>int64</code>, et ce chemin n'est explicitement
+                        <strong>pas vérifié</strong>. Le propriétaire doit garder la connexion
+                        vivante jusqu'à <code>thread_join</code>. Le langage ne le prouve pas.
+                    </p>
+                </section>
+
+                <section class="step" id="advantages" aria-labelledby="advantages-title">
+                    <span class="step-num">08. Ce que cela apporte</span>
+                    <h2 id="advantages-title">Les avantages, avec leur portée</h2>
+                    <ul>
+                        <li>
+                            <strong>Libérations déterministes.</strong> Aucun collecteur ne
+                            décide quand la mémoire est récupérée. Une valeur est détruite à la
+                            fin de la portée de son propriétaire, après un déplacement, ou à la
+                            jonction de branches ; l'analyse de possession décide de
+                            l'emplacement.
+                        </li>
+                        <li>
+                            <strong>Pas de pauses de GC.</strong> L'exécution n'a pas de phase de
+                            balayage. Pour un outil en ligne de commande, une requête de serveur
+                            ou un serveur de langage, le coût de la gestion mémoire est payé aux
+                            sites d'allocation et de libération choisis par le compilateur.
+                        </li>
+                        <li>
+                            <strong>Utilisation après déplacement et fuites sont des erreurs de
+                            compilation dans le sous-ensemble vérifié.</strong> <code>E0402</code>
+                            attrape une utilisation après transfert ; <code>E0403</code> attrape
+                            une valeur Linear non consommée sur un chemin. L'exécution peut être
+                            vérifiée séparément avec <code>yack build --debug-alloc</code>, qui
+                            affiche les allocations, les libérations et un résumé final
+                            <code>allocs/frees/net</code>.
+                        </li>
+                        <li>
+                            <strong>Pas de cycles de références dus au comptage.</strong> Yack
+                            n'utilise pas de comptage de références, donc la fuite classique par
+                            cycle n'existe pas. L'autre face de la médaille est que les graphes
+                            cycliques partagés ne sont pas exprimables dans le langage sûr (voir
+                            les coûts plus bas).
+                        </li>
+                        <li>
+                            <strong>Pas d'état de tas Yack mutable partagé entre threads.</strong>
+                            Seul un <code>int64</code> traverse <code>thread_spawn</code> ; l'état
+                            de l'allocateur est local au thread. Le benchmark de threads tourne
+                            sous ThreadSanitizer et AddressSanitizer dans
+                            <code>test/thread_tsan.sh</code>. Le chemin non vérifié des handles
+                            SQLite bruts est l'exception décrite plus haut.
+                        </li>
+                        <li>
+                            <strong>Petits binaires natifs.</strong> Dans la comparaison
+                            <code>bench/cli_size</code> du dépôt, le même programme d'analyse
+                            d'arguments fait 130 280 octets avec <code>yack build</code> et
+                            92 680 octets avec <code>--trim</code>, contre 2 471 820 octets pour
+                            la compilation Go et 1 042 640 octets pour la compilation Rust avec
+                            <code>clap</code>. Le binaire Yack est lié dynamiquement à libc, libm
+                            et libsqlite3 ; la comparaison porte sur l'artefact livré, pas sur la
+                            vitesse.
+                        </li>
+                    </ul>
+                    <p>
+                        Ce sont des propriétés de l'implémentation actuelle, pas une affirmation
+                        générale de « sûreté mémoire ». Les programmes qui utilisent des handles
+                        bruts, ou des parties de l'exécution que le validateur SSA ne modélise
+                        pas, restent hors du sous-ensemble vérifié. Le dépôt nomme ces
+                        frontières plutôt que de les masquer.
+                    </p>
+                </section>
+
+                <section class="step" id="costs" aria-labelledby="costs-title">
+                    <span class="step-num">09. Ce que cela coûte</span>
+                    <h2 id="costs-title">Les difficultés font partie de la conception</h2>
+                    <p>
+                        Le modèle n'est pas gratuit, et le dépôt dit franchement où il peine :
+                    </p>
+                    <ul>
+                        <li>
+                            <strong>Charge d'annotations.</strong> Les signatures doivent dire
+                            qui possède, qui emprunte et qui consomme. Les types de rappel
+                            utilisent <code>consume T -&gt; R</code> quand le rappel prend
+                            possession ; un emprunt renvoyé a besoin de <code>from</code> quand
+                            plusieurs paramètres pourraient être la source. Le compilateur infère
+                            beaucoup, mais la surface de possession reste visible dans le source.
+                            Ces annotations d'emprunt et ces copies explicites sont exactement
+                            la cérémonie que les types imposent ; c'est le prix d'une possession
+                            vérifiable sans collecteur, pas du bruit accidentel.
+                        </li>
+                        <li>
+                            <strong>Pas de closures capturantes.</strong> Les fonctions peuvent
+                            être passées par nom ou écrites en ligne comme <code>x =&gt; ...</code>,
+                            mais une fonction en ligne ne peut pas capturer une variable locale.
+                            Une fonction locale qui capture est lambda-liftée et ne peut être
+                            appelée que directement ; l'utiliser comme valeur donne
+                            <code>E0518</code>. Voici l'erreur pour un <code>base</code> capturé :
+                        </li>
+                    </ul>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">closure.yack</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="yack">fun main () =
+    let val base = 40
+        fun add (x) = x + base
+        val f = add
+    in print_int (f (2))
+    end</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">yack check</span>
+                            <button class="copy" type="button" data-copy>Copier</button>
+                        </div>
+                        <pre><code data-lang="plain">error[E0518]: local function `add` captures variables and cannot be used as a closure
+  --> closure.yack:4:17
+  |
+4 |         val f = add
+  |                 ^^^
+  = note: Yack has no capturing closures
+  = note: a local function is lambda-lifted and only supports direct calls
+  = note: a local function without captures can still be used as a value
+  = hint: call it directly, e.g. `add (...)`
+  = hint: or move it to module level and pass the captures explicitly
+  = hint: example: `fun add (capture, argument) = ...`</code></pre>
+                    </div>
+                    <ul>
+                        <li>
+                            <strong>Le code d'ordre supérieur fonctionne, dans cette
+                            limite.</strong> <code>lib/yack/src/list.yack</code> fournit
+                            <code>map</code>, <code>filter</code>, <code>foldl</code>,
+                            <code>foldr</code> et <code>zip</code>. Les fonctions sont
+                            spécialisées par la cible d'appel, mais une lambda qui a besoin d'un
+                            environnement capturé ne peut pas être passée.
+                        </li>
+                        <li>
+                            <strong>Pas de classes de types ni d'interfaces.</strong> La
+                            bibliothèque standard utilise des noms concrets et spécialisés comme
+                            <code>sort_int</code> et <code>contains_string</code> plutôt qu'une
+                            abstraction <code>Comparator</code> ou <code>Hashable</code>.
+                            <code>yack/map</code> est indexé par chaîne ; une map générique
+                            aurait besoin de <code>hash</code> et <code>eq</code> pour sa clé.
+                            <code>docs/stdlib.md</code> présente cela comme une limite de
+                            conception, pas comme un oubli.
+                        </li>
+                        <li>
+                            <strong>Les graphes partagés et les cycles sont maladroits ou
+                            impossibles.</strong> Les datatypes récursifs ne posent pas de
+                            problème, mais il n'y a ni comptage de références ni mutation à
+                            travers un emprunt. Construire un graphe cyclique mutable, ou
+                            partager une structure mutable entre deux propriétaires, sort du
+                            modèle actuel. Les collections de la bibliothèque standard sont
+                            Affine et font circuler la valeur à chaque opération.
+                        </li>
+                        <li>
+                            <strong>Certaines lectures exigent une copie.</strong> Un champ non
+                            Copy ne peut pas être lu à travers un emprunt (<code>E0508</code>).
+                            Les accesseurs doivent copier la valeur ou travailler sur une valeur
+                            possédée ; la bibliothèque standard expose <code>string_copy</code>
+                            et des variantes d'emprunt pour les tableaux et les maps, mais
+                            l'ergonomie est encore en cours de comblement.
+                        </li>
+                        <li>
+                            <strong>La courbe d'apprentissage passe par les diagnostics.</strong>
+                            Le vérificateur rapporte des codes stables avec notes et indices :
+                            déplacer cette utilisation avant le transfert, consommer cette valeur
+                            sur les deux branches, nommer la provenance de l'emprunt. Les règles
+                            s'apprennent, mais la possession dépendante des branches et les
+                            déplacements partiels dépendants des chemins demandent de la
+                            pratique.
+                        </li>
+                        <li>
+                            <strong>Toujours expérimental.</strong> L'analyse de régions du mode
+                            stack est incomplète ; les handles SQLite bruts ne sont pas vérifiés ;
+                            la bibliothèque standard est partielle pour le réseau, les dates et
+                            les encodages ; il n'y a ni visibilité <code>pub</code>/privée ni
+                            <code>open</code>. La table d'état du README est la carte actuelle.
+                        </li>
+                    </ul>
+                    <div class="callout warn">
+                        <strong>Le résumé honnête.</strong>
+                        Yack est une manière de demander jusqu'où la possession peut porter un ML
+                        sans GC. Il ne prétend pas que tout programme est plus simple dans ce
+                        modèle. Les programmes à état mutable partagé ou à usage intensif de
+                        closures luttent contre le langage ; les programmes à possession claire
+                        et ressources explicites s'y prêtent bien.
+                    </div>
+                </section>
+
+                <section class="step" id="status" aria-labelledby="status-title">
+                    <span class="step-num">10. État et lectures</span>
+                    <h2 id="status-title">Version 0.2.0, toujours une expérience</h2>
+                    <p>
+                        Le compilateur, la bibliothèque standard, les tests et la documentation
+                        vivent dans le même dépôt. La table d'état du README est la liste
+                        faisant autorité de ce qui est stable, partiel ou manquant.
+                    </p>
+                    <div class="table-scroll">
+                    <table class="compare">
+                        <thead><tr><th>Pour…</th><th>Lire</th></tr></thead>
+                        <tbody>
+                            <tr><td>Compiler et exécuter de vrais programmes</td><td><a href="cli.html">Le guide CLI</a> : quatre programmes en ligne de commande complets</td></tr>
+                            <tr><td>Construire une API web</td><td><a href="alpage.html">Le tutoriel Alpage</a>, pas à pas</td></tr>
+                            <tr><td>Voir l'état complet et le source</td><td><a href="https://github.com/AsymetricData/yack-public#readme">Le README sur GitHub</a></td></tr>
+                            <tr><td>Lire la frontière des threads</td><td><a href="https://github.com/AsymetricData/yack-public/blob/main/docs/threads.md">docs/threads.md</a></td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <div class="step-nav">
+                        <a class="btn btn-ghost" href="index.html">Retour à Yack</a>
+                        <a class="btn" href="https://github.com/AsymetricData/yack-public#readme">README sur GitHub</a>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-brand">
+            <img src="favicon.svg" alt="" width="26" height="26">
+            <p>Yack : un langage fonctionnel expérimental.<br>Possession et emprunt, vérifiés avant la génération de code.</p>
+        </div>
+        <nav aria-label="Liens de pied de page">
+            <a href="index.html">Accueil</a>
+            <a href="cli.html">Guide CLI</a>
+            <a href="alpage.html">Tutoriel Alpage</a>
+            <a href="https://github.com/AsymetricData/yack-public">GitHub</a>
+        </nav>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

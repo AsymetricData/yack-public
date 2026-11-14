@@ -1,0 +1,6 @@
+type empty = {}
+
+fun main () =
+    let val value : empty = {}
+    in ()
+    end

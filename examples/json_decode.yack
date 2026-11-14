@@ -1,0 +1,40 @@
+import yack/json
+import yack/list
+
+fun add_pair (pair : int * int) : int =
+    case pair of
+        (acc, x) => acc + x
+
+fun decode_count (text : borrow string, key : borrow string) : int =
+    case json.parse (text) of
+        Error _ => 0
+      | Ok root =>
+            case json.as_object (root) of
+                Error _ => 0
+              | Ok fields =>
+                    case json.field_decode (key, json.as_int, fields) of
+                        Error _ => 0
+                      | Ok count => count
+
+fun decode_sum (text : borrow string, key : borrow string) : int =
+    case json.parse (text) of
+        Error _ => 0
+      | Ok root =>
+            case json.as_object (root) of
+                Error _ => 0
+              | Ok fields =>
+                    case json.field_array (key, fields) of
+                        Error _ => 0
+                      | Ok values =>
+                            case json.array_decode (json.as_int, values) of
+                                Error _ => 0
+                              | Ok numbers => list.foldl (add_pair, 0, numbers)
+
+fun main () =
+    let val countText = "{\"n\":5}"
+        val itemsText = "{\"xs\":[1,2]}"
+        val countKey = "n"
+        val itemsKey = "xs"
+    in print_int (decode_count (borrow countText, borrow countKey)
+                  + decode_sum (borrow itemsText, borrow itemsKey))
+    end
