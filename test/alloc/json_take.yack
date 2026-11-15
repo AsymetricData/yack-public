@@ -1,0 +1,223 @@
+
+
+
+
+import yack/json
+import yack/list
+import yack/string
+
+fun drop_text (text : string) : unit = list.discard_value (text)
+
+fun count_list (values : 'a list) : int =
+    list.foldl (pair => case pair of (acc, _) => acc + 1, 0, values)
+
+fun decode_int (value : json.value) : int result = json.as_int (value)
+
+fun decode_int_list (value : json.value) : int list result =
+    json.decode_list (json.as_int, value)
+
+fun decode_int_option (value : json.value) : int option result =
+    json.decode_option (json.as_int, value)
+
+fun decode_float (value : json.value) : float result = json.as_float (value)
+
+fun drop_int_result (result : int result) : int =
+    case result of
+        Ok (value) => value
+      | Error (message) => let val ignored = drop_text (message) in 0 end
+
+fun decode_age (value : json.value) : int result =
+    case json.as_object (value) of
+        Error (message) => Error (message)
+      | Ok (fields) =>
+            case json.take_int (&"age", fields) of
+                Error (message) => Error (message)
+              | Ok (age, rest) =>
+                    let val ignored = json.discard_fields (rest)
+                    in Ok (age)
+                    end
+
+fun decode_n (value : json.value) : int result =
+    case json.as_object (value) of
+        Error (message) => Error (message)
+      | Ok (fields) =>
+            case json.take_int (&"n", fields) of
+                Error (message) => Error (message)
+              | Ok (n, rest) =>
+                    let val ignored = json.discard_fields (rest)
+                    in Ok (n)
+                    end
+
+fun decode_user (value : json.value) : int result =
+    case json.as_object (value) of
+        Error (message) => Error (message)
+      | Ok (fields) =>
+            case json.take_object (decode_age, &"user", fields) of
+                Error (message) => Error (message)
+              | Ok (age, rest) =>
+                    let val ignored = json.discard_fields (rest)
+                    in Ok (age)
+                    end
+
+fun check_take_success () : int =
+    let
+        val text =
+            "{\"name\":\"Ada\",\"unknown\":[1,2],\"age\":36,\"age\":99,\"active\":true}"
+    in
+        case json.parse (&text) of
+            Error (message) => let val ignored = drop_text (message) in 0 end
+          | Ok (value) =>
+                case json.as_object (value) of
+                    Error (message) => let val ignored = drop_text (message) in 0 end
+                  | Ok (fields) =>
+                        case json.take_int (&"age", fields) of
+                            Error (message) =>
+                                let val ignored = drop_text (message) in 0 end
+                          | Ok (age, afterAge) =>
+                                case json.take_string (&"name", afterAge) of
+                                    Error (message) =>
+                                        let val ignored = drop_text (message) in 0 end
+                                  | Ok (name, afterName) =>
+                                        case json.take_bool (&"active", afterName) of
+                                            Error (message) =>
+                                                let val ignored = drop_text (message) in 0 end
+                                          | Ok (active, afterActive) =>
+                                                case json.take_option (json.as_int, &"absent", afterActive) of
+                                                    Error (message) =>
+                                                        let val ignored = drop_text (message) in 0 end
+                                                  | Ok (option, rest) =>
+                                                        let
+                                                            val size = string.length (&name)
+                                                            val ignoredOption =
+                                                                case option of
+                                                                    Some (number) => number
+                                                                  | None => 0
+                                                            val ignoredName = drop_text (name)
+                                                            val ignoredRest = json.discard_fields (rest)
+                                                        in
+                                                            if active then age + size + ignoredOption
+                                                            else 0
+                                                        end
+    end
+
+fun check_take_errors () : int =
+    let
+        val missingText = "{\"name\":\"Ada\"}"
+        val wrongText = "{\"n\":\"x\"}"
+        val missing =
+            case json.parse (&missingText) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (value) => drop_int_result (decode_age (value))
+        val wrong =
+            case json.parse (&wrongText) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (value) => drop_int_result (decode_n (value))
+        val nestedText = "{\"user\":{\"name\":\"Ada\"}}"
+        val nested =
+            case json.parse (&nestedText) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (value) => drop_int_result (decode_user (value))
+    in missing + wrong + nested end
+
+fun check_lists () : int =
+    let
+        val text = "{\"items\":[1,2,3],\"names\":[\"a\",\"b\"]}"
+        val ok =
+            case json.parse (&text) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (value) =>
+                    case json.as_object (value) of
+                        Error (message) => let val ignored = drop_text (message) in 0 end
+                      | Ok (fields) =>
+                            case json.take_list (json.as_int, &"items", fields) of
+                                Error (message) =>
+                                    let val ignored = drop_text (message) in 0 end
+                              | Ok (items, afterItems) =>
+                                    case json.take_list (json.as_string, &"names", afterItems) of
+                                        Error (message) =>
+                                            let
+                                                val ignoredItems = list.discard_list (items)
+                                                val ignoredMessage = drop_text (message)
+                                            in 0 end
+                                      | Ok (names, rest) =>
+                                            let
+                                                val itemCount = count_list (items)
+                                                val nameCount = count_list (names)
+                                                val ignoredRest = json.discard_fields (rest)
+                                            in itemCount + nameCount end
+        val badText = "{\"items\":[1,\"x\",3]}"
+        val bad =
+            case json.parse (&badText) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (value) =>
+                    case json.as_object (value) of
+                        Error (message) => let val ignored = drop_text (message) in 0 end
+                      | Ok (fields) =>
+                            case json.take_list (json.as_int, &"items", fields) of
+                                Error (message) => let val ignored = drop_text (message) in 0 end
+                              | Ok (items, rest) =>
+                                    let
+                                        val count = count_list (items)
+                                        val ignoredRest = json.discard_fields (rest)
+                                    in count end
+    in ok + bad end
+
+fun check_decode_helpers () : int =
+    let
+        val listText = "[1,2,3]"
+        val badListText = "[1,\"x\",3]"
+        val optionText = "null"
+        val numberText = "1e999"
+        val decoded =
+            case json.decode (&listText, decode_int_list) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (values) =>
+                    let val count = count_list (values)
+                    in count end
+        val badDecoded =
+            case json.decode (&badListText, decode_int_list) of
+                Error (message) => let val ignored = drop_text (message) in 1 end
+              | Ok (values) =>
+                    let val count = count_list (values) in count end
+        val empty =
+            case json.decode (&optionText, decode_int_option) of
+                Error (message) => let val ignored = drop_text (message) in 0 end
+              | Ok (option) =>
+                    case option of
+                        Some (number) => number
+                      | None => 1
+        val absurd =
+            case json.decode (&numberText, decode_float) of
+                Error (message) => let val ignored = drop_text (message) in 1 end
+              | Ok (number) => 0
+        val syntax =
+            case json.decode (&"[", decode_int) of
+                Error (message) => let val ignored = drop_text (message) in 1 end
+              | Ok (number) => number
+    in decoded + badDecoded + empty + absurd + syntax end
+
+fun check_encoding () : int =
+    let
+        val big : int64 = 1234567890123
+        val document =
+            json.object
+                [json.entry ("null", json.null ()),
+                 json.entry ("bool", json.bool (true)),
+                 json.entry ("int", json.int (42)),
+                 json.entry ("int64", json.int64 (big)),
+                 json.entry ("float", json.float (1.5)),
+                 json.entry ("number", json.number ("2e3")),
+                 json.entry ("string", json.string ("a\"b")),
+                 json.entry ("array", json.array [json.int (1), json.null ()]),
+                 json.entry ("list", json.list (json.int, [1, 2, 3])),
+                 json.entry ("none", json.nullable (json.string, None)),
+                 json.entry ("some", json.nullable (json.string, Some ("x")))]
+        val rendered = json.to_string (document)
+        val size = string.length (&rendered)
+        val ignored = list.discard_value (rendered)
+    in size end
+
+fun main () =
+    print_int
+        (check_take_success () + check_take_errors () + check_lists () +
+         check_decode_helpers () + check_encoding ())

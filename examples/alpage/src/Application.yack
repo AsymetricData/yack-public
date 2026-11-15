@@ -1,6 +1,5 @@
 import alpage/Alpage
 import alpage/Ctx
-import alpage/Decode
 import alpage/Extract
 import alpage/Middleware
 import alpage/Reply
@@ -23,6 +22,9 @@ fun sum_values (ctx : Ctx.t, values : consume int list) : Reply.t =
         )
     end
 
+fun decode_int_list (value : json.value) : int list result =
+    json.decode_list (json.as_int, value)
+
 fun decode_items (body : borrow string) : int list result =
     case json.parse (body) of
         Error message => Error (message)
@@ -31,7 +33,7 @@ fun decode_items (body : borrow string) : int list result =
                  Error message => Error (message)
                | Ok fields =>
                      let val key = "items"
-                     in json.field_decode (borrow key, Decode.int_list, fields)
+                     in json.field_decode (borrow key, decode_int_list, fields)
                      end)
 
 fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =

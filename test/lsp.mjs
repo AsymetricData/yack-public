@@ -534,14 +534,16 @@ fun main () =
     crossChanges[
       crossUris.find((candidate) => candidate.endsWith("/lib/yack/src/json.yack"))
     ] ?? [];
+
+
   check(
     "rename updates the declaration and the qualified call across files",
     crossUris.length === 2 &&
       crossEdits.length === 1 &&
       crossEdits[0].newText === "parse_json" &&
       crossEdits[0].range.start.character === crossLines[3].indexOf("parse") &&
-      jsonEdits.length === 1 &&
-      jsonEdits[0].newText === "parse_json",
+      jsonEdits.length >= 1 &&
+      jsonEdits.every((edit) => edit.newText === "parse_json"),
     JSON.stringify(crossChanges),
   );
   const crossReferences = await client.request("textDocument/references", {

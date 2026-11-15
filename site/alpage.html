@@ -337,14 +337,17 @@ fun square (ctx : Ctx.t, request : consume Request.t) : Reply.t =
                             <span class="file">src/Api.yack</span>
                             <button class="copy" type="button" data-copy>Copy</button>
                         </div>
-                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun decode_items (body : &amp;string) : int list result =
-    case Decode.parse (body) of
+                        <pre><code data-lang="yack" data-from="examples/alpage_tutorial/src/Api.yack">fun decode_int_list (value : json.value) : int list result =
+    json.decode_list (json.as_int, value)
+
+fun decode_items (body : &amp;string) : int list result =
+    case json.parse (body) of
         Error message =&gt; Error (message)
       | Ok value =&gt;
             (case json.as_object (value) of
                  Error message =&gt; Error (message)
                | Ok fields =&gt;
-                     json.field_decode (&amp;"items", Decode.int_list, fields))
+                     json.field_decode (&amp;"items", decode_int_list, fields))
 
 fun add (pair : int * int) : int = pair.0 + pair.1
 

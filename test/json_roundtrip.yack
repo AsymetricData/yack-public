@@ -1,0 +1,48 @@
+
+
+
+
+import yack/io
+import yack/json
+import yack/list
+import yack/os
+import yack/string
+
+fun first_arg () : string result =
+    case os.command_args () of
+        Nil => Error ("json_roundtrip: missing path argument")
+      | Cons (path, rest) =>
+            let val ignored = list.discard_list (rest)
+            in Ok (path)
+            end
+
+fun check (text : &string) : unit =
+    case json.parse (text) of
+        Error (message) => print_string ("parse: " ^ message)
+      | Ok (value) =>
+            let
+                val rendered = json.to_string (value)
+                val same = string.equals (&rendered, text)
+            in
+                case json.parse (&rendered) of
+                    Error (message) => print_string ("reparse: " ^ message)
+                  | Ok (again) =>
+                        let val renderedAgain = json.to_string (again)
+                        in
+                            if same then
+                                if string.equals (&renderedAgain, &rendered) then
+                                    print_string ("ok")
+                                else
+                                    print_string ("FAIL: render is not stable")
+                            else
+                                print_string ("FAIL: roundtrip changed the document")
+                        end
+            end
+
+fun main () =
+    case first_arg () of
+        Error (message) => print_string (message)
+      | Ok (path) =>
+            case io.read_file (path) of
+                Error (message) => print_string ("read: " ^ message)
+              | Ok (text) => check (&text)

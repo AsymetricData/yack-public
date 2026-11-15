@@ -27,37 +27,81 @@ fun null () : value = Null
    - `input` : booléen scalaire consommé.
 
    Retourne une nouvelle valeur `Bool`. *)
-fun bool_value (input : bool) : value = Bool (input)
+fun bool (input : bool) : value = Bool (input)
 
-(* Convertit un entier en représentation numérique décimale JSON.
+(* Convertit un entier 32 bits en valeur JSON numérique.
    - `input` : entier scalaire consommé.
 
    Retourne `Number` contenant son texte décimal. *)
-fun int_value (input : int) : value = Number (int_to_string (input))
+fun int (input : int) : value = Number (int_to_string (input))
+
+(* Convertit un entier 64 bits en valeur JSON numérique.
+   - `input` : entier 64 bits consommé.
+
+   Retourne `Number` contenant son texte décimal. *)
+fun int64 (input : int64) : value = Number (int64_to_string (input))
+
+(* Convertit un flottant en valeur JSON numérique.
+   - `input` : flottant consommé.
+
+   Retourne `Number` contenant `float_to_string (input)`. Un flottant non
+   fini (`inf`, `nan`) produirait un document invalide : l'appelant doit
+   l'éviter. *)
+fun float (input : float) : value = Number (float_to_string (input))
 
 (* Construit un nombre depuis sa représentation textuelle.
    - `input` : texte consommé et conservé tel quel, sans validation.
 
-   Retourne une valeur `Number`. *)
-fun number_value (input : string) : value = Number (input)
+   Retourne une valeur `Number`. Préférer `int`, `int64` ou `float` quand le
+   type est connu ; `number` sert aux lexèmes déjà validés par `parse`. *)
+fun number (input : string) : value = Number (input)
 
 (* Emballe une chaîne comme valeur JSON.
    - `input` : chaîne consommée et stockée sans échappement préalable.
 
-   Retourne une nouvelle valeur `String`. *)
-fun string_value (input : string) : value = String (input)
+   Retourne une nouvelle valeur `String` ; `to_string` ajoute les
+   guillemets et les échappements. *)
+fun string (input : string) : value = String (input)
 
 (* Construit un tableau JSON depuis une liste ordonnée.
-   - `input` : liste de valeurs consommée par le constructeur.
+   - `values` : liste de valeurs consommée par le constructeur.
 
    Retourne `Array` sans modifier les éléments. *)
-fun array_value (input : value list) : value = Array (input)
+fun array (values : value list) : value = Array (values)
+
+(* Encode chaque élément d'une liste avec une fonction nommée.
+   - `f` : encodeur d'un élément, qui consomme sa valeur.
+   - `values` : éléments consommés dans l'ordre.
+
+   Retourne `Array` des valeurs encodées, dans l'ordre source. *)
+fun list (f : !'a -> value, values : 'a list) : value = Array (list_from (f, values, Nil))
+
+(* Parcours de `list` avec un accumulateur inversé.
+   - `f` : encodeur d'un élément, consommé par le parcours.
+   - `values` : éléments restants, consommés.
+   - `acc` : valeurs encodées en ordre inverse. *)
+fun list_from (f : !'a -> value, values : 'a list, acc : value list) : value list =
+    case values of
+        Nil => list.reverse (acc)
+      | Cons (value, rest) =>
+            list_from (f, rest, Cons ((f (value), acc)))
 
 (* Construit un objet JSON depuis une liste ordonnée de champs.
-   - `input` : couples clé-valeur consommés par le constructeur.
+   - `fields` : couples clé-valeur consommés par le constructeur.
 
-   Retourne `Object` ; les clés répétées sont conservées. *)
-fun object_value (input : (string, value) list) : value = Object (input)
+   Retourne `Object` ; les clés répétées sont conservées et l'ordre de la
+   liste est celui du document rendu. *)
+fun object (fields : (string, value) list) : value = Object (fields)
+
+(* Encode un `option` : `None` devient `null`, `Some` passe à `f`.
+   - `f` : encodeur de la valeur présente, qui la consomme.
+   - `value` : option consommée.
+
+   Retourne `Null` pour `None`, sinon la valeur encodée par `f`. *)
+fun nullable (f : !'a -> value, value : 'a option) : value =
+    case value of
+        None => Null
+      | Some (inner) => f (inner)
 
 (* Assemble une clé et sa valeur en entrée d'objet.
    - `name` : nom de clé consommé.
@@ -214,15 +258,41 @@ fun parse_escape (text : borrow string, index : int, size : int) : (string, int)
                 Error ("unknown escape at " ^ int_to_string (index))
         end
 
-(* Accumule le contenu décodé jusqu'au guillemet fermant d'une chaîne.
+(* Cherche la fin d'une plage de contenu de chaîne sans échappement.
+   - `text` : source empruntée, non modifiée.
+   - `index` : début de la plage.
+   - `size` : limite exclusive de lecture.
+
+   Retourne l'index du prochain guillemet ou de la prochaine barre inverse. *)
+fun internal_string_run_end (text : borrow string, index : int, size : int) : int =
+    if index >= size then
+        index
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 34 then
+                index
+            else if code = 92 then
+                index
+            else
+                internal_string_run_end (text, index + 1, size)
+        end
+
+(* Accumule les morceaux décodés jusqu'au guillemet fermant d'une chaîne.
    - `text` : source empruntée, non modifiée.
    - `index` : position du prochain caractère.
    - `size` : limite exclusive de lecture.
-   - `acc` : texte décodé accumulé, consommé puis prolongé.
+   - `acc` : morceaux décodés en ordre inverse.
 
-   Retourne le contenu et l'index après le guillemet, ou une erreur si la chaîne est
-   incomplète ou contient un échappement invalide. *)
-fun parse_string_chars (text : borrow string, index : int, size : int, acc : string) : (string, int) result =
+   Retourne les morceaux et l'index après le guillemet, ou une erreur. Les
+   plages sans échappement sont copiées d'un seul coup, donc le coût est
+   linéaire même pour une grande chaîne. *)
+fun parse_string_chunks (
+    text : borrow string,
+    index : int,
+    size : int,
+    acc : string list
+) : (string list, int) result =
     if index >= size then
         Error ("unterminated string at " ^ int_to_string (index))
     else
@@ -230,7 +300,7 @@ fun parse_string_chars (text : borrow string, index : int, size : int, acc : str
             val code = string.char_at_unchecked (text, index)
         in
             if code = 34 then
-                Ok ((acc, index + 1))
+                Ok ((list.reverse (acc), index + 1))
             else if code = 92 then
                 let
                     val escaped = parse_escape (text, index + 1, size)
@@ -238,10 +308,18 @@ fun parse_string_chars (text : borrow string, index : int, size : int, acc : str
                     case escaped of
                         Error message => Error (message)
                       | Ok (decoded, next) =>
-                          parse_string_chars (text, next, size, acc ^ decoded)
+                          parse_string_chunks (text, next, size, Cons ((decoded, acc)))
                 end
             else
-                parse_string_chars (text, index + 1, size, acc ^ string_of_char (code))
+                let val stop = internal_string_run_end (text, index, size)
+                in
+                    parse_string_chunks (
+                        text,
+                        stop,
+                        size,
+                        Cons ((string.slice (text, index, stop), acc))
+                    )
+                end
         end
 
 (* Analyse une chaîne JSON dont le guillemet ouvrant est à `index`.
@@ -256,7 +334,9 @@ fun parse_string (text : borrow string, index : int, size : int) : (string, int)
     else if string.char_at_unchecked (text, index) <> 34 then
         Error ("expected string at " ^ int_to_string (index))
     else
-        parse_string_chars (text, index + 1, size, "")
+        case parse_string_chunks (text, index + 1, size, Nil) of
+            Error (message) => Error (message)
+          | Ok (chunks, next) => Ok ((internal_concat (chunks), next))
 
 (* Teste si un code ASCII peut faire partie d'un littéral numérique.
    - `code` : code du caractère examiné.
@@ -545,8 +625,8 @@ fun parse_value (text : borrow string, index : int, size : int) : (value, int) r
 (* Analyse un document JSON entier et rejette les caractères finaux superflus.
    - `text` : document emprunté, non modifié.
 
-   Retourne l'arbre JSON analysé, ou une erreur descriptive. *)
-fun unmarshal (text : borrow string) : value result =
+   Retourne l'arbre JSON analysé, ou une erreur de syntaxe descriptive. *)
+fun parse (text : &string) : value result =
     let
         val size = string.length (text)
         val parsed = parse_value (text, 0, size)
@@ -570,45 +650,93 @@ fun unmarshal (text : borrow string) : value result =
    Retourne le code ASCII correspondant ; l'appelant fournit une valeur valide. *)
 fun hex_digit_code (value : int) : int = if value < 10 then 48 + value else 87 + value
 
-(* Échappe récursivement les caractères d'une chaîne JSON.
-   - `text` : chaîne source empruntée, non modifiée.
-   - `index` : position du prochain caractère à traiter.
-   - `size` : limite exclusive de lecture.
-   - `acc` : texte échappé accumulé, consommé puis prolongé.
+(* Indique si un octet doit être échappé dans une chaîne JSON.
+   - `code` : code de l'octet examiné.
 
-   Retourne le texte complet avec guillemets, barres inverses et contrôles
-   représentés par leurs échappements JSON. *)
-fun escape_from (text : borrow string, index : int, size : int, acc : string) : string =
+   Retourne vrai pour le guillemet, la barre inverse et les contrôles. *)
+fun internal_escape_needs (code : int) : bool =
+    if code = 34 then
+        true
+    else if code = 92 then
+        true
+    else
+        code < 32
+
+(* Rend l'échappement JSON d'un octet qui en a besoin.
+   - `code` : code de l'octet.
+
+   Retourne la séquence `\"`, `\\`, `\n`, … ou `\u00XX`. *)
+fun internal_escape_code (code : int) : string =
+    if code = 34 then
+        "\\\""
+    else if code = 92 then
+        "\\\\"
+    else if code = 10 then
+        "\\n"
+    else if code = 13 then
+        "\\r"
+    else if code = 9 then
+        "\\t"
+    else if code = 8 then
+        "\\b"
+    else if code = 12 then
+        "\\f"
+    else if code < 32 then
+        "\\u00" ^ string_of_char (hex_digit_code (code / 16)) ^
+            string_of_char (hex_digit_code (code % 16))
+    else
+        string_of_char (code)
+
+(* Cherche la fin d'une plage d'octets sans échappement.
+   - `text` : chaîne source empruntée, non modifiée.
+   - `index` : début de la plage.
+   - `size` : limite exclusive de lecture.
+
+   Retourne l'index du premier octet à échapper, ou `size`. *)
+fun internal_escape_run_end (text : borrow string, index : int, size : int) : int =
+    if index >= size then
+        index
+    else if internal_escape_needs (string.char_at_unchecked (text, index)) then
+        index
+    else
+        internal_escape_run_end (text, index + 1, size)
+
+(* Accumule les morceaux échappés d'une chaîne, en ordre inverse.
+   - `text` : chaîne source empruntée, non modifiée.
+   - `index` : position du prochain octet.
+   - `size` : limite exclusive de lecture.
+   - `acc` : morceaux déjà traités, en ordre inverse.
+
+   Retourne les morceaux du contenu échappé ; les plages sans échappement
+   sont copiées d'un seul coup, donc le coût est linéaire. *)
+fun internal_escape_chunks (
+    text : borrow string,
+    index : int,
+    size : int,
+    acc : string list
+) : string list =
     if index >= size then
         acc
     else
-        let
-            val code = string.char_at_unchecked (text, index)
+        let val code = string.char_at_unchecked (text, index)
         in
-            if code = 34 then
-                escape_from (text, index + 1, size, acc ^ "\\\"")
-            else if code = 92 then
-                escape_from (text, index + 1, size, acc ^ "\\\\")
-            else if code = 10 then
-                escape_from (text, index + 1, size, acc ^ "\\n")
-            else if code = 13 then
-                escape_from (text, index + 1, size, acc ^ "\\r")
-            else if code = 9 then
-                escape_from (text, index + 1, size, acc ^ "\\t")
-            else if code = 8 then
-                escape_from (text, index + 1, size, acc ^ "\\b")
-            else if code = 12 then
-                escape_from (text, index + 1, size, acc ^ "\\f")
-            else if code < 32 then
-                escape_from (
+            if internal_escape_needs (code) then
+                internal_escape_chunks (
                     text,
                     index + 1,
                     size,
-                    acc ^ "\\u00" ^ string_of_char (hex_digit_code (code / 16)) ^
-                        string_of_char (hex_digit_code (code % 16))
+                    Cons ((internal_escape_code (code), acc))
                 )
             else
-                escape_from (text, index + 1, size, acc ^ string_of_char (code))
+                let val stop = internal_escape_run_end (text, index, size)
+                in
+                    internal_escape_chunks (
+                        text,
+                        stop,
+                        size,
+                        Cons ((string.slice (text, index, stop), acc))
+                    )
+                end
         end
 
 (* Échappe le contenu d'une chaîne JSON sans ajouter de guillemets.
@@ -616,102 +744,604 @@ fun escape_from (text : borrow string, index : int, size : int, acc : string) : 
 
    Retourne une nouvelle chaîne prête à être incluse dans un littéral JSON. *)
 fun escape (text : borrow string) : string =
-    escape_from (text, 0, string.length (text), "")
+    internal_concat (
+        list.reverse (
+            internal_escape_chunks (text, 0, string.length (text), Nil)
+        )
+    )
 
-(* Rend les éléments d'une liste séparés par des virgules, sans crochets.
-   - `values` : valeurs en ordre de sortie, consommées par la récursion.
+(* Passe de fusion de deux morceaux adjacents.
+   - `chunks` : morceaux restants, consommés.
+   - `acc` : morceaux fusionnés en ordre inverse.
 
-   Retourne le texte JSON des éléments. *)
-fun marshal_values (values : value list) : string =
+   Retourne la liste fusionnée dans l'ordre, de moitié de longueur. *)
+fun internal_merge_chunks (chunks : string list, acc : string list) : string list =
+    case chunks of
+        Nil => list.reverse (acc)
+      | Cons (only, Nil) => list.reverse (Cons ((only, acc)))
+      | Cons (left, Cons (right, rest)) =>
+            internal_merge_chunks (rest, Cons ((left ^ right, acc)))
+
+(* Concatène des morceaux par fusions équilibrées.
+   - `chunks` : morceaux consommés dans l'ordre.
+
+   Retourne leur concaténation. Chaque passe copie tous les octets une fois,
+   donc le coût total est `O(n log n)` au lieu du `O(n²)` d'un `acc ^ next`
+   répété. *)
+fun internal_concat (chunks : string list) : string =
+    case chunks of
+        Nil => ""
+      | Cons (only, Nil) => only
+      | Cons (first, Cons (second, rest)) =>
+            internal_concat (
+                internal_merge_chunks (Cons ((first, Cons ((second, rest)))), Nil)
+            )
+
+(* Rend les morceaux d'une valeur, dans l'ordre source.
+   - `value` : arbre JSON consommé par inspection.
+
+   Retourne les morceaux à concaténer ; un scalaire en produit un seul. *)
+fun internal_chunks_value (value : value) : string list =
+    case value of
+        Null => Cons (("null", Nil))
+      | Bool inner =>
+            if inner then Cons (("true", Nil)) else Cons (("false", Nil))
+      | Number literal => Cons ((literal, Nil))
+      | String text => Cons (("\"" ^ escape (borrow text) ^ "\"", Nil))
+      | Array values => internal_chunks_array (values, Cons (("]", Nil)))
+      | Object fields => internal_chunks_object (fields, Cons (("}", Nil)))
+
+(* Rend les morceaux d'un tableau, du dernier élément vers le premier.
+   - `values` : éléments en ordre inverse, consommés.
+   - `acc` : suffixe déjà rendu, dont le `]` final.
+   - `needComma` : vrai si un séparateur précède l'élément courant.
+
+   Retourne les morceaux du tableau complet, dans l'ordre source. *)
+fun internal_chunks_array_from (
+    values : value list,
+    acc : string list,
+    needComma : bool
+) : string list =
     case values of
-        Nil => ""
-      | Cons (value, Nil) => marshal (value)
-      | Cons (value, rest) => marshal (value) ^ "," ^ marshal_values (rest)
+        Nil => Cons (("[", acc))
+      | Cons (value, rest) =>
+            let val separator = if needComma then Cons ((",", acc)) else acc
+                val next = list.append (internal_chunks_value (value), separator)
+            in internal_chunks_array_from (rest, next, true)
+            end
 
-(* Rend les champs d'un objet séparés par des virgules, sans accolades.
-   - `fields` : couples clé-valeur ordonnés, consommés par la récursion.
+(* Rend les morceaux d'un tableau JSON.
+   - `values` : éléments en ordre source, consommés.
+   - `acc` : suffixe déjà rendu, dont le `]` final.
 
-   Retourne les clés échappées entre guillemets et leurs valeurs sérialisées. *)
-fun marshal_fields (fields : (string, value) list) : string =
+   Retourne `[...]` en morceaux. *)
+fun internal_chunks_array (values : value list, acc : string list) : string list =
+    internal_chunks_array_from (list.reverse (values), acc, false)
+
+(* Rend les morceaux d'un champ d'objet, clé et valeur comprises.
+   - `name` : clé consommée.
+   - `value` : valeur consommée.
+
+   Retourne `"clé":valeur` en morceaux. *)
+fun internal_chunks_field (name : string, value : value) : string list =
+    list.append (
+        Cons (("\"" ^ escape (borrow name) ^ "\":", Nil)),
+        internal_chunks_value (value)
+    )
+
+(* Rend les morceaux d'un objet, du dernier champ vers le premier.
+   - `fields` : champs en ordre inverse, consommés.
+   - `acc` : suffixe déjà rendu, dont le `}` final.
+   - `needComma` : vrai si un séparateur précède le champ courant.
+
+   Retourne les morceaux de l'objet complet, dans l'ordre source. *)
+fun internal_chunks_object_from (
+    fields : (string, value) list,
+    acc : string list,
+    needComma : bool
+) : string list =
     case fields of
-        Nil => ""
-      | Cons ((name, value), Nil) =>
-          "\"" ^ escape (borrow name) ^ "\":" ^ marshal (value)
+        Nil => Cons (("{", acc))
       | Cons ((name, value), rest) =>
-          "\"" ^ escape (borrow name) ^ "\":" ^ marshal (value) ^ "," ^
-              marshal_fields (rest)
+            let val separator = if needComma then Cons ((",", acc)) else acc
+                val next = list.append (internal_chunks_field (name, value), separator)
+            in internal_chunks_object_from (rest, next, true)
+            end
+
+(* Rend les morceaux d'un objet JSON.
+   - `fields` : champs en ordre source, consommés.
+   - `acc` : suffixe déjà rendu, dont le `}` final.
+
+   Retourne `{...}` en morceaux. *)
+fun internal_chunks_object (
+    fields : (string, value) list,
+    acc : string list
+) : string list =
+    internal_chunks_object_from (list.reverse (fields), acc, false)
 
 (* Sérialise une valeur en texte JSON, en conservant l'ordre des listes.
    - `value` : arbre JSON consommé par inspection, sans mutation en place.
 
-   Retourne le document JSON correspondant. *)
-fun marshal (value : value) : string =
+   Retourne le document JSON correspondant. Le rendu passe par des morceaux
+   puis une concaténation équilibrée, donc un grand document reste linéaire
+   en temps comme en mémoire. *)
+fun to_string (value : value) : string =
+    internal_concat (internal_chunks_value (value))
+
+(* Donne le nom JSON d'un constructeur, pour les messages d'erreur.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne `null`, `bool`, `number`, `string`, `array` ou `object`. *)
+fun internal_value_kind (value : value) : string =
     case value of
         Null => "null"
-      | Bool inner => if inner then "true" else "false"
-      | Number literal => literal
-      | String text => "\"" ^ escape (borrow text) ^ "\""
-      | Array values => "[" ^ marshal_values (values) ^ "]"
-      | Object fields => "{" ^ marshal_fields (fields) ^ "}"
+      | Bool _ => "bool"
+      | Number _ => "number"
+      | String _ => "string"
+      | Array _ => "array"
+      | Object _ => "object"
+
+(* Formate une erreur de type sans chemin : `expected X, found Y`.
+   - `expected` : type attendu, emprunté puis copié.
+   - `value` : valeur réellement reçue, consommée.
+
+   Retourne le message employé par les `as_*` et préfixé par les `take_*`. *)
+fun internal_type_error (expected : &string, value : value) : string =
+    "expected " ^ string.copy (expected) ^ ", found " ^ internal_value_kind (value)
+
+(* Reconnaît un chiffre décimal ASCII.
+   - `code` : code du caractère examiné.
+
+   Retourne vrai pour `0` à `9`, sinon faux. *)
+fun internal_is_digit (code : int) : bool =
+    if code >= 48 then code <= 57 else false
+
+(* Avance sur un groupe de chiffres décimaux.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position courante.
+   - `size` : limite exclusive.
+
+   Retourne l'index du premier caractère qui n'est pas un chiffre. *)
+fun internal_digits_end (text : &string, index : int, size : int) : int =
+    if index >= size then
+        index
+    else if internal_is_digit (string.char_at_unchecked (text, index)) then
+        internal_digits_end (text, index + 1, size)
+    else
+        index
+
+(* Analyse la fraction et l'exposant d'un nombre JSON.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après la partie entière.
+   - `size` : limite exclusive.
+
+   Retourne l'index de fin, ou `None` si la fraction ou l'exposant est
+   vide/incomplet. *)
+fun internal_number_fraction (text : &string, index : int, size : int) : int option =
+    if index < size then
+        if string.char_at_unchecked (text, index) = 46 then
+            let val digits = internal_digits_end (text, index + 1, size)
+            in
+                if digits = index + 1 then
+                    None
+                else
+                    internal_number_exponent (text, digits, size)
+            end
+        else
+            internal_number_exponent (text, index, size)
+    else
+        Some (index)
+
+(* Analyse l'exposant optionnel d'un nombre JSON.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après la mantisse.
+   - `size` : limite exclusive.
+
+   Retourne l'index de fin, ou `None` si `e`/`E` n'est pas suivi de
+   chiffres. *)
+fun internal_number_exponent (text : &string, index : int, size : int) : int option =
+    if index < size then
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 101 then
+                internal_number_exponent_digits (text, index + 1, size)
+            else if code = 69 then
+                internal_number_exponent_digits (text, index + 1, size)
+            else
+                Some (index)
+        end
+    else
+        Some (index)
+
+(* Lit les chiffres d'un exposant, après un signe optionnel.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après `e`/`E`.
+   - `size` : limite exclusive.
+
+   Retourne l'index de fin, ou `None` si aucun chiffre ne suit. *)
+fun internal_number_exponent_digits (text : &string, index : int, size : int) : int option =
+    if index < size then
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 43 then
+                internal_number_exponent_value (text, index + 1, size)
+            else if code = 45 then
+                internal_number_exponent_value (text, index + 1, size)
+            else
+                internal_number_exponent_value (text, index, size)
+        end
+    else
+        None
+
+(* Vérifie qu'un exposant contient au moins un chiffre.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position du premier chiffre possible.
+   - `size` : limite exclusive.
+
+   Retourne l'index de fin, ou `None` si le groupe est vide. *)
+fun internal_number_exponent_value (text : &string, index : int, size : int) : int option =
+    let val digits = internal_digits_end (text, index, size)
+    in
+        if digits = index then None else Some (digits)
+    end
+
+(* Analyse la partie entière et la suite d'un nombre JSON.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après le signe optionnel.
+   - `size` : limite exclusive.
+
+   Refuse le zéro de tête (`01`) comme la grammaire JSON. Retourne l'index
+   de fin, ou `None`. *)
+fun internal_number_integer (text : &string, index : int, size : int) : int option =
+    if index >= size then
+        None
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 48 then
+                internal_number_fraction (text, index + 1, size)
+            else if internal_is_digit (code) then
+                let val digits = internal_digits_end (text, index, size)
+                in internal_number_fraction (text, digits, size) end
+            else
+                None
+        end
+
+(* Vérifie qu'un littéral est un nombre JSON complet.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position de départ.
+   - `size` : limite exclusive.
+
+   Retourne `Some` index de fin si le littéral est un nombre JSON valide,
+   `None` sinon. *)
+fun internal_number_end (text : &string, index : int, size : int) : int option =
+    if index >= size then
+        None
+    else if string.char_at_unchecked (text, index) = 45 then
+        internal_number_integer (text, index + 1, size)
+    else
+        internal_number_integer (text, index, size)
+
+(* Convertit un chiffre ASCII en flottant, sans conversion du noyau.
+   - `code` : code d'un chiffre décimal.
+
+   Retourne de `0.0` à `9.0` ; l'appelant fournit un chiffre valide. *)
+fun internal_digit_float (code : int) : float =
+    if code = 48 then
+        0.0
+    else if code = 49 then
+        1.0
+    else if code = 50 then
+        2.0
+    else if code = 51 then
+        3.0
+    else if code = 52 then
+        4.0
+    else if code = 53 then
+        5.0
+    else if code = 54 then
+        6.0
+    else if code = 55 then
+        7.0
+    else if code = 56 then
+        8.0
+    else
+        9.0
+
+(* Accumule la partie entière d'un nombre JSON validé.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position courante.
+   - `size` : limite exclusive.
+   - `acc` : valeur accumulée.
+
+   Retourne la valeur et l'index du premier caractère non chiffre. *)
+fun internal_float_integer (text : &string, index : int, size : int, acc : float) : float * int =
+    if index >= size then
+        (acc, index)
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if internal_is_digit (code) then
+                internal_float_integer (text, index + 1, size, acc * 10.0 + internal_digit_float (code))
+            else
+                (acc, index)
+        end
+
+(* Accumule la partie fractionnaire d'un nombre JSON validé.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après le point.
+   - `size` : limite exclusive.
+   - `value` : valeur déjà accumulée.
+   - `scale` : poids du prochain chiffre (`0.1`, `0.01`, …).
+
+   Retourne la valeur et l'index de fin de la fraction. *)
+fun internal_float_fraction (
+    text : &string,
+    index : int,
+    size : int,
+    value : float,
+    scale : float
+) : float * int =
+    if index >= size then
+        (value, index)
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if internal_is_digit (code) then
+                internal_float_fraction (
+                    text,
+                    index + 1,
+                    size,
+                    value + internal_digit_float (code) * scale,
+                    scale * 0.1
+                )
+            else
+                (value, index)
+        end
+
+(* Lit la valeur absolue d'un exposant, saturée pour éviter un long calcul.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position du prochain chiffre.
+   - `size` : limite exclusive.
+   - `acc` : magnitude accumulée.
+
+   Retourne la magnitude, plafonnée à `100000` ; au-delà, le résultat sera
+   de toute façon infini ou nul. *)
+fun internal_exponent_magnitude (text : &string, index : int, size : int, acc : int) : int =
+    if index >= size then
+        acc
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if internal_is_digit (code) then
+                let val next = if acc > 100000 then acc else acc * 10 + code - 48
+                in internal_exponent_magnitude (text, index + 1, size, next) end
+            else
+                acc
+        end
+
+(* Lit l'exposant d'un nombre JSON validé.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après la mantisse.
+   - `size` : limite exclusive.
+
+   Retourne l'exposant signé, ou `0` s'il est absent. *)
+fun internal_float_exponent (text : &string, index : int, size : int) : int =
+    if index < size then
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 101 then
+                internal_float_exponent_signed (text, index + 1, size)
+            else if code = 69 then
+                internal_float_exponent_signed (text, index + 1, size)
+            else
+                0
+        end
+    else
+        0
+
+(* Lit un exposant après `e`/`E`, avec signe optionnel.
+   - `text` : littéral emprunté, non modifié.
+   - `index` : position après `e`/`E`.
+   - `size` : limite exclusive.
+
+   Retourne l'exposant signé. *)
+fun internal_float_exponent_signed (text : &string, index : int, size : int) : int =
+    if index < size then
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 45 then
+                0 - internal_exponent_magnitude (text, index + 1, size, 0)
+            else if code = 43 then
+                internal_exponent_magnitude (text, index + 1, size, 0)
+            else
+                internal_exponent_magnitude (text, index, size, 0)
+        end
+    else
+        0
+
+(* Multiplie un flottant par une puissance de dix positive.
+   - `value` : valeur de départ.
+   - `count` : nombre de multiplications restantes, au plus `400`.
+
+   Retourne la valeur multipliée, éventuellement infinie. *)
+fun internal_float_mul10 (value : float, count : int) : float =
+    if count <= 0 then value else internal_float_mul10 (value * 10.0, count - 1)
+
+(* Divise un flottant par une puissance de dix positive.
+   - `value` : valeur de départ.
+   - `count` : nombre de divisions restantes, au plus `400`.
+
+   Retourne la valeur divisée, éventuellement nulle par sous-flux. *)
+fun internal_float_div10 (value : float, count : int) : float =
+    if count <= 0 then value else internal_float_div10 (value / 10.0, count - 1)
+
+(* Applique un exposant décimal à une mantisse.
+   - `value` : mantisse déjà signée.
+   - `exponent` : exposant signé.
+
+   L'exposant est borné à `400` : au-delà, le résultat est infini ou nul,
+   ce que `internal_float_is_finite` et l'appelant traitent. *)
+fun internal_float_scale (value : float, exponent : int) : float =
+    if exponent > 400 then
+        internal_float_mul10 (value, 400)
+    else if exponent < -400 then
+        internal_float_div10 (value, 400)
+    else if exponent >= 0 then
+        internal_float_mul10 (value, exponent)
+    else
+        internal_float_div10 (value, 0 - exponent)
+
+(* Analyse un littéral JSON validé en flottant.
+   - `literal` : texte emprunté, non modifié.
+
+   Retourne `Some` flottant, ou `None` si la grammaire est invalide. Le
+   calcul est fait en Yack (pas de `strtod` dans le noyau) ; un texte qui
+   n'est pas entièrement un nombre JSON est rejeté. *)
+fun internal_parse_float (literal : &string) : float option =
+    if internal_is_number_literal (literal) then
+        let
+            val size = string.length (literal)
+            val negative = string.char_at_unchecked (literal, 0) = 45
+            val start = if negative then 1 else 0
+            val (integer, afterInteger) =
+                internal_float_integer (literal, start, size, 0.0)
+            val (mantissa, afterMantissa) =
+                if afterInteger < size then
+                    if string.char_at_unchecked (literal, afterInteger) = 46 then
+                        internal_float_fraction (
+                            literal,
+                            afterInteger + 1,
+                            size,
+                            integer,
+                            0.1
+                        )
+                    else
+                        (integer, afterInteger)
+                else
+                    (integer, afterInteger)
+            val exponent = internal_float_exponent (literal, afterMantissa, size)
+            val signed = if negative then 0.0 - mantissa else mantissa
+        in
+            Some (internal_float_scale (signed, exponent))
+        end
+    else
+        None
+
+(* Teste si un flottant est fini, sans `is_nan` du noyau.
+   - `value` : flottant examiné.
+
+   Retourne faux pour `inf` et `nan`. `nan` est le seul cas où
+   `value <= value` est faux ; `inf` dépasse le plus grand flottant fini. *)
+fun internal_float_is_finite (value : float) : bool =
+    if value <= value then
+        if value > 1.7976931348623157e308 then
+            false
+        else if value < 0.0 - 1.7976931348623157e308 then
+            false
+        else
+            true
+    else
+        false
 
 (* Vérifie que la valeur JSON est nulle.
    - `value` : valeur inspectée et consommée par correspondance de motif.
 
-   Retourne `Ok ()` pour `Null`, sinon une erreur de type. *)
+   Retourne `Ok ()` pour `Null`, sinon `expected null, found …`. *)
 fun as_null (value : value) : unit result =
     case value of
         Null => Ok (())
-      | _ => Error ("expected null")
+      | other => Error (internal_type_error (&"null", other))
 
 (* Extrait un booléen d'une valeur JSON.
    - `value` : valeur inspectée et consommée.
 
-   Retourne le booléen si le constructeur est `Bool`, sinon une erreur. *)
+   Retourne le booléen si le constructeur est `Bool`, sinon
+   `expected bool, found …`. *)
 fun as_bool (value : value) : bool result =
     case value of
         Bool inner => Ok (inner)
-      | _ => Error ("expected bool")
+      | other => Error (internal_type_error (&"bool", other))
 
 (* Extrait une chaîne d'une valeur JSON.
    - `value` : valeur inspectée et consommée.
 
-   Retourne la chaîne si le constructeur est `String`, sinon une erreur. *)
+   Retourne la chaîne si le constructeur est `String`, sinon
+   `expected string, found …`. *)
 fun as_string (value : value) : string result =
     case value of
         String inner => Ok (inner)
-      | _ => Error ("expected string")
+      | other => Error (internal_type_error (&"string", other))
 
 (* Convertit un nombre JSON entier en valeur Yack `int`.
    - `value` : valeur inspectée et consommée.
 
-   Retourne l'entier si son texte est accepté par `string_to_int`, ou une erreur de
-   type/conversion. *)
+   Retourne l'entier si son texte est accepté par `string_to_int`, sinon
+   `expected int, found number \`lexème\`` ; une valeur d'un autre
+   constructeur donne `expected int, found <type>`. Une valeur hors de la
+   plage 32 bits donne donc `Error`, sans débordement silencieux. *)
 fun as_int (value : value) : int result =
     case value of
         Number literal =>
             (case string_to_int (borrow literal) of
                  None =>
-                     Error ("expected int, got `" ^ string.copy (borrow literal) ^ "`")
+                     Error ("expected int, found number `" ^ literal ^ "`")
                | Some inner => Ok (inner))
-      | _ => Error ("expected number")
+      | other => Error (internal_type_error (&"int", other))
+
+(* Vérifie qu'un littéral suit exactement la grammaire JSON des nombres.
+   - `literal` : texte emprunté, non modifié.
+
+   Retourne vrai si tout le texte est un nombre JSON : signe optionnel,
+   partie entière sans zéro de tête, fraction et exposant optionnels. *)
+fun internal_is_number_literal (literal : &string) : bool =
+    let
+        val size = string.length (literal)
+        val stop = internal_number_end (literal, 0, size)
+    in
+        case stop of
+            Some (stop) => stop = size
+          | None => false
+    end
+
+(* Extrait un flottant d'une valeur JSON.
+   - `value` : valeur inspectée et consommée.
+
+   Accepte un entier JSON (`1`) comme un littéral flottant (`1.5`,
+   `-0.25e3`). Un texte hors grammaire, `inf` ou `nan` donne `Error` ; un
+   débordement (`1e999`) donne aussi `Error` au lieu d'un infini. *)
+fun as_float (value : value) : float result =
+    case value of
+        Number literal =>
+            (case internal_parse_float (&literal) of
+                 None =>
+                     Error ("expected float, found number `" ^ literal ^ "`")
+               | Some (parsed) =>
+                     if internal_float_is_finite (parsed) then
+                         Ok (parsed)
+                     else
+                         Error ("expected float, found number `" ^ literal ^ "`"))
+      | other => Error (internal_type_error (&"float", other))
 
 (* Extrait la liste des éléments d'un tableau JSON.
    - `value` : valeur inspectée et consommée.
 
-   Retourne la liste si le constructeur est `Array`, sinon une erreur. *)
+   Retourne la liste si le constructeur est `Array`, sinon
+   `expected array, found …`. *)
 fun as_array (value : value) : value list result =
     case value of
         Array inner => Ok (inner)
-      | _ => Error ("expected array")
+      | other => Error (internal_type_error (&"array", other))
 
 (* Extrait les couples clé-valeur d'un objet JSON.
    - `value` : valeur inspectée et consommée.
 
-   Retourne la liste si le constructeur est `Object`, sinon une erreur. *)
+   Retourne la liste si le constructeur est `Object`, sinon
+   `expected object, found …`. *)
 fun as_object (value : value) : (string, value) list result =
     case value of
         Object inner => Ok (inner)
-      | _ => Error ("expected object")
+      | other => Error (internal_type_error (&"object", other))
 
 (* Consomme une valeur JSON sans la rendre.
    - `value` : valeur abandonnée. *)
@@ -723,6 +1353,278 @@ fun discard_fields (fields : (string, value) list) : unit =
     case fields of
         Nil => ()
       | Cons (_, rest) => discard_fields (rest)
+
+(* Formate l'erreur d'un champ obligatoire absent.
+   - `name` : clé cherchée, empruntée puis copiée dans le message.
+
+   Retourne ``missing field `name` ``. *)
+fun internal_missing_field (name : &string) : string =
+    "missing field `" ^ string.copy (name) ^ "`"
+
+(* Préfixe une erreur par le chemin d'un champ d'objet.
+   - `key` : clé du champ, consommée.
+   - `message` : erreur interne, consommée.
+
+   Un message déjà indexé (`[0]: …`) est collé tel quel, une erreur brute
+   (`expected …` ou `missing field …`) reçoit `key: `, et un chemin
+   imbriqué (`zip: …`) reçoit `key.`. *)
+fun internal_prefix_field (key : string, message : string) : string =
+    if string.starts_with (&message, &"expected ") then
+        key ^ ": " ^ message
+    else if string.starts_with (&message, &"missing field") then
+        key ^ ": " ^ message
+    else if string.starts_with (&message, &"[") then
+        key ^ message
+    else
+        key ^ "." ^ message
+
+(* Préfixe une erreur par un index de liste.
+   - `prefix` : chemin de la liste, emprunté (`""` à la racine).
+   - `index` : indice de l'élément fautif.
+   - `message` : erreur interne, consommée.
+
+   Produit `prefix[i]: expected …` pour une erreur brute,
+   `prefix[i].name: …` pour un chemin de champ, et `prefix[i][j]: …` pour
+   une liste imbriquée. *)
+fun internal_prefix_index (prefix : &string, index : int, message : string) : string =
+    let val label = string.copy (prefix) ^ "[" ^ int_to_string (index) ^ "]"
+    in
+        if string.starts_with (&message, &"expected ") then
+            label ^ ": " ^ message
+        else if string.starts_with (&message, &"missing field") then
+            label ^ ": " ^ message
+        else if string.starts_with (&message, &"[") then
+            label ^ message
+        else
+            label ^ "." ^ message
+    end
+
+(* Parcours de `take` avec un accumulateur inversé.
+   - `name` : clé cherchée, empruntée.
+   - `fields` : champs restants, consommés.
+   - `acc` : champs déjà sautés, en ordre inverse.
+
+   Retourne la valeur du premier champ correspondant et le reste de
+   l'objet, dans l'ordre source. *)
+fun take_from (
+    name : &string,
+    fields : (string, value) list,
+    acc : (string, value) list
+) : (value option * (string, value) list) =
+    case fields of
+        Nil => (None, list.reverse (acc))
+      | Cons ((key, value), rest) =>
+            if string.equals (name, &key) then
+                let val ignored = list.discard_value (key)
+                in (Some (value), list.reverse_into (acc, rest))
+                end
+            else
+                take_from (name, rest, Cons (((key, value), acc)))
+
+(* Retire le premier champ portant une clé et rend le reste de l'objet.
+   - `name` : clé cherchée, empruntée sans modification.
+   - `fields` : couples de l'objet, consommés par le parcours.
+
+   Retourne `Some valeur` si la clé est présente (le premier doublon
+   gagne), sinon `None`, avec le reste des champs dans l'ordre source. Les
+   entrées sautées et les doublons restent dans le reste, à libérer par
+   `discard_fields` quand ils ne servent plus. *)
+fun take (name : &string, fields : (string, value) list) : (value option * (string, value) list) =
+    take_from (name, fields, Nil)
+
+(* Retire un champ entier obligatoire.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne l'entier et le reste de l'objet. Un champ absent donne
+   ``missing field `name` `` ; un autre type donne
+   `name: expected int, found string`. Le reste est libéré en cas
+   d'erreur. *)
+fun take_int (name : &string, fields : (string, value) list) : (int * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) =>
+            let val ignored = discard_fields (rest)
+            in Error (internal_missing_field (name))
+            end
+      | (Some (value), rest) =>
+            case as_int (value) of
+                Ok (inner) => Ok ((inner, rest))
+              | Error (message) =>
+                    let val ignored = discard_fields (rest)
+                    in Error (internal_prefix_field (string.copy (name), message))
+                    end
+
+(* Retire un champ flottant obligatoire.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Accepte aussi un entier JSON. Retourne le flottant et le reste de
+   l'objet, ou une erreur préfixée par `name`. *)
+fun take_float (name : &string, fields : (string, value) list) : (float * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) =>
+            let val ignored = discard_fields (rest)
+            in Error (internal_missing_field (name))
+            end
+      | (Some (value), rest) =>
+            case as_float (value) of
+                Ok (inner) => Ok ((inner, rest))
+              | Error (message) =>
+                    let val ignored = discard_fields (rest)
+                    in Error (internal_prefix_field (string.copy (name), message))
+                    end
+
+(* Retire un champ booléen obligatoire.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne le booléen et le reste de l'objet, ou une erreur préfixée par
+   `name`. *)
+fun take_bool (name : &string, fields : (string, value) list) : (bool * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) =>
+            let val ignored = discard_fields (rest)
+            in Error (internal_missing_field (name))
+            end
+      | (Some (value), rest) =>
+            case as_bool (value) of
+                Ok (inner) => Ok ((inner, rest))
+              | Error (message) =>
+                    let val ignored = discard_fields (rest)
+                    in Error (internal_prefix_field (string.copy (name), message))
+                    end
+
+(* Retire un champ chaîne obligatoire.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne la chaîne et le reste de l'objet, ou une erreur préfixée par
+   `name`. *)
+fun take_string (name : &string, fields : (string, value) list) : (string * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) =>
+            let val ignored = discard_fields (rest)
+            in Error (internal_missing_field (name))
+            end
+      | (Some (value), rest) =>
+            case as_string (value) of
+                Ok (inner) => Ok ((inner, rest))
+              | Error (message) =>
+                    let val ignored = discard_fields (rest)
+                    in Error (internal_prefix_field (string.copy (name), message))
+                    end
+
+(* Retire un champ optionnel.
+   - `decoder` : décodeur de la valeur présente, qui la consomme.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne `None` et le reste si le champ est absent, `None` si sa valeur
+   est `null`, sinon `Some` du résultat de `decoder`. Une erreur du
+   décodeur est préfixée par `name`. *)
+fun take_option (
+    decoder : !value -> 'a result,
+    name : &string,
+    fields : (string, value) list
+) : ('a option * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) => Ok ((None, rest))
+      | (Some (value), rest) =>
+            case value of
+                Null => Ok ((None, rest))
+              | present =>
+                    case decoder (present) of
+                        Ok (inner) => Ok ((Some (inner), rest))
+                      | Error (message) =>
+                            let val ignored = discard_fields (rest)
+                            in Error (internal_prefix_field (string.copy (name), message))
+                            end
+
+(* Retire un champ et le décode avec une fonction, en préfixant les
+   erreurs du chemin.
+   - `decoder` : décodeur appliqué à la valeur, qui la consomme.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Sert aux objets imbriqués : une erreur `zip: …` devient
+   `address.zip: …`. Retourne la valeur décodée et le reste de l'objet. *)
+fun take_object (
+    decoder : !value -> 'a result,
+    name : &string,
+    fields : (string, value) list
+) : ('a * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) =>
+            let val ignored = discard_fields (rest)
+            in Error (internal_missing_field (name))
+            end
+      | (Some (value), rest) =>
+            case decoder (value) of
+                Ok (inner) => Ok ((inner, rest))
+              | Error (message) =>
+                    let val ignored = discard_fields (rest)
+                    in Error (internal_prefix_field (string.copy (name), message))
+                    end
+
+(* Décode les éléments d'un tableau avec un chemin de liste.
+   - `decoder` : décodeur d'un élément, qui le consomme.
+   - `prefix` : chemin de la liste, emprunté (`""` à la racine).
+   - `values` : éléments restants, consommés.
+   - `index` : indice de l'élément courant.
+   - `acc` : résultats en ordre inverse.
+
+   Retourne les valeurs décodées, ou la première erreur préfixée par
+   `<prefix>[i]`. Le suffixe et l'accumulateur sont libérés en cas
+   d'erreur. *)
+fun internal_decode_list (
+    decoder : !value -> 'a result,
+    prefix : &string,
+    values : value list,
+    index : int,
+    acc : 'a list
+) : 'a list result =
+    case values of
+        Nil => Ok (list.reverse (acc))
+      | Cons (value, rest) =>
+            case decoder (value) of
+                Ok (decoded) =>
+                    internal_decode_list (decoder, prefix, rest, index + 1, Cons ((decoded, acc)))
+              | Error (message) =>
+                    let val ignoredRest = list.discard_list (rest)
+                        val ignoredAcc = list.discard_list (acc)
+                    in Error (internal_prefix_index (prefix, index, message))
+                    end
+
+(* Retire un champ tableau et décode ses éléments.
+   - `decoder` : décodeur d'un élément, qui le consomme.
+   - `name` : clé attendue, empruntée.
+   - `fields` : couples de l'objet, consommés par la recherche.
+
+   Retourne la liste décodée et le reste de l'objet. Une erreur d'élément
+   donne `items[2]: …` ou `items[2].name: …`. *)
+fun take_list (
+    decoder : !value -> 'a result,
+    name : &string,
+    fields : (string, value) list
+) : ('a list * (string, value) list) result =
+    case take (name, fields) of
+        (None, rest) =>
+            let val ignored = discard_fields (rest)
+            in Error (internal_missing_field (name))
+            end
+      | (Some (value), rest) =>
+            case as_array (value) of
+                Error (message) =>
+                    let val ignored = discard_fields (rest)
+                    in Error (internal_prefix_field (string.copy (name), message))
+                    end
+              | Ok (values) =>
+                    case internal_decode_list (decoder, name, values, 0, Nil) of
+                        Ok (decoded) => Ok ((decoded, rest))
+                      | Error (message) =>
+                            let val ignored = discard_fields (rest)
+                            in Error (message)
+                            end
 
 (* Recherche la première entrée portant une clé donnée.
    - `name` : clé cherchée, empruntée sans modification.
@@ -920,47 +1822,38 @@ fun field_decode (name : borrow string, decoder : consume value -> 'a result, fi
         Error message => Error (message)
       | Ok value => decoder (value)
 
-(* Analyse un document JSON complet (alias de `unmarshal`).
+(* Décode les éléments d'un tableau JSON.
+   - `decoder` : décodeur d'un élément, qui le consomme.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne la liste décodée, ou `expected array, found …` et
+   `[i]: …` / `[i].name: …` pour un élément fautif. Le suffixe est libéré
+   dès la première erreur. *)
+fun decode_list (decoder : !value -> 'a result, value : value) : 'a list result =
+    case as_array (value) of
+        Error (message) => Error (message)
+      | Ok (values) => internal_decode_list (decoder, &"", values, 0, Nil)
+
+(* Décode un `option` JSON : `null` devient `None`.
+   - `decoder` : décodeur de la valeur présente, qui la consomme.
+   - `value` : valeur inspectée et consommée.
+
+   Retourne `Ok (None)` pour `Null`, sinon `Some` du résultat de
+   `decoder`, ou son erreur. *)
+fun decode_option (decoder : !value -> 'a result, value : value) : 'a option result =
+    case value of
+        Null => Ok (None)
+      | present =>
+            case decoder (present) of
+                Ok (inner) => Ok (Some (inner))
+              | Error (message) => Error (message)
+
+(* Analyse un document puis applique un décodeur.
    - `text` : document emprunté et non modifié.
+   - `decoder` : décodeur appliqué à la racine, qui la consomme.
 
-   Retourne l'arbre JSON analysé ou une erreur de syntaxe. *)
-fun parse (text : borrow string) : value result = unmarshal (text)
-
-(* Sérialise une valeur JSON en texte (alias de `marshal`).
-   - `value` : arbre consommé par inspection, sans mutation en place.
-
-   Retourne le document sérialisé. *)
-fun to_string (value : value) : string = marshal (value)
-
-(* Construit un objet JSON à partir de couples ordonnés.
-   - `fields` : liste des clés et valeurs consommée par le constructeur.
-
-   Retourne `Object` en conservant les éventuelles clés répétées. *)
-fun object (fields : (string, value) list) : value = Object (fields)
-
-(* Construit un tableau JSON à partir d'une liste ordonnée.
-   - `values` : éléments consommés par le constructeur.
-
-   Retourne `Array` sans mutation des valeurs. *)
-fun array (values : value list) : value = Array (values)
-
-(* Construit une valeur JSON de type chaîne.
-   - `input` : chaîne consommée sans échappement préalable.
-
-   Retourne `String`. *)
-fun string (input : string) : value = String (input)
-
-(* Convertit un entier en valeur JSON numérique décimale.
-   - `input` : entier scalaire consommé.
-
-   Retourne `Number` contenant sa représentation décimale. *)
-fun int (input : int) : value = Number (int_to_string (input))
-
-(* Construit une valeur JSON booléenne.
-   - `input` : booléen scalaire consommé.
-
-   Retourne `Bool`. *)
-fun bool (input : bool) : value = Bool (input)
-
-(* Construit une valeur JSON nulle, sans argument ni mutation. *)
-fun null_value () : value = Null
+   Retourne le résultat du décodeur, ou l'erreur de syntaxe de `parse`. *)
+fun decode (text : &string, decoder : !value -> 'a result) : 'a result =
+    case parse (text) of
+        Error (message) => Error (message)
+      | Ok (value) => decoder (value)

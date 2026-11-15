@@ -317,7 +317,7 @@ documentées, `⏳` pas encore écrit.
 | `os.File` | `yack/file` | ✅ | handle Linear : `open`, `read_chunk`, `write_all`, `seek`, `sync`, `close` |
 | `os/exec` | `yack/process` | 🟡 | `run` par popen/pclose ; `run_with` pour stdin texte/fd et stdout/stderr vers un fd |
 | `time` | `yack/time` | ✅ | horloges milliseconde, `sleep_ms`, `format_utc` ; UTC seulement |
-| `encoding/json` | `yack/json`, `yack/dynamic`, `yack/json/derive` | 🟡 | voir §9 |
+| `encoding/json` | `yack/json` | 🟡 | voir §9 ; génération de codecs par action LSP (plan) |
 | `encoding/hex` | `yack/encoding/hex` | ⏳ | pur, facile |
 | `encoding/base64` | `yack/encoding/base64` | ⏳ | pur, facile |
 | `encoding/csv` | `yack/csv` | ⏳ | pur |
@@ -976,7 +976,7 @@ Yack n'a ni `use`, ni closure capturante, ni `Decoder(t)` fonction. Le plan
 reprend la **séparation en deux couches** et remplace les fonctions par des
 valeurs.
 
-#### `yack/json` : arbre et syntaxe
+#### `yack/json` : arbre, syntaxe et curseur
 
 ```yack
 datatype value =
@@ -987,29 +987,104 @@ datatype value =
   | Array of value list
   | Object of (string * value) list
 
-parse : borrow string -> value result
+parse : &string -> value result
 to_string : value -> string
+
 object : (string * value) list -> value
 array : value list -> value
+list : (!'a -> value, 'a list) -> value
 string : string -> value
 int : int -> value
+int64 : int64 -> value
+float : float -> value
+number : string -> value
 bool : bool -> value
 null : unit -> value
+nullable : (!'a -> value, 'a option) -> value
+entry : string * value -> string * value
 ```
 
-`Number` conserve le **lexème** (`"42"`, `"-1.5e3"`) au lieu d'un `float` :
-le noyau n'a pas `float_to_string`. `as_int` utilise `string_to_int`. Pour les
-floats, il faudra `string_to_float` et `float_to_string`.
+`Number` conserve le **lexème** (`"42"`, `"-1.5e3"`) : le document rendu ne
+perd ni précision ni notation. `as_float` accepte un entier JSON comme un
+littéral décimal ou exponentiel. Il est écrit en Yack (le noyau n'a pas
+`string_to_float`), rejette les restes non consommés, `inf`, `nan` et un
+débordement (`1e999`). `float` utilise `float_to_string`.
 
 Aides typées :
 
 ```yack
-as_null, as_bool, as_int, as_string, as_array, as_object
+as_null, as_bool, as_int, as_float, as_string, as_array, as_object
 field, required, find_field
 field_int, field_string, field_bool, field_array, field_object
 ```
 
-Combinateurs d'ordre supérieur :
+### 9.2.1 Curseur de champs `take_*`
+
+Une liste est Affine : `field_*` consomme l'objet, donc un seul champ par
+objet. Le curseur rend le reste et permet de décoder plusieurs champs :
+
+```yack
+take : (&string, (string, value) list) -> (value option * (string, value) list)
+take_int, take_float, take_bool, take_string :
+    (&string, (string, value) list) -> (t * (string, value) list) result
+take_option : (!value -> 'a result, &string, (string, value) list)
+              -> ('a option * (string, value) list) result
+take_list   : (!value -> 'a result, &string, (string, value) list)
+              -> ('a list * (string, value) list) result
+take_object : (!value -> 'a result, &string, (string, value) list)
+              -> ('a * (string, value) list) result
+```
+
+```yack
+fun user_from_json (value : json.value) : user result =
+    case json.as_object (value) of
+        Error (message) => Error (message)
+      | Ok (fields) =>
+            case json.take_string (&"name", fields) of
+                Error (message) => Error (message)
+              | Ok (name, afterName) =>
+                    case json.take_int (&"age", afterName) of
+                        Error (message) => Error (message)
+                      | Ok (age, rest) =>
+                            let val ignored = json.discard_fields (rest)
+                            in Ok ({ name = name, age = age })
+                            end
+```
+
+Le premier doublon gagne ; les clés inconnues et les doublons restent dans
+le reste, dans l'ordre, jusqu'à `json.discard_fields (rest)`. Le reste est
+libéré par le `take_*` lui-même quand il rend `Error`, donc l'appelant ne
+libère que le message.
+
+Les erreurs portent un chemin :
+
+```text
+missing field `age`
+age: expected int, found string
+user.zip: expected string, found null
+items[2]: expected int, found string
+items[2].name: expected string, found null
+```
+
+`take_option` rend `None` si le champ est absent **ou** vaut `null`.
+`take_list` préfixe l'index, `take_object` préfixe la clé des erreurs d'un
+décodeur imbriqué.
+
+### 9.2.2 Aides de décodage
+
+```yack
+decode_list   : (!value -> 'a result, value) -> 'a list result
+decode_option : (!value -> 'a result, value) -> 'a option result
+decode        : (&string, !value -> 'a result) -> 'a result
+```
+
+`decode (text, f)` enchaîne `parse` puis `f`. `decode_list` rend
+`[i]: …` pour un élément fautif et libère le suffixe dès la première
+erreur. Toutes ces fonctions prennent une fonction **nommée** ou `x => …`
+sans capture : une fonction Yack ne porte pas d'environnement.
+
+Les combinateurs d'ordre supérieur restent disponibles pour les cas
+particuliers :
 
 ```yack
 array_map, array_filter_map, array_foldl, array_decode
@@ -1017,166 +1092,17 @@ object_map, object_map_values, object_decode_values
 field_decode
 ```
 
-Ces fonctions prennent une fonction par nom ou `x => ...`, sans capture. Le
-callback **consomme** la valeur JSON qu'il reçoit : utiliser `as_int`,
-`as_string`, etc., ou une fonction qui les appelle. C'est le contrat qui évite
-de dupliquer un arbre Affine.
+### 9.2.3 Ce qui est abandonné
 
-Attention : `Object` est une liste, et une liste est Affine. `field_*` consomme
-la liste. Pour décoder plusieurs champs, il faut :
+Le curseur `reader` et `yack/dynamic` des versions précédentes de ce
+document ne sont pas réalisés : `take_*` les remplace sans datatype
+décodeur à maintenir. `alpage/Decode` est supprimé ; ses appels deviennent
+`json.parse`, `json.decode_list` ou les `take_*`.
 
-- soit générer un décodeur qui parcourt l'objet **une seule fois** ;
-- soit utiliser un curseur `reader` qui rend les champs restants :
-
-```yack
-type reader = { fields : (string * value) list }
-reader : (string * value) list -> reader
-take : borrow string * reader -> (value * reader) result
-take_int, take_string, take_bool, take_array, take_object : ...
-```
-
-Le curseur est ownership-correct : chaque `take` rend un nouveau reader. Il
-demande de rebinder à chaque champ, ce qui est verbeux mais explicite.
-
-#### `yack/dynamic` : décodeurs comme valeurs
-
-Sans fermeture capturante, `Decoder(t)` devient un **datatype fermé** :
-
-```yack
-datatype dynamic =
-    DNull
-  | DBool of bool
-  | DInt of int
-  | DString of string
-  | DList of dynamic list
-  | DObject of (string * dynamic) list
-
-datatype decoder =
-    DAny
-  | DNull
-  | DBool
-  | DInt
-  | DString
-  | DList of decoder
-  | DOptional of decoder
-  | DField of string * decoder
-  | DOptionalField of string * decoder
-  | DOneOf of decoder list
-
-run : decoder * value -> dynamic result
-```
-
-`run` est le `decode.run` de Gleam. Il décode vers `dynamic`, pas vers un type
-utilisateur : le passage `dynamic -> T` reste une fonction écrite à la main ou
-générée.
-
-Ce qui manque par rapport à Gleam, et pourquoi :
-
-| Gleam | Yack v0 | Raison |
-|---|---|---|
-| `Decoder(t)` fonction | `decoder` datatype | closures capturantes hors modèle |
-| `map` | `array_map` / `object_map_values` | callback direct, sans capture |
-| `then` | `and_then` | enchaînement direct, sans capture |
-| `recursive` | absent | demande `() -> Decoder(t)` ; possible avec un registre de décodeurs nommés |
-| `success` | absent | demande une valeur finale typée |
-| `field` avec continuation | `DField` + `run` | la continuation est une fonction |
-| code action LSP | `yack json derive` | génération de code |
-
-#### Génération `yack json derive`
-
-C'est la pièce qui donne « depuis et vers des types » sans réflexion.
-
-Entrée : une déclaration `type` ou `datatype`.
-Sortie : deux fonctions générées, `t_to_json` et `t_from_json` (ou
-`t_decoder`), dans un module `.yack` compilé normalement.
-
-Exemple cible :
-
-```yack
-type user = { name : string, age : int }
-
-(* généré *)
-fun user_to_json (value : user) : json.value =
-    case value of
-        { name = name, age = age } =>
-            json.object
-                (Cons ((json.entry ("name", json.string (name)),
-                        Cons ((json.entry ("age", json.int (age)), Nil)))))
-
-fun user_from_json (value : json.value) : user result =
-    case json.as_object (value) of
-        Error (message) => Error (message)
-      | Ok (fields) =>
-            let val nameKey = "name"
-                val ageKey = "age"
-                val name = json.field_string (borrow nameKey, fields)
-                (* pour plusieurs champs : reader ou génération d'un seul passage *)
-            in ...
-            end
-```
-
-Le générateur doit produire un **parcours unique** de l'objet, pas des
-`field_*` successifs qui consomment la liste. Il connaît tous les champs, donc
-il peut faire un seul `case` sur la liste et accumuler.
-
-Tags / noms custom :
-
-- par défaut, le nom Yack du champ est le nom JSON ;
-- attribut proposé : `@json("nom")`, `@json(skip)`, `@json(default = …)` ;
-- à défaut d'attributs dans la syntaxe, un fichier sidecar
-  `derive.toml` peut décrire les renommages ;
-- les champs `option` deviennent `optional_field` ;
-- les datatypes deviennent un `one_of` sur un champ discriminant (`"type"`,
-  `"kind"`, …).
-
-Custom par type :
-
-- si un champ a un type `T` pour lequel l'utilisateur a écrit
-  `t_to_json`/`t_from_json`, le générateur appelle ces fonctions ;
-- si le type est opaque ou vient d'un paquet, une annotation
-  `@json(with = module.fn)` indique la fonction à appeler ;
-- pas besoin de fonction de première classe : le nom de la fonction est résolu
-  statiquement par le générateur.
-
-C'est exactement le rôle de la code action Gleam « generate dynamic decoder »,
-avec un modèle d'extension par noms de fonctions au lieu de valeurs de fonction.
-
-#### Custom sans générateur
-
-Pour un type ponctuel, l'utilisateur écrit à la main :
-
-```yack
-fun point_to_json (value : point) : json.value =
-    json.object
-        (Cons ((json.entry ("x", json.int (value.x)),
-                Cons ((json.entry ("y", json.int (value.y)), Nil)))))
-
-fun point_from_json (value : json.value) : point result =
-    case json.as_object (value) of
-        Error (message) => Error (message)
-      | Ok (fields) =>
-            let val xKey = "x"
-                val yKey = "y"
-            in ...
-            end
-```
-
-C'est le `MarshalJSON`/`UnmarshalJSON` de Go, en plus explicite.
-
-#### Évolution quand les closures arriveront
-
-Quand `fn`/closures seront supportés :
-
-```yack
-type codec 'a = { encode : 'a -> json.value,
-                  decode : json.value -> 'a result }
-
-fun json.field (name : string, codec : codec 'a) : codec 'a = ...
-```
-
-`map`, `then`, `one_of` et `recursive` deviennent alors des fonctions
-génériques comme à Gleam, et `Decoder(t)` peut remplacer le datatype fermé.
-Le générateur reste utile pour éviter d'écrire les codecs à la main.
+La génération automatique des fonctions `t_to_json` / `t_from_json` n'est
+plus une commande `yack json derive` : c'est une action LSP (voir
+`docs/design/plan-json-codecs.md`, section 2), qui écrit le code dans le
+fichier pour qu'il reste lisible et modifiable.
 
 ### 9.3 JSON pour le LSP
 
@@ -1191,9 +1117,9 @@ Le LSP est le premier consommateur réel. Il impose :
 - messages volumineux, donc un parseur linéaire et sans allocation inutile ;
 - erreurs localisées (position) pour diagnostiquer un message malformé.
 
-`yack/json` couvre ces points sauf les paires de surrogates et les
-floats. `Number` en texte permet de garder `Content-Length` et les entiers LSP
-sans dépendre de `float_to_string`.
+`yack/json` couvre ces points, y compris les flottants (`as_float`, `float`),
+sauf les paires de surrogates. `Number` en texte permet de garder
+`Content-Length` et les entiers LSP sans conversion flottante.
 
 ## 10. Paquet LSP
 

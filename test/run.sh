@@ -1475,6 +1475,36 @@ expect_error file_forgot_close E0403 test/reject/file_forgot_close.yack
 
 expect_run json_combinators examples/json_combinators.yack "4"
 expect_run json_decode examples/json_decode.yack "8"
+json_fields_expected=$'fields 36 3 true\nmissing field `age`\nuser: missing field `age`\nuser.zip: expected string, found null\nitems[1]: expected int, found string\nitems[0].name: expected string, found number\noptions 0 0 7\nempty 0\nfloats 3\nn: expected int, found number `4000000000`\n{"xs":[1,2],"n":null,"big":1234567890123,"f":1.5}'
+expect_run json_fields test/json_fields.yack "$json_fields_expected"
+
+
+
+json_big="$TMP/json_big.json"
+python3 - "$json_big" <<'PY'
+import json
+import sys
+
+items = [
+    {"id": i, "name": "user%d" % i, "active": i % 2 == 0,
+     "score": i * 1.5, "tags": ["alpha", "beta"]}
+    for i in range(80000)
+]
+with open(sys.argv[1], "w") as handle:
+    json.dump({"items": items}, handle, separators=(",", ":"))
+PY
+if "$YACK" build test/json_roundtrip.yack "$TMP/json_roundtrip" >"$TMP/json_roundtrip.build" 2>&1; then
+  json_big_size=$(wc -c < "$json_big")
+  json_roundtrip_output=$("$TMP/json_roundtrip" "$json_big" 2>&1)
+  if [ "$json_roundtrip_output" = "ok" ] && [ "$json_big_size" -gt 2000000 ]; then
+    pass json_roundtrip
+  else
+    fail json_roundtrip "unexpected output" "size=$json_big_size" "got [$json_roundtrip_output]"
+  fi
+else
+  fail json_roundtrip "compile failed"
+  sed 's/^/     /' "$TMP/json_roundtrip.build" | head -20
+fi
 expect_run codegen_int examples/codegen_int.yack "42"
 expect_run codegen_add examples/codegen_add.yack $'42\n4.000000'
 expect_run codegen_if examples/codegen_if.yack "5"
@@ -1773,6 +1803,7 @@ expect_no_leak drop_deep_record test/alloc/drop_deep_record.yack
 expect_no_leak option_name_prefix test/alloc/option_name_prefix.yack
 expect_no_leak nested_types test/alloc/nested_types.yack
 expect_no_leak alloc_list_api test/alloc/list_api.yack
+expect_no_leak alloc_json_take test/alloc/json_take.yack
 expect_no_leak tail_param_array test/alloc/tail_param_array.yack
 expect_no_leak alloc_temp_map test/alloc/temp_map.yack
 expect_no_leak alloc_temp_array_arena test/alloc/temp_array_arena.yack
