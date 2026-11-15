@@ -1,6 +1,7 @@
 /yack
 /yack-dev
 /src/build_info.sml
+/src/error_docs.sml
 __pycache__/
 *.pyc
 *.ll

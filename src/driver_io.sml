@@ -2,6 +2,36 @@ structure DriverIo =
 struct
   open DriverTypes
 
+  val explainCode : string option ref = ref NONE
+
+  fun documented code =
+    List.exists
+      (fn (candidate, _, _) => candidate = code)
+      ErrorDocs.entries
+
+  fun noteDiagnostic (diagnostic : Diag.t) =
+    case !explainCode of
+      SOME _ => ()
+    | NONE =>
+        let val code = #code diagnostic in
+          if code <> "E0902" andalso documented code
+          then explainCode := SOME code
+          else ()
+        end
+
+  fun explainHint () =
+    case !explainCode of
+      NONE => ()
+    | SOME code =>
+        ( TextIO.output
+            ( TextIO.stdErr
+            , "For more information about an error, try 'yack explain " ^
+              code ^ "'.\n"
+            )
+        ; explainCode := NONE
+        ; TextIO.flushOut TextIO.stdErr
+        )
+
   fun readFile path =
     ( let
         val input = TextIO.openIn path
@@ -16,16 +46,18 @@ struct
     let val sourceMap = Source.create source in
       List.app
         (fn diagnostic =>
-          TextIO.output
-            ( TextIO.stdErr
-            , Diag.renderWith
-                (!diagnosticStyle,
-                 { source = sourceMap
-                 , file = file
-                 , severity = #severity diagnostic
-                 })
-                diagnostic
-            ))
+          ( noteDiagnostic diagnostic
+          ; TextIO.output
+              ( TextIO.stdErr
+              , Diag.renderWith
+                  (!diagnosticStyle,
+                   { source = sourceMap
+                   , file = file
+                   , severity = #severity diagnostic
+                   })
+                  diagnostic
+              )
+          ))
         diagnostics
     end
 
@@ -57,6 +89,7 @@ struct
                   SOME entry => entry
                 | NONE => fallback
             in
+              noteDiagnostic diagnostic;
               TextIO.output
                 ( TextIO.stdErr
                 , Diag.renderWith

@@ -6,6 +6,11 @@ donnent le contexte, les lignes `= hint:` proposent une correction. Les
 avertissements utilisent `warning[W....]` et ne bloquent ni `yack check` ni
 `yack build`.
 
+`yack explain <code>` affiche l'explication longue d'un code (par exemple
+`yack explain E0501`), et `yack explain` seul liste les codes documentés. La
+sortie s'arrête par un rappel `try 'yack explain <code>'` quand un diagnostic
+a une explication.
+
 Les codes `E09xx` sont des erreurs internes : ils signalent un bug du
 compilateur, pas du programme. Signalez-les, avec la commande et le fichier
 concernés, sur <https://github.com/AsymetricData/yack-public/issues>.

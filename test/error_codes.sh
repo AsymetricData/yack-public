@@ -19,7 +19,13 @@ fi
 
 
 
-emitted=$(grep -ohE '[EW][0-9]{4}' src/*.sml | sort -u)
+
+
+sources=()
+for source in src/*.sml; do
+  [ "$source" = src/error_docs.sml ] || sources+=("$source")
+done
+emitted=$(grep -ohE '[EW][0-9]{4}' "${sources[@]}" | sort -u)
 documented=$(grep -oE '^### [EW][0-9]{4}' "$docs" |
   sed 's/^### //' | sort -u)
 

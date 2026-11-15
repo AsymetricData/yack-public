@@ -185,6 +185,7 @@ Vous pouvez aussi partir directement des exemples :
 | `yack new [name] [--template hello\|cli\|web\|tui]` | crée un projet ; sur un TTY, demande le nom et le template s'ils sont absents |
 | `yack run [file]` | compile puis exécute ; sans fichier, prend `src/main.yack` ou `main.yack` du paquet |
 | `yack check <file>` | lex, parse, résolution et vérification de types (silencieux si OK) |
+| `yack explain <code>` | affiche l'explication longue d'un code ; sans code, liste les codes |
 | `yack fmt [options] <file\|->` | formate un fichier ou l'entrée standard |
 | `yack resolve <file>` | affiche les liaisons, leurs identifiants et leurs usages |
 | `yack types <file>` | affiche les propriétés déclarées → effectives |
@@ -198,8 +199,8 @@ Vous pouvez aussi partir directement des exemples :
 | `yack lsp` | lance le language server sur `stdin`/`stdout` |
 | `yack version` | affiche la version |
 
-`yack help` liste les commandes ; `yack help fmt` et `yack help new` détaillent
-leurs options.
+`yack help` liste les commandes ; `yack help fmt`, `yack help new` et
+`yack help explain` détaillent leurs options.
 
 ### Templates
 
@@ -221,7 +222,8 @@ répertoire.
 
 Les erreurs renvoient le code de sortie `1` et portent un code stable
 (`E2002` syntaxe, `E3004` type, `E0402` use-after-move, `E0502` conflit
-d'emprunt, etc.).
+d'emprunt, etc.). `yack explain <code>` en donne l'explication longue, sans
+accès réseau, et `yack explain` seul liste les codes documentés.
 
 En terminal, `yack new`, `yack build` et `yack run` affichent des étapes
 colorées et animées. `NO_COLOR` désactive la couleur, `YACK_UNICODE=0` les

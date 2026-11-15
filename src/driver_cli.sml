@@ -29,6 +29,7 @@ struct
       say ("  " ^ heading "Commands");
       row "new <name>" "create a new project";
       row "check <file>" "lex, parse, resolve and type-check";
+      row "explain <code>" "explain a diagnostic code";
       row "fmt <file|->" "format a file or standard input";
       row "resolve <file>" "print bindings, ids and uses";
       row "types <file>" "print type properties (declared -> effective)";
@@ -88,6 +89,70 @@ struct
 
   fun exitWith code =
     if code = 0 then () else OS.Process.exit OS.Process.failure
+
+  fun explainBody body =
+    let
+      val lines = String.fields (fn ch => ch = #"\n") body
+      fun fence line = String.isPrefix "```" line
+      fun loop (inside, acc, []) = List.rev acc
+        | loop (inside, acc, line :: rest) =
+            if fence line then loop (not inside, acc, rest)
+            else if inside then loop (inside, ("    " ^ line) :: acc, rest)
+            else loop (inside, line :: acc, rest)
+    in
+      loop (false, [], lines)
+    end
+
+  fun explainEntry code =
+    let val wanted = String.map Char.toUpper code in
+      List.find (fn (candidate, _, _) => candidate = wanted) ErrorDocs.entries
+    end
+
+  fun explainCode code =
+    case explainEntry code of
+      NONE =>
+        ( complain ("error: unknown diagnostic code '" ^ code ^ "'")
+        ; complain ("= help: run 'yack explain' to list the documented codes")
+        ; 1
+        )
+    | SOME (found, title, body) =>
+        let val style = makeStyle (ColorAuto, Posix.FileSys.stdout) in
+          say (paint (style, "1", found ^ " — " ^ title));
+          say "";
+          List.app say (explainBody body);
+          0
+        end
+
+  fun explainList () =
+    ( List.app
+        (fn (code, title, _) => say (code ^ "  " ^ title))
+        ErrorDocs.entries
+    ; 0
+    )
+
+  fun explainUsage () =
+    let
+      val style = makeStyle (ColorAuto, Posix.FileSys.stdout)
+      fun heading text = paint (style, "1;36", text)
+      fun command text = paint (style, "1;33", text)
+      fun description text = paint (style, "2", text)
+    in
+      say ("  " ^ mascot style ^ paint (style, "1;36", "yack") ^
+           paint (style, "2", "  explain"));
+      say "";
+      say ("  " ^ description "Explain a diagnostic code.");
+      say "";
+      say ("  " ^ heading "Usage");
+      say ("    " ^ command "yack explain <code>");
+      say ("    " ^ command "yack explain");
+      say ("        " ^ description "list the documented codes");
+      say "";
+      say ("  " ^ heading "Examples");
+      say ("    " ^ command "yack explain E0501");
+      say ("    " ^ command "yack explain e3004");
+      say "";
+      TextIO.flushOut TextIO.stdOut
+    end
 
   datatype parsedMemory =
       MemoryOk of
@@ -370,9 +435,14 @@ struct
         | ["help"] => usage ()
         | ["help", "new"] => exitWith (newCommand ["--help"])
         | ["help", "fmt"] => exitWith (fmtCommand ["--help"])
+        | ["help", "explain"] => explainUsage ()
+        | ["explain"] => exitWith (explainList ())
+        | ["explain", code] => exitWith (explainCode code)
         | "new" :: newArguments => exitWith (newCommand newArguments)
         | "fmt" :: fmtArguments => exitWith (fmtCommand fmtArguments)
-        | ["check", file] => exitWith (DriverCommands.checkLowered mode file)
+        | ["check", file] =>
+            let val status = DriverCommands.checkLowered mode file
+            in DriverIo.explainHint (); exitWith status end
         | ["resolve", file] => exitWith (resolveOnly file)
         | ["types", file] => exitWith (typesOnly file)
         | ["parse", file] => exitWith (parseOnly file)
@@ -395,13 +465,16 @@ struct
             (checkArchitecture (); exitWith (llvmOnly mode reserve file))
         | ["build", file, output] =>
             (checkArchitecture ();
-             exitWith (build mode reserve trim file output))
+             let val status = build mode reserve trim file output
+             in DriverIo.explainHint (); exitWith status end)
         | ["run", file] =>
             (checkArchitecture ();
-             exitWith (runFile mode reserve trim file))
+             let val status = runFile mode reserve trim file
+             in DriverIo.explainHint (); exitWith status end)
         | "run" :: runArguments =>
             (checkArchitecture ();
-             exitWith (runCommand mode reserve trim runArguments))
+             let val status = runCommand mode reserve trim runArguments
+             in DriverIo.explainHint (); exitWith status end)
         | _ => (usage (); OS.Process.exit OS.Process.failure)
         end
     end

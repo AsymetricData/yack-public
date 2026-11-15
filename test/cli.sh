@@ -244,4 +244,93 @@ else
   fail "stdlib next to the executable"
 fi
 
+
+
+explain_output=$("$YACK" explain E0501)
+explain_status=$?
+if [ "$explain_status" -eq 0 ] &&
+   printf '%s' "$explain_output" | grep -Fq "E0501 — déplacement d'une valeur empruntée" &&
+   printf '%s' "$explain_output" | grep -Fq "fun eat" &&
+   ! printf '%s' "$explain_output" | grep -q '```'; then
+  pass "explain E0501"
+else
+  fail "explain E0501" "unexpected output"
+  printf '%s\n' "$explain_output" | sed 's/^/     /'
+fi
+
+explain_lower=$("$YACK" explain e0501)
+if [ "$explain_lower" = "$explain_output" ]; then
+  pass "explain is case-insensitive"
+else
+  fail "explain is case-insensitive" "e0501 differs from E0501"
+fi
+
+for unknown in E9999 foo; do
+  explain_error=$("$YACK" explain "$unknown" 2>&1 >/dev/null)
+  explain_status=$?
+  if [ "$explain_status" -eq 1 ] &&
+     printf '%s' "$explain_error" | grep -Fq "error: unknown diagnostic code '$unknown'" &&
+     printf '%s' "$explain_error" | grep -Fq \
+       "= help: run 'yack explain' to list the documented codes"; then
+    pass "explain unknown $unknown"
+  else
+    fail "explain unknown $unknown" "unexpected output"
+    printf '%s\n' "$explain_error" | sed 's/^/     /'
+  fi
+done
+
+docs_codes=$(grep -c '^### ' docs/errors.md)
+listed=$("$YACK" explain | wc -l | tr -d ' ')
+if [ "$listed" = "$docs_codes" ]; then
+  pass "explain lists every code"
+else
+  fail "explain lists every code" "$listed lines for $docs_codes sections"
+fi
+
+explain_all_ok=1
+for code in $(grep -oE '^### [EW][0-9]{4}' docs/errors.md | cut -c5-); do
+  if ! "$YACK" explain "$code" >/dev/null 2>&1; then
+    fail "explain $code" "expected exit 0"
+    explain_all_ok=0
+    break
+  fi
+done
+if [ "$explain_all_ok" -eq 1 ]; then
+  pass "explain every documented code"
+fi
+
+
+if "$TMP/dist/yack" explain E0501 >/dev/null 2>&1; then
+  pass "explain from a copied binary"
+else
+  fail "explain from a copied binary"
+fi
+
+
+cat > "$TMP/explain-bad.yack" <<'EOF'
+fun main () = print_int ("text")
+EOF
+explain_error=$("$YACK" check "$TMP/explain-bad.yack" 2>&1)
+explain_status=$?
+explain_last=$(printf '%s\n' "$explain_error" | tail -n 1)
+if [ "$explain_status" -eq 1 ] &&
+   [ "$explain_last" = "For more information about an error, try 'yack explain E3004'." ]; then
+  pass "explain hint after a type error"
+else
+  fail "explain hint after a type error" "got [$explain_last]"
+fi
+
+
+
+cp docs/errors.md "$TMP/errors.md"
+printf '\n### E9997 — titre de test\nCorps de test.\n' >> "$TMP/errors.md"
+if LC_ALL=C awk -f tools/gen_error_docs.awk "$TMP/errors.md" \
+     > "$TMP/error_docs.sml" &&
+   grep -Fq '"E9997", "titre de test"' "$TMP/error_docs.sml" &&
+   grep -Eq '^\$\(ERROR_DOCS\): docs/errors.md tools/gen_error_docs.awk' Makefile; then
+  pass "explain generator regeneration"
+else
+  fail "explain generator regeneration" "new section not generated, or Makefile rule lost its prerequisites"
+fi
+
 exit "$failed"

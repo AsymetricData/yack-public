@@ -1,5 +1,6 @@
 $(SML_LIB)/basis/basis.mlb
 src/build_info.sml
+src/error_docs.sml
 src/pos.sml
 src/source.sml
 src/diag.sml
