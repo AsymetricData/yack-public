@@ -103,6 +103,201 @@ fun parseFunctionDeclaration st =
       }
   end
 
+and parseExternDeclaration st =
+  let
+    val startToken = current st
+    val _ = advance st
+  in
+    if (case Token.identOf (current st) of
+          SOME "record" => true
+        | _ => false) then
+      parseExternRecord st startToken
+    else parseExternFunction st startToken
+  end
+
+and parseExternFunction st startToken =
+  let
+    val _ = expectKeyword st "fun"
+    val (name, nameSpan) = expectIdent st "an extern function name"
+    val _ = expectPunct st "("
+    val params = parseParams st
+    val _ =
+      List.app
+        (fn param =>
+          case #annot param of
+            SOME _ => ()
+          | NONE =>
+              report st
+                "E2002"
+                ("extern parameter `" ^ #name param ^
+                 "` needs a type annotation")
+                (#span param)
+                ["the libc signature cannot be inferred from a body"]
+                [ "write `" ^ #name param ^ " : int` or `" ^ #name param ^
+                  " : int64`" ])
+        params
+    val _ = expectPunct st ":"
+    val result = parseTy st
+    val _ = expectPunct st "="
+    val symbolToken = current st
+    val symbol =
+      case #kind symbolToken of
+        Token.StringLit text => (advance st; text)
+      | _ =>
+          failAt st
+            "E2002"
+            ("expected the C symbol as a string, found " ^
+             Token.describe symbolToken)
+            (#span symbolToken)
+            []
+            ["write `= \"clock_gettime\"`"]
+    val _ =
+      if validCSymbol symbol then ()
+      else
+        failAt st
+          "E2002"
+          ("`" ^ symbol ^ "` is not a C symbol")
+          (#span symbolToken)
+          []
+          ["use letters, digits and underscores, starting with a letter or `_`"]
+    val span =
+      { start = Token.startOf startToken
+      , stop = Token.stopOf (previousToken st)
+      }
+  in
+    Ast.DFun
+      { name = name
+      , nameSpan = nameSpan
+      , params = params
+      , result = SOME result
+      , recursive = false
+      , body =
+          Ast.EExtern
+            { symbol = symbol
+            , params = params
+            , result = result
+            , span = span
+            }
+      , span = span
+      }
+  end
+
+and validCSymbol symbol =
+  let
+    val size = String.size symbol
+    fun isStart ch = Char.isAlpha ch orelse ch = #"_"
+    fun isPart ch = Char.isAlphaNum ch orelse ch = #"_"
+  in
+    size > 0 andalso isStart (String.sub (symbol, 0)) andalso
+    List.all (fn index => isPart (String.sub (symbol, index)))
+      (List.tabulate (size - 1, fn index => index + 1))
+  end
+
+and expectIntLiteral st context =
+  let val token = current st in
+    case #kind token of
+      Token.IntLit text =>
+        (case Int.fromString text of
+           SOME value => (advance st; value)
+         | NONE =>
+             failAt st
+               "E2002"
+               ("invalid integer for " ^ context)
+               (#span token)
+               []
+               [])
+    | _ =>
+        failAt st
+          "E2002"
+          ("expected an integer for " ^ context ^ ", found " ^
+           Token.describe token)
+          (#span token)
+          []
+          []
+  end
+
+and parseExternRecord st startToken =
+  let
+    val (recordName, _) = expectIdent st "`record`"
+    val _ =
+      if recordName = "record" then ()
+      else
+        failAt st
+          "E2002"
+          ("expected `record`, found `" ^ recordName ^ "`")
+          (#span startToken)
+          []
+          ["write `extern record Name (size = 16) { ... }`"]
+    val (name, nameSpan) = expectIdent st "an extern record name"
+    val _ = expectPunct st "("
+    val (sizeName, _) = expectIdent st "the size field"
+    val _ =
+      if sizeName = "size" then ()
+      else
+        failAt st
+          "E2002"
+          ("expected `size` in an extern record, found `" ^ sizeName ^ "`")
+          nameSpan
+          []
+          ["write `extern record Name (size = 16) { ... }`"]
+    val _ = expectPunct st "="
+    val size = expectIntLiteral st "the record size"
+    val _ =
+      if size > 0 then ()
+      else
+        report st
+          "E2002"
+          "an extern record needs a positive size"
+          nameSpan
+          []
+          []
+    val _ = expectPunct st ")"
+    val _ = expectPunct st "{"
+    val seen = StringSet.create 16
+    fun fields acc =
+      if Token.isPunct "}" (current st) then
+        let val close = current st
+            val _ = advance st
+        in (List.rev acc, close) end
+      else
+        let
+          val (field, fieldSpan) = expectIdent st "a field name"
+          val _ =
+            if StringSet.insert (seen, field) then ()
+            else report st "E3013" ("duplicate field `" ^ field ^ "`")
+                   fieldSpan [] []
+          val _ = expectPunct st ":"
+          val ty = parseTy st
+          val _ = expectPunct st "@"
+          val offset = expectIntLiteral st "a field offset"
+          val _ =
+            if offset >= 0 then ()
+            else report st "E2002" "a field offset cannot be negative"
+                   fieldSpan [] []
+          val item = (field, ty, offset)
+        in
+          if Token.isPunct "," (current st) then
+            (advance st; fields (item :: acc))
+          else
+            let val close = current st
+                val _ = expectPunct st "}"
+            in (List.rev (item :: acc), close) end
+        end
+    val (fieldList, close) = fields []
+    val span =
+      { start = Token.startOf startToken
+      , stop = Token.stopOf close
+      }
+  in
+    Ast.DExternRecord
+      { name = name
+      , nameSpan = nameSpan
+      , size = size
+      , fields = fieldList
+      , span = span
+      }
+  end
+
 and parseParams st =
   if Token.isPunct ")" (current st) then (advance st; [])
   else
@@ -1296,6 +1491,7 @@ and parseDecl st =
     else
       case Token.identOf token of
         SOME "import" => parseImport st
+      | SOME "extern" => parseExternDeclaration st
       | SOME "open" =>
           failAt st
             "E2002"

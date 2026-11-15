@@ -1,5 +1,6 @@
 import yack/option
 import yack/result
+import yack/string
 
 fun inc (x : int) : int = x + 1
 fun times_two (x : int) : int option = Some (x * 2)
@@ -13,5 +14,5 @@ fun main () =
         val text = result.error_or (failed, "none")
     in print_int (option.unwrap_or (second, 0)
                   + result.unwrap_or (ok, 0)
-                  + string_length (borrow text))
+                  + string.length (borrow text))
     end

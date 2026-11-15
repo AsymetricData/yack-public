@@ -1,6 +1,7 @@
 # Performance notes
 
-Objectif : éviter les algorithmes quadratiques dans le frontend.
+Le frontend doit rester linéaire sur la taille du source. Ces notes disent
+pourquoi c'est le cas aujourd'hui et ce qui reste à surveiller.
 
 ## Lexer
 
@@ -35,7 +36,8 @@ Objectif : éviter les algorithmes quadratiques dans le frontend.
   O(portée). C'est acceptable pour le noyau actuel, mais il faudra une table de
   symboles (ou une map équilibrée) avant les passes de lifetimes sur des
   portées profondes.
-- Les diagnostics n'ont pas encore de sortie JSON ; le renderer terminal est
-  volontairement simple.
-- Aucun AST n'est cloné entre les passes ; chaque passe fait sa propre
-  traversée.
+- Les diagnostics n'ont pas encore de sortie JSON, et le renderer terminal
+  reste simple.
+- Aucun AST n'est cloné entre les passes : chaque passe fait sa propre
+  traversée. C'est plus lent qu'un partage, mais cela garde les passes
+  indépendantes.

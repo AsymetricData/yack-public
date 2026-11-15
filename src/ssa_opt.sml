@@ -36,6 +36,7 @@ struct
         | Ir.Tuple (xs, _) => List.app walk xs
         | Ir.Record (fields, _) => List.app (fn (_, x) => walk x) fields
         | Ir.Field (x, _, _) => walk x
+        | Ir.RawField (x, _, _) => walk x
         | Ir.TupleIndex (x, _, _) => walk x
         | Ir.Ctor (_, _, x, _, _) => Option.app walk x
         | Ir.Match (s, branches, _) =>
@@ -115,6 +116,7 @@ struct
     | Ir.Tuple (xs, ty) => Ir.Tuple (List.map rewrite xs, ty)
     | Ir.Record (fields, ty) => Ir.Record (List.map (fn (n, x) => (n, rewrite x)) fields, ty)
     | Ir.Field (x, i, ty) => Ir.Field (rewrite x, i, ty)
+    | Ir.RawField (x, i, ty) => Ir.RawField (rewrite x, i, ty)
     | Ir.TupleIndex (x, i, ty) => Ir.TupleIndex (rewrite x, i, ty)
     | Ir.Ctor (d, c, x, ty, site) => Ir.Ctor (d, c, Option.map rewrite x, ty, site)
     | Ir.Match (s, branches, ty) =>
@@ -138,6 +140,7 @@ struct
 
   fun optimize (program : Ir.program) : Ir.program =
     { datatypes = #datatypes program
+    , externs = #externs program
     , functions =
         List.map
           (fn (f : Ir.funDef) =>

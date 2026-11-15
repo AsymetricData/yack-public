@@ -1,11 +1,16 @@
 import net/Net
 
 fun main () =
-    case Net.listen (0) of
+    let val resolved = Net.resolve (borrow "127.0.0.1")
+        val addressOk =
+            case resolved of
+                Ok (values) => list_length (values) > 0
+              | Error (_) => false
+    in case Net.listen (0) of
         Error message => print_string (message)
       | Ok listener =>
           let val port = Net.local_port (borrow listener)
-              val client = Net.connect_loopback (port)
+              val client = Net.connect (borrow "127.0.0.1", port)
           in case client of
                Error message =>
                    let val _ = Net.close_listener (listener)
@@ -29,7 +34,9 @@ fun main () =
                             val _ = Net.close (peer)
                             val _ = Net.close (stream)
                             val _ = Net.close_listener (listener)
+                            val _ = print_int (if addressOk then 1 else 0)
                         in print_string (text)
                         end
                  end
           end
+    end

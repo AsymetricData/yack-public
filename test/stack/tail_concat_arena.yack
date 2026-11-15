@@ -1,0 +1,15 @@
+
+
+
+
+fun loop (n : int, acc : int) : int =
+    if n <= 0 then acc
+    else
+        let val length = arena
+                            val text = int_to_string (n) ^ "-tail"
+                        in string_length (borrow text)
+                        end
+        in loop (n - 1, acc + length)
+        end
+
+fun main () = print_int (loop (1000000, 0))

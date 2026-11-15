@@ -1,0 +1,50 @@
+import yack/fs
+import yack/random
+import yack/string
+
+fun is_file (kind : fs.kind) : bool =
+    case kind of
+        fs.File => true
+      | _ => false
+
+fun main () =
+    let val token = random.token_hex (4)
+        val base =
+            case token of
+                Ok (value) => "/tmp/yack-fs-" ^ value
+              | Error (_) => "/tmp/yack-fs-fallback"
+        val file = string.copy (borrow base) ^ "/a.txt"
+        val renamed = string.copy (borrow base) ^ "/b.txt"
+        val sub = string.copy (borrow base) ^ "/sub"
+        val made = fs.mkdir_all (borrow sub)
+        val _ = fs.append_file (borrow file, borrow "hello")
+        val existsOk = fs.exists (borrow file)
+        val sizeOk =
+            case fs.stat (borrow file) of
+                Ok (value) => value.size = int_to_int64 (5)
+              | Error (_) => false
+        val kindOk =
+            case fs.stat (borrow file) of
+                Ok (value) => is_file (value.kind)
+              | Error (_) => false
+        val moved = fs.rename (borrow file, borrow renamed)
+        val listOk =
+            case fs.list_dir (borrow base) of
+                Ok (entries) => list_length (entries) = 2
+              | Error (_) => false
+        val removed = fs.remove (borrow renamed)
+        val gone = fs.exists (borrow renamed)
+        val _ = fs.remove (borrow sub)
+        val _ = fs.remove (borrow base)
+        val madeOk = case made of Ok (_) => true | Error (_) => false
+        val movedOk = case moved of Ok (_) => true | Error (_) => false
+        val removedOk = case removed of Ok (_) => true | Error (_) => false
+        val _ = print_int (if madeOk then 1 else 0)
+        val _ = print_int (if existsOk then 1 else 0)
+        val _ = print_int (if sizeOk then 1 else 0)
+        val _ = print_int (if kindOk then 1 else 0)
+        val _ = print_int (if movedOk then 1 else 0)
+        val _ = print_int (if listOk then 1 else 0)
+        val _ = print_int (if removedOk then 1 else 0)
+    in print_int (if gone then 0 else 1)
+    end

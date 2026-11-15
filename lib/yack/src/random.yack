@@ -1,0 +1,142 @@
+import yack/array
+import yack/bytes as byte_array
+
+extern fun getrandom_raw
+    (buffer : borrow int8 array, length : int64, flags : int) : int64 =
+    "getrandom"
+
+(* Copie un préfixe de `source` dans `target` à partir de `targetIndex`.
+   - `source` : octets lus, consommés.
+   - `target` : tableau cible, muté et rendu.
+   - `index` : prochain octet source.
+   - `stop` : nombre d'octets à copier.
+   - `targetIndex` : prochain indice cible. *)
+fun internal_copy_from
+    (source : int8 array, target : int8 array, index : int, stop : int,
+     targetIndex : int) : int8 array =
+    if index >= stop then target
+    else
+        let
+            val value = array.get (borrow source, index)
+            val filled = array.set (target, targetIndex, value)
+        in internal_copy_from (source, filled, index + 1, stop, targetIndex + 1)
+        end
+
+(* Remplit `buffer[offset..total)` par tranches de 256 octets, en reprenant
+   sur EINTR et lecture partielle.
+   - `buffer` : tableau cible, muté et rendu.
+   - `offset` : prochain octet à remplir.
+   - `total` : taille du tableau. *)
+fun internal_fill
+    (buffer : int8 array, offset : int, total : int) : int8 array result =
+    if offset >= total then Ok (buffer)
+    else
+        let
+            val remaining = total - offset
+            val chunkSize = if remaining > 256 then 256 else remaining
+            val chunk : int8 array = array_make_uninit (chunkSize)
+            val written =
+                getrandom_raw (borrow chunk, int_to_int64 (chunkSize), 0)
+        in
+            if written < int_to_int64 (0) then
+                let val code = sys.errno ()
+                in
+                    if code = 4 then internal_fill (buffer, offset, total)
+                    else
+                        Error ("random.bytes: getrandom failed (errno " ^
+                               int_to_string (code) ^ ")")
+                end
+            else if written = int_to_int64 (0) then
+                Error ("random.bytes: getrandom returned 0")
+            else
+                let
+                    val count = int64_to_int (written)
+                    val filled =
+                        internal_copy_from (chunk, buffer, 0, count, offset)
+                in internal_fill (filled, offset + count, total)
+                end
+        end
+
+(* Remplit un nouveau tableau de `count` octets aléatoires.
+   - `count` : nombre d'octets demandés ; un nombre négatif est une erreur.
+
+   Rend le tableau possédé ou le message d'échec de `getrandom`. *)
+fun bytes (count : int) : int8 array result =
+    if count < 0 then Error ("random.bytes: count must not be negative")
+    else if count = 0 then Ok (array.make (0, 0))
+    else internal_fill (array_make_uninit (count), 0, count)
+
+(* Convertit un octet en chiffre hexadécimal minuscule.
+   - `value` : valeur entre 0 et 15. *)
+fun internal_hex_digit (value : int) : string =
+    if value < 10 then string_of_char (48 + value)
+    else string_of_char (87 + value)
+
+(* Encode les octets d'une chaîne en hexadécimal.
+   - `raw` : chaîne brute empruntée, lue de `index` à `stop`.
+   - `index` : prochain octet à encoder.
+   - `stop` : borne exclusive de l'encodage. *)
+fun internal_hex_from (raw : borrow string, index : int, stop : int) : string =
+    if index >= stop then ""
+    else
+        let
+            val value = string_char_at_unchecked (raw, index)
+        in
+            internal_hex_digit (value / 16) ^
+            internal_hex_digit (value % 16) ^
+            internal_hex_from (raw, index + 1, stop)
+        end
+
+(* Rend `count` octets aléatoires encodés en hexadécimal minuscule.
+   - `count` : nombre d'octets tirés, donc deux caractères par octet. *)
+fun token_hex (count : int) : string result =
+    case bytes (count) of
+        Error (message) => Error (message)
+      | Ok (raw) =>
+            let
+                val raw_text = byte_array.to_string (raw)
+                val size = string_length (borrow raw_text)
+            in
+                Ok (internal_hex_from (borrow raw_text, 0, size))
+            end
+
+(* Tire un entier uniforme dans `[0, limit)` par rejet.
+   - `remaining` : tentatives restantes avant l'échec.
+   - `limit` : borne exclusive positive.
+   - `size` : `limit` converti en `int64`. *)
+fun internal_int_below_attempt
+    (remaining : int, limit : int, size : int64) : int result =
+    if remaining <= 0 then
+        Error ("random.int_below: retry limit reached")
+    else
+        case bytes (4) of
+            Error (message) => Error (message)
+          | Ok (raw) =>
+                let
+                    val raw_text = byte_array.to_string (raw)
+                    val value : int64 =
+                        int_to_int64 (string_char_at_unchecked
+                                          (borrow raw_text, 0)) +
+                        int_to_int64 (string_char_at_unchecked
+                                          (borrow raw_text, 1)) *
+                            int_to_int64 (256) +
+                        int_to_int64 (string_char_at_unchecked
+                                          (borrow raw_text, 2)) *
+                            int_to_int64 (65536) +
+                        int_to_int64 (string_char_at_unchecked
+                                          (borrow raw_text, 3)) *
+                            int_to_int64 (16777216)
+                    val bound : int64 = int_to_int64 (2147483647)
+                    val usable : int64 = (bound / size) * size
+                in
+                    if value >= usable then
+                        internal_int_below_attempt (remaining - 1, limit, size)
+                    else Ok (int64_to_int (value % size))
+                end
+
+(* Tire un entier uniforme dans `[0, limit)`.
+   - `limit` : borne exclusive strictement positive. *)
+fun int_below (limit : int) : int result =
+    if limit <= 0 then Error ("random.int_below: limit must be positive")
+    else if limit = 1 then Ok (0)
+    else internal_int_below_attempt (64, limit, int_to_int64 (limit))

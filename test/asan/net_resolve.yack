@@ -1,0 +1,17 @@
+import yack/net
+
+fun loop (remaining : int) : unit =
+    if remaining <= 0 then ()
+    else
+        let val count =
+                case net.resolve (borrow "localhost") of
+                    Ok (values) => list_length (values)
+                  | Error (_) => -1
+            val _ = if count < 0 then -1 else 0
+        in loop (remaining - 1)
+        end
+
+fun main () =
+    let val _ = loop (20)
+    in ()
+    end

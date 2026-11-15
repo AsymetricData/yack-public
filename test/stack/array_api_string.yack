@@ -1,0 +1,21 @@
+
+
+import yack/array
+
+fun main () =
+    let val values = array.new ()
+        val values = array.push (values, "a")
+        val values = array.push (values, "bb")
+        val values = array.set (values, 0, "ccc")
+        val pair = array.take (values, 1)
+        val values = pair.0
+        val values = array.put (values, 1, pair.1)
+        val first = string_copy (array.get_borrow (borrow values, 0))
+        val second = string_copy (array.get_borrow (borrow values, 1))
+    in
+        let val _ = print_int (string_length (borrow first))
+            val _ = print_int (string_length (borrow second))
+            val _ = print_int (array.length (borrow values))
+        in print_int (array.capacity (borrow values))
+        end
+    end

@@ -38,19 +38,20 @@
                 <p class="eyebrow">v0.2.0: an experiment</p>
                 <h1 id="hero-title">A comfortable ML, <span class="accent">without a garbage collector.</span></h1>
                 <p class="lead">
-                    Yack is a small ML-family language, close to SML and OCaml: pleasant and
-                    simple to write, with little ceremony except what the types force.
-                    Affine and linear types, the ownership ideas borrowed from Rust, replace
-                    the garbage collector without Rust's syntactic weight. It compiles through
-                    LLVM to native binaries, with frees placed deterministically and ownership
-                    checked in the frontend.
+                    Yack is a language in the ML family, close to SML and OCaml. It is meant to
+                    be pleasant to write: the syntax keeps the same shape, and the only ceremony
+                    it adds is what the types require. Affine and linear types,
+                    together with the ownership rules Rust popularised, take the place of the
+                    garbage collector. The compiler checks ownership in the frontend, places
+                    each free deterministically, and lowers the program through LLVM to a
+                    native binary.
                 </p>
                 <div class="actions">
                     <a class="btn" href="#quick-start">Quick start</a>
                     <a class="btn btn-ghost" href="alpage.html">Build a web API</a>
                     <a class="btn btn-ghost" href="ideas.html">Why Yack</a>
                 </div>
-                <p class="meta">LLVM backend · Linux / POSIX · License to be determined</p>
+                <p class="meta">LLVM backend · Linux x86-64 · License to be determined</p>
             </div>
 
             <div class="code-card code-tabs" data-tabs aria-label="Yack source and generated LLVM IR">
@@ -135,11 +136,12 @@
         <section class="section" id="language" aria-labelledby="language-title">
             <div class="section-head">
                 <p class="section-label">01. Language</p>
-                <h2 id="language-title">Small, typed, predictable.</h2>
+                <h2 id="language-title">A small core with inferred types</h2>
                 <p>
-                    A deliberately narrow core: module-level functions, recursion,
-                    <code>case</code>, records, tuples and generic datatypes. No classes,
-                    no loops, no capturing closures.
+                    The core is deliberately narrow: module-level functions, recursion,
+                    <code>case</code>, records, tuples and generic datatypes, with no classes,
+                    loop syntax or capturing closures. Integer literals are checked against the
+                    width they are used at, so a value that does not fit is a compile error.
                 </p>
             </div>
 
@@ -147,29 +149,29 @@
                 <article class="feature">
                     <h3>Inferred types</h3>
                     <p>
-                        Hindley-Milner, <code>'a</code> and <code>''a</code> generics,
-                        numeric constraints and monomorphisation at compile time.
+                        Hindley-Milner inference with <code>'a</code> and <code>''a</code>
+                        generics; numeric constraints are resolved and generic functions
+                        monomorphised at compile time.
                     </p>
                 </article>
                 <article class="feature">
                     <h3>Pattern matching</h3>
                     <p>
-                        Nested <code>case</code>, guards, exhaustiveness checking, list
-                        and string patterns.
+                        Nested <code>case</code> expressions, guards, exhaustiveness checking,
+                        and patterns for lists and strings.
                     </p>
                 </article>
                 <article class="feature">
                     <h3>Modules and packages</h3>
                     <p>
-                        Qualified, selective or aliased imports, with local dependencies
-                        described in a plain <code>yack.toml</code>.
+                        Imports can be qualified, selective or aliased. Local dependencies live
+                        in a plain <code>yack.toml</code>.
                     </p>
                 </article>
                 <article class="feature">
                     <h3>Useful diagnostics</h3>
                     <p>
-                        Stable codes, notes and suggestions. Errors explain the problem
-                        instead of only pointing at it.
+                        Every error has a stable code, a span, a note and often a suggestion.
                     </p>
                 </article>
             </div>
@@ -178,12 +180,12 @@
         <section class="section" id="examples" aria-labelledby="examples-title">
             <div class="section-head">
                 <p class="section-label">02. Examples</p>
-                <h2 id="examples-title">Four small programs, one consistent model.</h2>
+                <h2 id="examples-title">Four small example programs</h2>
                 <p>
-                    Lists, modules, datatypes and diagnostics. Every example compiles
-                    with the same frontend, the same type checker and the same
-                    ownership rules. Ghost hints show inferred types: hover one, or
-                    the diagnostic underline, to see the language server response.
+                    Lists, modules, datatypes and diagnostics. All four examples go through the
+                    same frontend, type checker and ownership rules. The grey hints show
+                    inferred types; hover one, or the underline in the last example, to see
+                    what the language server reports.
                 </p>
             </div>
 
@@ -206,7 +208,7 @@
     print_int (sum ([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]))</code></pre>
                         <div class="code-out"><span aria-hidden="true">→</span> <code>6</code></div>
                     </div>
-                    <p class="snippet-caption"><strong>Pattern matching.</strong> Lists, recursion and exhaustiveness.</p>
+                    <p class="snippet-caption"><strong>Pattern matching.</strong> Lists, recursion and exhaustiveness checking.</p>
                 </div>
 
                 <div class="snippet">
@@ -229,7 +231,7 @@
     <span class="kw">end</span></code></pre>
                         <div class="code-out"><span aria-hidden="true">→</span> <code>3</code></div>
                     </div>
-                    <p class="snippet-caption"><strong>Modules.</strong> Higher-order functions, no captures.</p>
+                    <p class="snippet-caption"><strong>Modules.</strong> Higher-order functions without capturing closures.</p>
                 </div>
 
                 <div class="snippet">
@@ -280,7 +282,7 @@
                             <span class="diag-note">note: move this use before the transfer</span>
                         </div>
                     </div>
-                    <p class="snippet-caption"><strong>Diagnostics.</strong> Stable codes, notes and repair hints.</p>
+                    <p class="snippet-caption"><strong>Diagnostics.</strong> Stable codes, notes and suggestions for a repair.</p>
                 </div>
             </div>
 
@@ -292,11 +294,11 @@
         <section class="section memory" id="memory" aria-labelledby="memory-title">
             <div class="section-head">
                 <p class="section-label">03. Memory</p>
-                <h2 id="memory-title">Memory is part of the type.</h2>
+                <h2 id="memory-title">Every value declares how it is used</h2>
                 <p>
-                    Every value declares <code>Copy</code>, <code>Affine</code> or
-                    <code>Linear</code>. The compiler tracks moves and borrows, then
-                    places <code>free</code> after the last owner.
+                    Each value is <code>Copy</code>, <code>Affine</code> or
+                    <code>Linear</code>. The compiler tracks moves and borrows, then places
+                    <code>free</code> after the last owner.
                 </p>
             </div>
 
@@ -322,33 +324,35 @@
                 <div class="memory-copy">
                     <ul class="plain-list">
                         <li>
-                            <strong>No GC.</strong> Ownership and lifetimes replace the
-                            collector. Frees stay deterministic, and the declarations the model
-                            adds are the ceremony the types force.
+                            <strong>No collector.</strong> Ownership and lifetimes decide when
+                            memory is released, so frees stay deterministic. The annotations the
+                            model adds are the ceremony the types require.
                         </li>
                         <li>
-                            <strong>Checked borrows.</strong> Shared or mutable, with
-                            explicit provenance and reported conflicts.
+                            <strong>Checked borrows.</strong> A borrow is shared or mutable, its
+                            provenance is explicit, and conflicting loans are reported.
                         </li>
                         <li>
-                            <strong>Temporary arenas.</strong> For request-scoped memory,
-                            without changing the language model.
+                            <strong>Temporary arenas.</strong> Request-scoped memory can be
+                            released in one step at the end of a block, without leaving the
+                            language model.
                         </li>
                         <li>
-                            <strong>Proved twice.</strong> After lowering, every function is
-                            rebuilt as an SSA graph and ownership is checked again on every
-                            path: each owned value is freed exactly once, never used after.
+                            <strong>Checked again after lowering.</strong> After lowering, every
+                            function is rebuilt as an SSA graph and ownership is checked again on
+                            every path: each owned value is freed exactly once and never used
+                            afterwards.
                         </li>
                         <li>
-                            <strong>Free pass-through.</strong> The graph knows the last use:
-                            <code>a ^ b ^ c</code> chains fuse, and an accumulator grows in
-                            place instead of being copied.
+                            <strong>Pass-through allocations.</strong> The graph knows the last
+                            use, so <code>a ^ b ^ c</code> chains fuse and an accumulator grows
+                            in place instead of being copied.
                         </li>
                         <li>
-                            <strong>Failures are loud.</strong> An allocation that cannot be served
-                            aborts with <code>[yack] out of memory</code>, integer overflow aborts
-                            instead of wrapping, and a thread that cannot be created is reported.
-                            No silent null pointer.
+                            <strong>Failures stop the program.</strong> An allocation that cannot
+                            be served aborts with <code>[yack] out of memory</code>. Integer
+                            overflow aborts instead of wrapping, and a thread that cannot be
+                            created is reported. There is no silent null pointer.
                         </li>
                     </ul>
                     <p class="memory-foot">
@@ -362,25 +366,25 @@
         <section class="section" id="tools" aria-labelledby="tools-title">
             <div class="section-head">
                 <p class="section-label">04. Tools</p>
-                <h2 id="tools-title">One binary, from source to native.</h2>
+                <h2 id="tools-title">The compiler and its tools</h2>
             </div>
 
             <div class="tools">
                 <article class="tool">
                     <code>yack new</code>
-                    <p>Scaffolds a project from a template: hello, cli, web or tui.</p>
+                    <p>Creates a project from a template: hello, cli, web or tui.</p>
                 </article>
                 <article class="tool">
                     <code>yack check</code>
-                    <p>Lex, parse, resolution, types and ownership. Silent when everything is fine.</p>
+                    <p>Runs the lexer, parser, resolution, types and ownership. It prints nothing when the program is fine.</p>
                 </article>
                 <article class="tool">
                     <code>yack fmt</code>
-                    <p>Deterministic, idempotent formatter, usable in your editor or in CI.</p>
+                    <p>Rewrites a file in one canonical form. A second run changes nothing.</p>
                 </article>
                 <article class="tool">
                     <code>yack build</code>
-                    <p>Typed IR, LLVM, clang. A native executable as output.</p>
+                    <p>Lowers the typed IR to LLVM, calls clang, and writes a native executable.</p>
                 </article>
                 <article class="tool">
                     <code>yack run</code>
@@ -388,9 +392,20 @@
                 </article>
                 <article class="tool">
                     <code>yack lsp</code>
-                    <p>Diagnostics, inlay hints, completion, hover and quick fixes; go to definition, references and rename across files; semantic tokens, signature help, call hierarchy and formatting. Native, no Node required.</p>
+                    <p>Diagnostics, inlay hints, completion, hover and quick fixes; go to definition, references and rename across files; semantic tokens, signature help, call hierarchy and formatting. It is a native binary, so it does not need Node.</p>
                 </article>
             </div>
+
+            <p>
+                The standard library has 29 modules, including six that reach the system:
+                <code>yack/fs</code> for directories and metadata, <code>yack/file</code> for
+                streaming handles, <code>yack/process</code> for running programs,
+                <code>yack/net</code> for DNS and TCP, <code>yack/time</code> for clocks and
+                dates, and <code>yack/random</code> for kernel random bytes. They use an
+                <code>extern</code> mechanism reserved for the standard library; descriptors
+                are opened with <code>O_CLOEXEC</code>, interrupted calls are retried, and
+                errors carry the errno in a <code>result</code> value.
+            </p>
 
             <p class="section-link">
                 <a class="text-link" href="cli.html">Argument parsing, colours and a tiny TUI in the standard library <span aria-hidden="true">→</span></a>
@@ -400,10 +415,12 @@
         <section class="section" id="cli" aria-labelledby="cli-title">
             <div class="section-head">
                 <p class="section-label">05. Command line</p>
-                <h2 id="cli-title">One command, a project that runs.</h2>
+                <h2 id="cli-title">Scaffold, check, format and build</h2>
                 <p>
-                    Real output from the binary, not a mockup. Scaffold a project, check
-                    it, format it, build it: no package manager, no hand-written config.
+                    The output below comes from the binary. A project is created with
+                    <code>yack new</code>, checked with <code>yack check</code>, formatted with
+                    <code>yack fmt</code> and built with <code>yack build</code>. There is no
+                    package manager and no hand-written build configuration.
                 </p>
             </div>
 
@@ -542,13 +559,13 @@ Hello from Ada !</code></pre>
             </div>
 
             <div class="sub-head">
-                <h3>Same program, four languages</h3>
+                <h3>The same program in four languages</h3>
                 <p>
-                    Same contract in each: an optional <code>--name</code> value, default
-                    <code>Yack</code>, one greeting, and a usage error on an unknown flag.
-                    Each uses its language's idiomatic parser. <code>flag</code> and
-                    <code>clap</code> print that error and exit inside the parser; Yack
-                    hands it back as a value, so its branch is visible in the source.
+                    Each version implements the same contract: an optional <code>--name</code>
+                    value, <code>Yack</code> as the default, one greeting, and a usage error on
+                    an unknown flag. Every version uses its language's idiomatic parser.
+                    <code>flag</code> and <code>clap</code> print that error and exit inside the
+                    parser; Yack returns it as a value, so the branch appears in the source.
                 </p>
             </div>
 
@@ -585,8 +602,9 @@ fun main () =
                     <p class="code-note code-note-dark">
                         The option is a declared <code>args.spec</code>: the flag name,
                         its help text and its default live in one value, and usage is
-                        generated from it. A bad flag is an <code>Error</code> value, not
-                        an exception, and <code>option.unwrap_or</code> owns the default.
+                        generated from it. A bad flag comes back as an <code>Error</code>
+                        value, so the caller handles it; <code>option.unwrap_or</code> owns the
+                        default.
                     </p>
                 </div>
 
@@ -605,8 +623,7 @@ func main() {
 }</code></pre>
                     <p class="code-note code-note-dark">
                         Go's <code>flag</code> does the same job with the standard
-                        library; memory is a garbage collector's problem rather than part
-                        of the type.
+                        library, and memory stays the garbage collector's concern.
                     </p>
                 </div>
 
@@ -713,7 +730,7 @@ fn main() {
             <p class="size-note">
                 Every native build is a single file. Yack loads <code>libsqlite3.so</code>
                 from the system because the runtime exposes SQLite; a Go binary embeds its
-                own runtime and libc, and Rust's <code>clap</code> is compiled in.
+                runtime and libc, and Rust compiles <code>clap</code> into the binary.
                 <code>--trim</code> compiles with <code>-Os</code>, drops unused sections and
                 strips symbols. Sizes are <code>wc -c</code> on the produced file, with no
                 post-build stripping beyond the flags shown.
@@ -727,11 +744,11 @@ fn main() {
         <section class="section web" id="web" aria-labelledby="web-title">
             <div class="section-head">
                 <p class="section-label">06. Web</p>
-                <h2 id="web-title">An HTTP API is a value.</h2>
+                <h2 id="web-title">Alpage, a web framework in Yack</h2>
                 <p>
-                    Alpage is the web framework written in Yack. Handlers are plain
-                    functions, the request is moved into them, errors are values,
-                    and the whole application can be tested without a socket.
+                    Alpage is written in Yack. Handlers are ordinary functions, the request is
+                    moved into the handler that owns it, errors are values, and an application
+                    can be tested without opening a socket.
                 </p>
             </div>
 
@@ -757,21 +774,23 @@ fn main() {
                 <div class="memory-copy">
                     <ul class="plain-list">
                         <li>
-                            <strong>Coming from Go, TypeScript or Gleam?</strong> The
-                            tutorial puts each step next to the code you already write.
+                            <strong>From another language.</strong> The tutorial puts each step
+                            next to the code you would write in Go, TypeScript or Gleam.
                         </li>
                         <li>
-                            <strong>No hidden owner.</strong> Reading a request twice is a
-                            compile error, not a bug found at run time.
+                            <strong>One owner per request.</strong> Reading a request twice is a
+                            compile error, so that bug cannot reach run time.
                         </li>
                         <li>
-                            <strong>Tested in process.</strong> The same value runs on the
-                            server and in the test client.
+                            <strong>Tests run without a socket.</strong> The same application
+                            value runs on the server and in the test client.
                         </li>
                         <li>
-                            <strong>Stops cleanly.</strong> The HTTP server catches
+                            <strong>Clean shutdown.</strong> The HTTP server handles
                             <code>SIGINT</code> and <code>SIGTERM</code>, closes the listener and
-                            every connection, and returns <code>Ok ()</code>.
+                            every connection, and returns <code>Ok ()</code>. It also closes
+                            slow, idle and non-reading connections, and a hostile-client fuzzer
+                            runs in the test suite.
                         </li>
                     </ul>
                     <p class="memory-foot">
@@ -784,13 +803,24 @@ fn main() {
         <section class="section state" id="status" aria-labelledby="status-title">
             <div class="state-intro">
                 <p class="section-label">07. Status</p>
-                <h2 id="status-title">An experiment, tested seriously.</h2>
+                <h2 id="status-title">Status of the project</h2>
                 <p>
-                    Yack is an experiment first: a comfortable ML-family language, with
-                    ownership checked in the frontend, carried through to native code, a web
-                    framework and a language server. What is in place is tested under
-                    AddressSanitizer, ThreadSanitizer and fuzzing; the rest is labelled as
-                    such.
+                    Yack is still an experiment: a language in the ML family, with ownership
+                    checked in the frontend and native code, a web framework and a language
+                    server built around it. The parts that exist are tested under
+                    AddressSanitizer, ThreadSanitizer and fuzzing; the table below marks
+                    everything else.
+                </p>
+                <p>
+                    It is not ready for production. The runtime blockers from the last audit are
+                    fixed: out-of-memory allocations abort with a message, thread creation
+                    failures are reported, and the HTTP server shuts down cleanly and backs off
+                    on <code>EMFILE</code>. Still missing: a stable, versioned standard library
+                    API (everything is 0.1.0), targets other than Linux x86-64, a language
+                    server that a malformed message cannot crash, an HTTP server that accepts
+                    requests and responses larger than 4&nbsp;KiB (larger ones are currently
+                    dropped), and CI running the test suites. It fits experiments, tools and
+                    side projects, not a service someone depends on.
                 </p>
                 <a class="text-link" href="https://github.com/AsymetricData/yack-public#état-du-projet">Full status table <span aria-hidden="true">↗</span></a>
             </div>
@@ -829,6 +859,10 @@ fn main() {
                     <span class="tag experimental" role="cell"><i aria-hidden="true"></i> Experimental</span>
                 </div>
                 <div class="status-row" role="row">
+                    <span role="cell">System modules (fs, file, process, net, time, random)</span>
+                    <span class="tag experimental" role="cell"><i aria-hidden="true"></i> Experimental</span>
+                </div>
+                <div class="status-row" role="row">
                     <span role="cell">Capturing closures</span>
                     <span class="tag absent" role="cell"><i aria-hidden="true"></i> Out of scope</span>
                 </div>
@@ -838,8 +872,12 @@ fn main() {
         <section class="section start" id="quick-start" aria-labelledby="quick-start-title">
             <div class="section-head">
                 <p class="section-label">08. Quick start</p>
-                <h2 id="quick-start-title">Three commands are enough.</h2>
-                <p>MLton for the compiler, clang for native output. Node or Bun only for tests.</p>
+                <h2 id="quick-start-title">Build and run a first project</h2>
+                <p>
+                    The compiler needs MLton, and <code>yack build</code> needs clang. Node or
+                    Bun is only used by the tests. Only Linux x86-64 is supported as a target:
+                    <code>yack build</code> refuses any other platform with an explicit error.
+                </p>
             </div>
 
             <div class="code-card code-card-wide">
@@ -857,6 +895,12 @@ make
 ../yack run</code></pre>
             </div>
 
+            <p>
+                The prebuilt <code>yack-linux-x86_64.tar.gz</code> on the
+                <a class="text-link" href="https://github.com/AsymetricData/yack-public/releases">releases page <span aria-hidden="true">↗</span></a>
+                finds <code>lib/</code> by itself, or through <code>YACK_LIB</code>.
+            </p>
+
             <div class="docs">
                 <a href="https://github.com/AsymetricData/yack-public#readme">
                     <strong>README</strong>
@@ -872,7 +916,7 @@ make
                 </a>
                 <a href="https://github.com/AsymetricData/yack-public/blob/main/docs/stdlib.md">
                     <strong>Standard library</strong>
-                    <span>23 modules, from lists to JSON and TUI</span>
+                    <span>29 modules, from lists and JSON to files, processes, TCP and a TUI</span>
                 </a>
             </div>
         </section>

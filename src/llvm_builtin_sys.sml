@@ -7,9 +7,12 @@ struct
     , fresh : string -> string
     , freshLabel : string -> string
     , lowerExpr : localEntry list -> Ir.expr -> value
+    , allocString : string -> string
     , stackMode : bool
     , enterArena : unit -> unit
     , leaveArena : unit -> unit
+    , arenaMark : unit -> unit
+    , arenaRelease : unit -> unit
     }
 
   fun lower (env : env) (locals, name, arguments, resultTy) =
@@ -18,9 +21,12 @@ let
   val fresh = #fresh env
   val freshLabel = #freshLabel env
   val lowerExpr = #lowerExpr env
+  val allocString = #allocString env
   val stackMode = #stackMode env
   val enterArena = #enterArena env
   val leaveArena = #leaveArena env
+  val arenaMark = #arenaMark env
+  val arenaRelease = #arenaRelease env
   val lowered = List.map (lowerExpr locals) arguments
       val result = fn text => { text = text, ty = resultTy, const = false }
       val headerTy = "{ ptr, i64, i64, ptr }"
@@ -215,10 +221,39 @@ let
           result reg
         end
     in
+      if String.isPrefix "extern:" name then
+        lowerExtern env (name, lowered, resultTy)
+      else if name = "extern_view" then
+        lowerExternView env (lowered, resultTy)
+      else if name = "extern_view_ptr" then
+        lowerExternViewPtr env (lowered, resultTy)
+      else if name = "c_ptr.of_int" then
+        let
+          val value =
+            case lowered of
+              argument :: _ => argument
+            | [] => { text = "0", ty = Ir.Int 64, const = true }
+          val reg = fresh "cptr.of_int"
+          val _ = emit (reg ^ " = inttoptr i64 " ^ #text value ^ " to ptr")
+        in
+          { text = reg, ty = resultTy, const = false }
+        end
+      else if name = "c_ptr.is_null" then
+        let
+          val value =
+            case lowered of
+              argument :: _ => argument
+            | [] => { text = "null", ty = Ir.TCPtr, const = true }
+          val reg = fresh "cptr.is_null"
+          val _ = emit (reg ^ " = icmp eq ptr " ^ #text value ^ ", null")
+        in
+          { text = reg, ty = resultTy, const = false }
+        end
+      else
       case (name, lowered) of
         ("sys.socket_tcp", []) =>
           let val reg = fresh "sys.socket" in
-            emit (reg ^ " = call i32 @socket(i32 2, i32 1, i32 0)");
+            emit (reg ^ " = call i32 @socket(i32 2, i32 524289, i32 0)");
             result reg
           end
       | ("sys.reuseaddr", [fd]) =>
@@ -267,8 +302,8 @@ let
           end
       | ("sys.accept", [fd]) =>
           let val reg = fresh "sys.accept" in
-            emit (reg ^ " = call i32 @accept(i32 " ^ #text fd ^
-                  ", ptr null, ptr null)");
+            emit (reg ^ " = call i32 @accept4(i32 " ^ #text fd ^
+                  ", ptr null, ptr null, i32 524288)");
             result reg
           end
       | ("sys.connect_loopback", [fd, port]) =>
@@ -339,7 +374,7 @@ let
           end
       | ("sys.epoll_create", []) =>
           let val reg = fresh "sys.epoll" in
-            emit (reg ^ " = call i32 @epoll_create1(i32 0)");
+            emit (reg ^ " = call i32 @epoll_create1(i32 524288)");
             result reg
           end
       | ("sys.epoll_add", [epfd, fd, events]) =>
@@ -510,19 +545,22 @@ let
           end
       | ("sys.scratch_enter", []) =>
           ( if Memory.arenaEnabled () then
-              emit "call void @yack_scratch_enter()"
+              if stackMode then arenaMark ()
+              else emit "call void @yack_scratch_enter()"
             else ()
           ; { text = "", ty = resultTy, const = true }
           )
       | ("sys.scratch_enter_all", []) =>
           ( if Memory.arenaEnabled () then
-              emit "call void @yack_scratch_enter_all()"
+              if stackMode then arenaMark ()
+              else emit "call void @yack_scratch_enter_all()"
             else ()
           ; { text = "", ty = resultTy, const = true }
           )
       | ("sys.scratch_leave", []) =>
           ( if Memory.arenaEnabled () then
-              emit "call void @yack_scratch_leave()"
+              if stackMode then arenaRelease ()
+              else emit "call void @yack_scratch_leave()"
             else ()
           ; { text = "", ty = resultTy, const = true }
           )
@@ -577,6 +615,18 @@ let
             val _ = emit ("call void @yack_sleep_ms(i64 " ^ width ^ ")")
           in
             { text = "", ty = resultTy, const = true }
+          end
+      | ("sys.monotonic_ms", []) =>
+          let val reg = fresh "sys.monotonic"
+          in
+            emit (reg ^ " = call i64 @yack_monotonic_ms()");
+            result reg
+          end
+      | ("sys.realtime_ms", []) =>
+          let val reg = fresh "sys.realtime"
+          in
+            emit (reg ^ " = call i64 @yack_realtime_ms()");
+            result reg
           end
       | ("sqlite_open", [path]) =>
           let val data = stringData path
@@ -681,6 +731,167 @@ let
           end
       | _ =>
           { text = "0", ty = resultTy, const = true }
+    end
+
+  and lowerExtern (env : env) (name, lowered, resultTy) =
+    let
+      val emit = #emit env
+      val fresh = #fresh env
+      val allocString = #allocString env
+      fun stringData value =
+        let val data = fresh "extern.data" in
+          emit (data ^ " = extractvalue { ptr, i64, i1 } " ^
+                #text value ^ ", 0");
+          data
+        end
+      fun cString value =
+        let
+          val data = stringData value
+          val length = fresh "extern.len"
+          val size = fresh "extern.size"
+          val endPointer = fresh "extern.end"
+          val _ = emit (length ^ " = extractvalue { ptr, i64, i1 } " ^
+                        #text value ^ ", 1")
+          val _ = emit (size ^ " = add i64 " ^ length ^ ", 1")
+          val memory = allocString size
+          val _ = emit ("call void @memcpy(ptr " ^ memory ^ ", ptr " ^
+                        data ^ ", i64 " ^ length ^ ")")
+          val _ = emit (endPointer ^ " = getelementptr i8, ptr " ^ memory ^
+                        ", i64 " ^ length)
+          val _ = emit ("store i8 0, ptr " ^ endPointer)
+        in
+          memory
+        end
+      fun arrayData value =
+        let
+          val field = fresh "extern.field"
+          val data = fresh "extern.array"
+          val _ = emit (field ^ " = getelementptr { ptr, i64, i64, ptr }, ptr " ^
+                        #text value ^ ", i32 0, i32 0")
+          val _ = emit (data ^ " = load ptr, ptr " ^ field)
+        in
+          data
+        end
+      val temporaries = ref []
+      fun argumentText value =
+        case #ty value of
+          Ir.Int _ => llvmTy (#ty value) ^ " " ^ #text value
+        | Ir.TCPtr => "ptr " ^ #text value
+        | Ir.TString =>
+            let val memory = cString value in
+              temporaries := memory :: !temporaries;
+              "ptr " ^ memory
+            end
+        | Ir.TBorrow (Ir.TString, _) =>
+            let val memory = cString value in
+              temporaries := memory :: !temporaries;
+              "ptr " ^ memory
+            end
+        | Ir.TArray _ => "ptr " ^ arrayData value
+        | Ir.TBorrow (Ir.TArray _, _) => "ptr " ^ arrayData value
+        | _ => "i64 0"
+      val symbol = String.extract (name, String.size "extern:", NONE)
+      val argumentTexts = List.map argumentText lowered
+      val resultText = if isUnit resultTy then "void" else llvmTy resultTy
+      val callText =
+        "call " ^ resultText ^ " @" ^ symbol ^ "(" ^
+        String.concatWith ", " argumentTexts ^ ")"
+      fun freeTemporaries () =
+        List.app
+          (fn memory => emit ("call void @yack_free(ptr " ^ memory ^ ")"))
+          (!temporaries)
+    in
+      if isUnit resultTy then
+        ( emit callText
+        ; freeTemporaries ()
+        ; { text = "", ty = resultTy, const = true }
+        )
+      else
+        let val reg = fresh "extern.result" in
+          emit (reg ^ " = " ^ callText);
+          freeTemporaries ();
+          { text = reg, ty = resultTy, const = false }
+        end
+    end
+
+  and lowerExternView (env : env) (lowered, resultTy) =
+    let
+      val emit = #emit env
+      val fresh = #fresh env
+      val freshLabel = #freshLabel env
+      val size =
+        case resultTy of
+          Ir.TBorrow (Ir.TRecord (_, Ir.DExtern (_, size)), _) => size
+        | _ => 0
+      val value =
+        case lowered of
+          argument :: _ => argument
+        | [] => { text = "null", ty = Ir.TArray (Ir.Int 8), const = true }
+      val field = fresh "extern.view.field"
+      val data = fresh "extern.view.data"
+      val length = fresh "extern.view.length"
+      val ok = fresh "extern.view.ok"
+      val badLabel = freshLabel "extern.view.bad"
+      val goodLabel = freshLabel "extern.view.good"
+      val _ =
+        emit (field ^ " = getelementptr { ptr, i64, i64, ptr }, ptr " ^
+              #text value ^ ", i32 0, i32 0")
+      val _ = emit (data ^ " = load ptr, ptr " ^ field)
+      val lengthPointer = fresh "extern.view.lenp"
+      val _ =
+        emit (lengthPointer ^ " = getelementptr { ptr, i64, i64, ptr }, ptr " ^
+              #text value ^ ", i32 0, i32 1")
+      val _ = emit (length ^ " = load i64, ptr " ^ lengthPointer)
+      val _ = emit (ok ^ " = icmp uge i64 " ^ length ^ ", " ^
+                    Int.toString size)
+      val _ = emit ("br i1 " ^ ok ^ ", label %" ^ goodLabel ^
+                    ", label %" ^ badLabel)
+      val _ = emit (badLabel ^ ":")
+      val _ =
+        emit ("call void @yack_abort_bounds(i64 " ^ Int.toString size ^
+              ", i64 " ^ length ^ ")")
+      val _ = emit "unreachable"
+      val _ = emit (goodLabel ^ ":")
+    in
+      { text = data, ty = resultTy, const = false }
+    end
+
+  and lowerExternViewPtr (env : env) (lowered, resultTy) =
+    let
+      val emit = #emit env
+      val fresh = #fresh env
+      val freshLabel = #freshLabel env
+      val size =
+        case resultTy of
+          Ir.TBorrow (Ir.TRecord (_, Ir.DExtern (_, size)), _) => size
+        | _ => 0
+      val address =
+        case lowered of
+          argument :: _ => argument
+        | [] => { text = "null", ty = Ir.TCPtr, const = true }
+      val requested =
+        case lowered of
+          _ :: argument :: _ => argument
+        | _ => { text = "0", ty = Ir.Int 32, const = true }
+      val requested64 = fresh "extern.view.ptr.size64"
+      val matches = fresh "extern.view.ptr.matches"
+      val nonNull = fresh "extern.view.ptr.nonnull"
+      val valid = fresh "extern.view.ptr.valid"
+      val badLabel = freshLabel "extern.view.ptr.bad"
+      val goodLabel = freshLabel "extern.view.ptr.good"
+      val _ = emit (requested64 ^ " = sext i32 " ^ #text requested ^ " to i64")
+      val _ = emit (matches ^ " = icmp eq i64 " ^ requested64 ^ ", " ^
+                    Int.toString size)
+      val _ = emit (nonNull ^ " = icmp ne ptr " ^ #text address ^ ", null")
+      val _ = emit (valid ^ " = and i1 " ^ matches ^ ", " ^ nonNull)
+      val _ = emit ("br i1 " ^ valid ^ ", label %" ^ goodLabel ^
+                    ", label %" ^ badLabel)
+      val _ = emit (badLabel ^ ":")
+      val _ = emit "call void @abort()"
+      val _ = emit "unreachable"
+      val _ = emit (goodLabel ^ ":")
+    in
+      { text = #text address, ty = resultTy, const = false }
     end
 
 end

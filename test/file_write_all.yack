@@ -1,0 +1,31 @@
+
+
+import yack/bytes
+import yack/file
+import yack/fs
+import yack/io
+
+fun main () =
+    let val path = "/tmp/yack-file-write-all"
+        val _ = fs.remove (borrow path)
+    in
+        case file.open (borrow path, file.Write) of
+            Error (message) => print_string (message)
+          | Ok (handle) =>
+                let val data = bytes.from_string (borrow "hello write_all")
+                    val wrote = file.write_all (borrow handle, data)
+                    val _ = file.close (handle)
+                in
+                    case wrote of
+                        Error (message) => print_string (message)
+                      | Ok (count) =>
+                            let val text =
+                                    case io.read_file
+                                             (string_copy (borrow path)) of
+                                        Ok (value) => value
+                                      | Error (_) => ""
+                                val size = string_length (borrow text)
+                                val _ = fs.remove (borrow path)
+                            in print_int (count + size) end
+                end
+    end

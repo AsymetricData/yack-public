@@ -284,6 +284,29 @@ struct
         ; 1
         )
 
+  fun checkArchitecture () =
+    let
+      fun field name =
+        case List.find (fn (key, _) => key = name)
+               (Posix.ProcEnv.uname ()) of
+          SOME (_, value) => value
+        | NONE => ""
+      val sysname = field "sysname"
+      val machine = field "machine"
+    in
+      if sysname = "Linux" andalso
+         (machine = "x86_64" orelse machine = "amd64") then ()
+      else
+        ( TextIO.output
+            ( TextIO.stdErr
+            , "yack: unsupported platform `" ^ sysname ^ "/" ^ machine ^
+              "`\n" ^
+              "  the stdlib extern records and getdents64 are Linux x86-64 only\n"
+            )
+        ; OS.Process.exit OS.Process.failure
+        )
+    end
+
   fun main () =
     let
       val stderrStyle = makeStyle (ColorAuto, Posix.FileSys.stderr)
@@ -363,12 +386,17 @@ struct
         | ["ssa", "--loans", file] => exitWith (ssaOnly true file)
         | ["ssa-fmt", file] => exitWith (ssaFormat file)
         | ["ssa-check", file] => exitWith (ssaCheck file)
-        | ["llvm", file] => exitWith (llvmOnly mode reserve file)
+        | ["llvm", file] =>
+            (checkArchitecture (); exitWith (llvmOnly mode reserve file))
         | ["build", file, output] =>
-            exitWith (build mode reserve trim file output)
-        | ["run", file] => exitWith (runFile mode reserve trim file)
+            (checkArchitecture ();
+             exitWith (build mode reserve trim file output))
+        | ["run", file] =>
+            (checkArchitecture ();
+             exitWith (runFile mode reserve trim file))
         | "run" :: runArguments =>
-            exitWith (runCommand mode reserve trim runArguments)
+            (checkArchitecture ();
+             exitWith (runCommand mode reserve trim runArguments))
         | _ => (usage (); OS.Process.exit OS.Process.failure)
         end
     end

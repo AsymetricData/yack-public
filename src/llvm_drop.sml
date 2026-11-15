@@ -21,6 +21,7 @@ struct
         | Ir.TRecord (_, _) => true
         | Ir.TData (_, _, _) => true
         | Ir.TString => true
+        | Ir.TCPtr => false
         | Ir.TArray _ => true
         | Ir.TMap _ => true
         | Ir.TFun _ => false

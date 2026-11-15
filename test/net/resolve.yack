@@ -1,0 +1,64 @@
+
+
+
+import net/Net
+import yack/map
+import yack/string
+
+fun all (checks : bool list) : bool =
+    case checks of
+        [] => true
+      | check :: rest =>
+            if check then all (rest) else false
+
+fun scan
+    (values : string list, seen : bool map, count : int) : (int * bool) =
+    case values of
+        Nil => (count, false)
+      | Cons (value, rest) =>
+            if map_has (seen, value) then (count + 1, true)
+            else scan (rest, map.set (seen, value, true), count + 1)
+
+fun check_resolve () : bool =
+    case Net.resolve (borrow "localhost") of
+        Error (_) => false
+      | Ok (values) =>
+            let val (count, duplicate) = scan (values, map.new (), 0)
+            in
+                if count = 0 then false
+                else if duplicate then false
+                else true
+            end
+
+fun check_resolve_error () : bool =
+    case Net.resolve (borrow "no-such-host.invalid") of
+        Error (message) => string.contains (borrow message, borrow "(code ")
+      | Ok (_) => false
+
+fun check_connect_error () : bool =
+    case Net.connect (borrow "127.0.0.1", 1) of
+        Error (message) =>
+            if string.contains (borrow message, borrow "errno") then
+                if string.contains (borrow message, borrow "no stream address")
+                then false
+                else true
+            else false
+      | Ok (stream) =>
+            let val _ = Net.close (stream)
+            in false
+            end
+
+fun check_port () : bool =
+    case Net.connect (borrow "127.0.0.1", 65536) of
+        Error (message) => string.contains (borrow message, borrow "port")
+      | Ok (stream) =>
+            let val _ = Net.close (stream)
+            in false
+            end
+
+fun main () =
+    if all ([check_resolve (),
+             check_resolve_error (),
+             check_connect_error (),
+             check_port ()]) then print_string ("ok")
+    else print_string ("FAIL")

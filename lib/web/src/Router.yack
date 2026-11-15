@@ -55,7 +55,7 @@ fun match_segments
                 val is_wildcard = string.starts_with (borrow segment, borrow star)
             in
                 if is_wildcard then
-                    let val name = string_slice (borrow segment, 1, string_length (borrow segment))
+                    let val name = string.slice (borrow segment, 1, string.length (borrow segment))
                         val value = string.join ("/", path)
                     in Some (Cons (((name, value), params)))
                     end
@@ -66,10 +66,10 @@ fun match_segments
                             if is_param then
                                 let val name =
                                         string_slice
-                                            (borrow segment, 1, string_length (borrow segment))
+                                            (borrow segment, 1, string.length (borrow segment))
                                 in match_segments (rest, tail, Cons (((name, value), params)))
                                 end
-                            else if string_eq (borrow segment, borrow value) then
+                            else if string.equals (borrow segment, borrow value) then
                                 match_segments (rest, tail, params)
                             else None
             end
@@ -190,7 +190,7 @@ fun param_from (name : borrow string, params : (string * string) list) : string 
           let val key = pair.0
               val value = pair.1
           in
-              if string_eq (name, borrow key) then Some (value)
+              if string.equals (name, borrow key) then Some (value)
               else param_from (name, rest)
           end
 
@@ -216,7 +216,7 @@ fun find_route_from
                 let val route_method = array.get_borrow (borrow methods, index)
                     val route_path = array.get_borrow (borrow paths, index)
                     val matched = match_path (route_path, path)
-                    val same = string_eq (route_method, method)
+                    val same = string.equals (route_method, method)
                     val borrowed_handler =
                         array.get_borrow (borrow handlers, index)
                     val handler = { run = borrowed_handler.run }

@@ -6,7 +6,21 @@ struct
   open DriverIo
   open DriverLoad
 
-  fun compileProject (style : style) interactive mode reserve trim file outputPath display =
+  fun usesSqlite text =
+    let
+      fun hasSymbol line = String.isSubstring "@sqlite3_" line
+      fun isDeclare line =
+        case String.tokens Char.isSpace line of
+          ("declare" :: _) => true
+        | _ => false
+      fun loop [] = false
+        | loop (line :: rest) =
+            (not (isDeclare line) andalso hasSymbol line) orelse loop rest
+    in
+      loop (String.tokens (fn c => c = #"\n") text)
+    end
+
+  fun compileProject (style : style) interactive dev mode reserve trim file outputPath display =
     let
       val checkStart = Time.now ()
       val writtenLabel =
@@ -52,6 +66,8 @@ struct
                       if trim then
                         "-Os -ffunction-sections -fdata-sections " ^
                         "-Wl,--gc-sections "
+                      else if dev then
+                        "-O0 "
                       else
                         "-O2 "
 
@@ -60,11 +76,13 @@ struct
                         "-Wl,--strip-all "
                       else
                         ""
+                    val sqlite =
+                      if usesSqlite llvmText then " -lsqlite3" else ""
                     val command =
                       "clang " ^ optimize ^ strip ^ sanitize ^
-                      "-Wno-override-module -lsqlite3 -o " ^
+                      "-Wno-override-module -o " ^
                       shellQuote outputPath ^ " " ^
-                      shellQuote llvmPath ^ " > " ^
+                      shellQuote llvmPath ^ sqlite ^ " > " ^
                       shellQuote logPath ^ " 2>&1"
                     val _ =
                       if interactive then
@@ -113,7 +131,7 @@ struct
       val style = makeStyle (ColorAuto, Posix.FileSys.stderr)
       val interactive = progressEnabled Posix.FileSys.stderr
     in
-      if compileProject style interactive mode reserve trim file outputPath
+      if compileProject style interactive false mode reserve trim file outputPath
            (SOME outputPath) then
         0
       else 1
@@ -132,7 +150,7 @@ struct
         ; OS.FileSys.remove logPath handle _ => ()
         )
     in
-      if not (compileProject style interactive mode reserve trim file outputPath NONE) then
+      if not (compileProject style interactive true mode reserve trim file outputPath NONE) then
         ( cleanup (); 1 )
       else
         let

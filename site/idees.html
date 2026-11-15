@@ -34,13 +34,12 @@
     <main id="content">
         <div class="tut-hero">
             <p class="eyebrow">Notes de conception · Modèle mémoire · environ 20 minutes</p>
-            <h1>La possession, <span class="accent">sans ramasse-miettes.</span></h1>
+            <h1>La possession à la place <span class="accent">d'un ramasse-miettes.</span></h1>
             <p class="lead">
                 Yack est une expérience : un petit langage de la famille ML, dont la syntaxe
-                plaît à son auteur par sa simplicité, compilé en code natif via LLVM. Les
-                types affines et linéaires, empruntés au modèle de possession de Rust,
-                remplacent le ramasse-miettes ; la seule cérémonie qui reste est celle que
-                les types imposent.
+                plaît à son auteur, compilé en code natif via LLVM. Les types affines et
+                linéaires, ces idées de possession que Rust a rendues familières, remplacent le
+                ramasse-miettes. La seule cérémonie qui reste est celle que les types imposent.
             </p>
             <ul class="from-langs" aria-label="Construit à partir de">
                 <li>la syntaxe de <strong>SML</strong> et <strong>OCaml</strong></li>
@@ -69,39 +68,38 @@
             <div class="tut-body">
                 <section class="step" id="question" aria-labelledby="question-title">
                     <span class="step-num">01. Le point de départ</span>
-                    <h2 id="question-title">Un ML confortable, sans ramasse-miettes</h2>
+                    <h2 id="question-title">Pourquoi le langage existe</h2>
                     <p>
                         Yack existe parce que son auteur voulait un langage dont la syntaxe lui
-                        plaît : sympathique, simple, celle de la famille ML, proche de SML et
-                        OCaml, avec <code>let</code> et <code>val</code>, <code>fun</code>,
-                        les datatypes, le filtrage par motifs, les modules et les pipes.
-                        L'objectif est un langage où l'on se sente comme chez soi, confortable à
-                        écrire, avec peu de cérémonie.
+                        plaît : la famille ML, proche de SML et OCaml, avec <code>let</code> et
+                        <code>val</code>, <code>fun</code>, les datatypes, le filtrage par motifs,
+                        les modules et les pipes. L'objectif est un langage familier et confortable
+                        à écrire.
                     </p>
                     <p>
                         Rust montre que la possession peut remplacer un ramasse-miettes : les
                         types affines et linéaires, les déplacements et les emprunts font le
-                        travail qu'un collecteur à balayage ferait autrement. Sa syntaxe est
-                        toutefois ressentie comme plus verbeuse et plus lourde ; Yack garde les
-                        idées de possession et abandonne ce poids. Le modèle mémoire reste
-                        vérifié dans le frontend, sur une syntaxe qui reste petite.
+                        travail qu'un collecteur à balayage ferait autrement. Sa syntaxe paraît
+                        plus verbeuse en comparaison, alors Yack garde les idées de possession et
+                        laisse ce poids de côté. Le modèle mémoire est vérifié dans le frontend,
+                        sur une syntaxe qui reste petite.
                     </p>
                     <p>
                         La seule cérémonie qui devrait rester est celle que les types imposent :
                         un déplacement quand la possession est transférée, une annotation
-                        d'emprunt quand une valeur est lue sans être prise, un appel qui consomme
-                        une valeur linéaire. <a href="#borrowing">La section sur l'emprunt</a>
-                        montre les annotations, et <a href="#costs">Ce que cela coûte</a> indique
-                        où elles se font sentir. Yack est une expérience ; la version 0.2.0 est
-                        utilisable et testée, mais elle n'est pas présentée comme prête pour la
-                        production.
+                        d'emprunt quand une valeur est lue sans être prise, et un appel qui
+                        consomme une valeur linéaire. <a href="#borrowing">La section sur
+                        l'emprunt</a> montre les annotations, et <a href="#costs">Ce que cela
+                        coûte</a> décrit où elles se font sentir. Yack est une expérience ; la
+                        version 0.2.0 est utilisable et testée, mais elle n'est pas présentée comme
+                        prête pour la production.
                     </p>
                     <div class="callout">
                         <strong>Aucune collecte cachée à l'exécution.</strong>
                         Les valeurs sont déplacées, empruntées et détruites selon la propriété
                         déclarée. Il n'y a ni ramasse-miettes à balayage ni comptage de
-                        références ; le compilateur émet du code natif et les informations de
-                        possession sont vérifiées avant la génération de code.
+                        références. Le compilateur émet du code natif, et la possession est
+                        vérifiée avant la génération de code.
                     </div>
                     <p>
                         Le reste de cette page décrit le modèle tel qu'il existe dans le dépôt,
@@ -289,11 +287,11 @@ fun main () =
   = hint: or move the consumption after the `if`/`case` so every branch reaches it</code></pre>
                     </div>
                     <p>
-                        La linéarité est une propriété de type déclarée, pas un cas particulier
-                        réservé à deux primitives. Un record ou un datatype peut être déclaré
-                        <code>: Linear</code>, et le vérificateur le suit à travers les branches.
-                        La liaison SQLite de <code>lib/sql/src/Sqlite.yack</code> le fait pour
-                        <code>db</code> et <code>statement</code> :
+                        La linéarité est une propriété de type déclarée ; un record ou un datatype
+                        peut être déclaré <code>: Linear</code>, et le vérificateur le suit à
+                        travers les branches. La liaison SQLite de
+                        <code>lib/sql/src/Sqlite.yack</code> le fait pour <code>db</code> et
+                        <code>statement</code> :
                     </p>
                     <div class="code-card">
                         <div class="code-head">
@@ -332,7 +330,7 @@ fun main () = ()</code></pre>
                         fonctions sont <code>close_listener</code> et <code>close</code>. La
                         linéarité est ici une discipline portée par des types de handles
                         déclarés : la propriété est vérifiée par la même analyse de possession
-                        que les déplacements, pas par un mécanisme d'exécution séparé.
+                        que les déplacements, sans mécanisme d'exécution séparé.
                     </p>
                 </section>
 
@@ -399,8 +397,8 @@ fun main () =
                     <p>
                         Yack possède deux modes d'allocation, choisis à la compilation avec
                         <code>--memory=heap</code> (le défaut) ou <code>--memory=stack</code>.
-                        Le même source peut être compilé dans l'un ou l'autre ; le mode change
-                        l'exécution émise, pas un drapeau d'exécution.
+                        Le même source peut être compilé dans l'un ou l'autre ; le choix change
+                        l'exécution émise, et il n'y a pas d'interrupteur à l'exécution.
                     </p>
                     <div class="table-scroll">
                     <table class="compare">
@@ -446,24 +444,24 @@ fun main () =
                         (<code>E0703</code>).
                     </p>
                     <p>
-                        Le mode stack est la moitié la plus ambitieuse de l'expérience. Il
-                        n'émet aucun <code>malloc</code>, <code>calloc</code>,
-                        <code>realloc</code> ou <code>free</code> de la libc pour les valeurs
-                        Yack ; les allocations viennent d'une région réservée avec
-                        <code>mmap</code>. Le contrat veut que le compilateur prouve qu'une
-                        valeur ne survit pas à sa région et refuse le programme plutôt que de
-                        retomber sur le tas. Le vérificateur de régions est encore en cours
-                        d'achèvement : <code>E0702</code> couvre les stockages que l'analyse ne
-                        peut pas prouver, <code>E0703</code> un emprunt dont le propriétaire vit
-                        dans une arène fermée, et <code>E0701</code> (une valeur qui s'échappe
-                        de sa région) reste inachevé. Le README marque tout le mode comme
-                        expérimental pour cette raison.
+                        Le mode stack est la moitié la plus ambitieuse de l'expérience. Il n'émet
+                        aucun <code>malloc</code>, <code>calloc</code>, <code>realloc</code> ou
+                        <code>free</code> de la libc pour les valeurs Yack ; les allocations
+                        viennent d'une région réservée avec <code>mmap</code>. Le contrat veut que
+                        le compilateur prouve qu'une valeur ne survit pas à sa région et refuse le
+                        programme plutôt que de retomber sur le tas. Un vérificateur de régions
+                        tourne maintenant sur chaque compilation en mode stack :
+                        <code>E0701</code> couvre une valeur qui pourrait survivre à sa région
+                        d'activation, <code>E0702</code> un stockage que l'analyse ne peut pas
+                        prouver, <code>E0703</code> un emprunt dont le propriétaire vit dans une
+                        arène fermée, et <code>E0704</code> un site d'allocation qu'il ne prend pas
+                        en charge. Le mode reste expérimental, et le README le dit.
                     </p>
                     <div class="callout warn">
                         <strong>Expérimental veut dire expérimental.</strong>
                         Le mode stack est testé différentiellement contre le mode heap et sous
                         AddressSanitizer, mais l'analyse de régions garde des recoins
-                        conservateurs. Le mode heap reste le défaut pour une bonne raison.
+                        conservateurs. Le mode heap reste le défaut.
                     </div>
                 </section>
 
@@ -504,9 +502,9 @@ fun main () =
                         <code>docs/threads.md</code>.
                     </p>
                     <p>
-                        Le chemin brut des handles SQLite dans <code>docs/sql.md</code> est
-                        l'exception qui confirme la règle : un handle de connexion est passé
-                        comme un <code>int64</code>, et ce chemin n'est explicitement
+                        Le chemin brut des handles SQLite dans <code>docs/sql.md</code> est la
+                        seule exception : un handle de connexion est passé comme un
+                        <code>int64</code>, et ce chemin n'est explicitement
                         <strong>pas vérifié</strong>. Le propriétaire doit garder la connexion
                         vivante jusqu'à <code>thread_join</code>. Le langage ne le prouve pas.
                     </p>
@@ -560,24 +558,24 @@ fun main () =
                             92 680 octets avec <code>--trim</code>, contre 2 471 820 octets pour
                             la compilation Go et 1 042 640 octets pour la compilation Rust avec
                             <code>clap</code>. Le binaire Yack est lié dynamiquement à libc, libm
-                            et libsqlite3 ; la comparaison porte sur l'artefact livré, pas sur la
-                            vitesse.
+                            et libsqlite3 ; la comparaison mesure l'artefact livré, et la vitesse
+                            est une autre question.
                         </li>
                     </ul>
                     <p>
-                        Ce sont des propriétés de l'implémentation actuelle, pas une affirmation
-                        générale de « sûreté mémoire ». Les programmes qui utilisent des handles
-                        bruts, ou des parties de l'exécution que le validateur SSA ne modélise
-                        pas, restent hors du sous-ensemble vérifié. Le dépôt nomme ces
-                        frontières plutôt que de les masquer.
+                        Ce sont des propriétés de l'implémentation actuelle, et l'affirmation
+                        s'arrête là : les programmes qui utilisent des handles bruts, ou des
+                        parties de l'exécution que le validateur SSA ne modélise pas, restent hors
+                        du sous-ensemble vérifié. Le dépôt énumère ces frontières dans sa
+                        documentation.
                     </p>
                 </section>
 
                 <section class="step" id="costs" aria-labelledby="costs-title">
                     <span class="step-num">09. Ce que cela coûte</span>
-                    <h2 id="costs-title">Les difficultés font partie de la conception</h2>
+                    <h2 id="costs-title">Là où le modèle peine</h2>
                     <p>
-                        Le modèle n'est pas gratuit, et le dépôt dit franchement où il peine :
+                        Le modèle a un coût réel, et le dépôt dit où il peine :
                     </p>
                     <ul>
                         <li>
@@ -587,9 +585,8 @@ fun main () =
                             possession ; un emprunt renvoyé a besoin de <code>from</code> quand
                             plusieurs paramètres pourraient être la source. Le compilateur infère
                             beaucoup, mais la surface de possession reste visible dans le source.
-                            Ces annotations d'emprunt et ces copies explicites sont exactement
-                            la cérémonie que les types imposent ; c'est le prix d'une possession
-                            vérifiable sans collecteur, pas du bruit accidentel.
+                            Ces annotations d'emprunt et ces copies explicites sont ce que coûte
+                            une possession vérifiée sans collecteur.
                         </li>
                         <li>
                             <strong>Pas de closures capturantes.</strong> Les fonctions peuvent
@@ -645,8 +642,8 @@ fun main () =
                             abstraction <code>Comparator</code> ou <code>Hashable</code>.
                             <code>yack/map</code> est indexé par chaîne ; une map générique
                             aurait besoin de <code>hash</code> et <code>eq</code> pour sa clé.
-                            <code>docs/stdlib.md</code> présente cela comme une limite de
-                            conception, pas comme un oubli.
+                            <code>docs/stdlib.md</code> traite cela comme une limite de
+                            conception.
                         </li>
                         <li>
                             <strong>Les graphes partagés et les cycles sont maladroits ou
@@ -676,9 +673,10 @@ fun main () =
                         </li>
                         <li>
                             <strong>Toujours expérimental.</strong> L'analyse de régions du mode
-                            stack est incomplète ; les handles SQLite bruts ne sont pas vérifiés ;
-                            la bibliothèque standard est partielle pour le réseau, les dates et
-                            les encodages ; il n'y a ni visibilité <code>pub</code>/privée ni
+                            stack reste conservatrice ; les handles SQLite bruts ne sont pas
+                            vérifiés ; la bibliothèque standard reste partielle pour les encodages
+                            de texte, et les modules système récents (fichiers, processus, TCP,
+                            temps) sont jeunes ; il n'y a ni visibilité <code>pub</code>/privée ni
                             <code>open</code>. La table d'état du README est la carte actuelle.
                         </li>
                     </ul>

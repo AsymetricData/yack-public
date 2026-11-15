@@ -47,8 +47,8 @@ fun parse_part (part : string) : string * string =
             (trimmed, "")
         else
             (
-                string_slice (borrow trimmed, 0, equal),
-                string_slice (borrow trimmed, equal + 1, string_length (borrow trimmed))
+                string.slice (borrow trimmed, 0, equal),
+                string.slice (borrow trimmed, equal + 1, string.length (borrow trimmed))
             )
     end
 
@@ -83,13 +83,13 @@ fun parse_header (value : borrow string) : (string, string) list =
 
 fun skip_spaces_at (text : borrow string, index : int, stop : int) : int =
     if index >= stop then index
-    else if string_char_at_unchecked (text, index) = 32 then
+    else if string.char_at_unchecked (text, index) = 32 then
         skip_spaces_at (text, index + 1, stop)
     else index
 
 fun trim_right_index (text : borrow string, start : int, stop : int) : int =
     if stop <= start then start
-    else if string_char_at_unchecked (text, stop - 1) = 32 then
+    else if string.char_at_unchecked (text, stop - 1) = 32 then
         trim_right_index (text, start, stop - 1)
     else stop
 
@@ -101,13 +101,13 @@ fun slice_eq_from
     , index : int
     ) : bool =
     if index >= stop - start then true
-    else if string_char_at_unchecked (value, index) =
-            string_char_at_unchecked (text, start + index)
+    else if string.char_at_unchecked (value, index) =
+            string.char_at_unchecked (text, start + index)
     then slice_eq_from (value, text, start, stop, index + 1)
     else false
 
 fun slice_eq (value : borrow string, text : borrow string, start : int, stop : int) : bool =
-    if stop - start <> string_length (value) then false
+    if stop - start <> string.length (value) then false
     else slice_eq_from (value, text, start, stop, 0)
 
 (* Cherche un cookie directement dans la valeur de l'en-tête `Cookie`, sans
@@ -117,10 +117,10 @@ fun find_in_header_from
     : string option =
     if start >= length then None
     else
-        let val semi = string_find_char_from (header, start, 59)
+        let val semi = string.index_of_char_from (header, start, 59)
             val stop = if semi < 0 then length else semi
             val key_start = skip_spaces_at (header, start, stop)
-            val equal = string_find_char_from (header, key_start, 61)
+            val equal = string.index_of_char_from (header, key_start, 61)
             val key_stop0 =
                 if equal < 0 then stop
                 else if equal > stop then stop
@@ -132,7 +132,7 @@ fun find_in_header_from
         in
             if slice_eq (name, header, key_start, key_stop) then
                 if has_equal then
-                    let val value = string_slice (header, equal + 1, stop)
+                    let val value = string.slice (header, equal + 1, stop)
                     in Some (string.trim (borrow value))
                     end
                 else Some ("")
@@ -141,7 +141,7 @@ fun find_in_header_from
         end
 
 fun find_in_header (name : borrow string, header : borrow string) : string option =
-    find_in_header_from (name, header, string_length (header), 0)
+    find_in_header_from (name, header, string.length (header), 0)
 
 (* Cherche un cookie par nom. *)
 fun discard_pairs (pairs : (string, string) list) : unit =
@@ -159,7 +159,7 @@ fun find_from (name : borrow string, pairs : (string, string) list) : string opt
       | pair :: rest =>
           let val key = pair.0
               val value = pair.1
-              val same = string_eq (name, borrow key)
+              val same = string.equals (name, borrow key)
           in
               if same then
                   let val _ = discard_pairs (rest)
@@ -183,7 +183,7 @@ fun find_keep (name : borrow string, pairs : (string, string) list) : string opt
               val same =
                   let val k = borrow key
                   in
-                      string_eq (name, k)
+                      string.equals (name, k)
                   end
           in
               if same then

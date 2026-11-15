@@ -77,12 +77,17 @@ fun parameterNames name =
       [ "array_get", "array_get_unchecked", "array_get_borrow"
       , "array_get_borrow_view", "array_get_copy_borrow", "array_take"
       , "array_kernel_load", "array_kernel_borrow", "array_kernel_take"
+      , "array_kernel_drop"
       ] then ["array", "index"]
     else if oneOf
       [ "array_set", "array_set_unchecked", "array_put", "array_put_arena"
       , "array_kernel_write"
       ] then ["array", "index", "value"]
     else if oneOf ["array_push", "array_push_unchecked"] then ["array", "value"]
+    else if name = "extern_view" then ["buffer"]
+    else if name = "extern_view_ptr" then ["address", "size"]
+    else if oneOf ["c_ptr.of_int", "c_ptr.is_null"] then
+      ["pointer"]
     else if name = "array_kernel_new" then ["capacity"]
     else if oneOf ["array_kernel_length", "array_kernel_capacity"] then ["array"]
     else if name = "array_kernel_reserve" then ["array", "capacity"]
@@ -591,6 +596,28 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
       , generalized = ref []
       }
     )
+  , ( "sys.monotonic_ms"
+    , { name = "sys.monotonic_ms"
+      , params = []
+      , result = Types.TInt 64
+      , span = builtinSpan
+      , arity = 0
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref []
+      }
+    )
+  , ( "sys.realtime_ms"
+    , { name = "sys.realtime_ms"
+      , params = []
+      , result = Types.TInt 64
+      , span = builtinSpan
+      , arity = 0
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref []
+      }
+    )
   , ( "sys.scratch_enter"
     , { name = "sys.scratch_enter"
       , params = []
@@ -706,7 +733,7 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
   , ( "bytes_to_string_range"
     , { name = "bytes_to_string_range"
       , params =
-          [ Types.TArray (Types.TInt 8)
+          [ Types.TBorrow (Types.TArray (Types.TInt 8), false, NONE)
           , Types.TInt 32
           , Types.TInt 32
           ]
@@ -718,26 +745,10 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
       , generalized = ref []
       }
     )
-  , ( "send_string"
-    , { name = "send_string"
-      , params =
-          [ Types.TInt 32
-          , Types.TBorrow (Types.TString, false, NONE)
-          , Types.TInt 32
-          , Types.TInt 32
-          ]
-      , result = ioResultOf (Types.TInt 32)
-      , span = builtinSpan
-      , arity = 4
-      , paramSpans = []
-      , typeVars = []
-      , generalized = ref []
-      }
-    )
   , ( "bytes_header_end"
     , { name = "bytes_header_end"
       , params =
-          [ Types.TArray (Types.TInt 8)
+          [ Types.TBorrow (Types.TArray (Types.TInt 8), false, NONE)
           , Types.TInt 32
           , Types.TInt 32
           ]
@@ -752,7 +763,7 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
   , ( "bytes_write_string"
     , { name = "bytes_write_string"
       , params =
-          [ Types.TArray (Types.TInt 8)
+          [ Types.TBorrow (Types.TArray (Types.TInt 8), false, NONE)
           , Types.TInt 32
           , Types.TInt 32
           , Types.TBorrow (Types.TString, false, NONE)
@@ -768,7 +779,7 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
   , ( "bytes_write_int"
     , { name = "bytes_write_int"
       , params =
-          [ Types.TArray (Types.TInt 8)
+          [ Types.TBorrow (Types.TArray (Types.TInt 8), false, NONE)
           , Types.TInt 32
           , Types.TInt 32
           , Types.TInt 32
@@ -1016,6 +1027,53 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
       , paramSpans = []
       , typeVars = []
       , generalized = ref []
+      }
+    )
+  , ( "c_ptr.of_int"
+    , { name = "c_ptr.of_int"
+      , params = [Types.TInt 64]
+      , result = Types.TCPtr
+      , span = builtinSpan
+      , arity = 1
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref []
+      }
+    )
+  , ( "c_ptr.is_null"
+    , { name = "c_ptr.is_null"
+      , params = [Types.TCPtr]
+      , result = Types.TBool
+      , span = builtinSpan
+      , arity = 1
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref []
+      }
+    )
+  , ( "extern_view_ptr"
+    , { name = "extern_view_ptr"
+      , params = [Types.TCPtr, Types.TInt 32]
+      , result = Types.TBorrow (Types.TVar (9203, ref Types.Unbound), false, NONE)
+      , span = builtinSpan
+      , arity = 2
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref [(9203, Types.Ordinary)]
+      }
+    )
+  , ( "extern_view"
+    , { name = "extern_view"
+      , params =
+          [Types.TBorrow (Types.TArray (Types.TInt 8), false, NONE)]
+      , result =
+          Types.TBorrow
+            (Types.TVar (9202, ref Types.Unbound), false, SOME 1)
+      , span = builtinSpan
+      , arity = 1
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref [(9202, Types.Ordinary)]
       }
     )
   , ( "array_make"
@@ -1306,6 +1364,20 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
       , paramSpans = []
       , typeVars = []
       , generalized = ref [(9025, Types.Ordinary)]
+      }
+    )
+  , ( "array_kernel_drop"
+    , { name = "array_kernel_drop"
+      , params =
+          [ Types.TArray (Types.TVar (9028, ref Types.Unbound))
+          , Types.TInt 32
+          ]
+      , result = Types.TUnit
+      , span = builtinSpan
+      , arity = 2
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref [(9028, Types.Ordinary)]
       }
     )
   , ( "array_kernel_write"

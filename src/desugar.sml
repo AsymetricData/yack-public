@@ -214,6 +214,7 @@ struct
     | Ast.DAlias _ => declaration
     | Ast.DDatatype _ => declaration
     | Ast.DImport _ => declaration
+    | Ast.DExternRecord _ => declaration
 
   and desugarExpr expression =
     case expression of
@@ -345,6 +346,7 @@ struct
         Ast.EBorrow (mutable, ampersand, desugarExpr operand, span)
     | Ast.EFn (params, result, body, span) =>
         Ast.EFn (params, result, desugarExpr body, span)
+    | Ast.EExtern _ => expression
 
   and desugarBindings bindings body =
     case bindings of

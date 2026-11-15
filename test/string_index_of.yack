@@ -1,0 +1,12 @@
+import yack/string
+
+
+
+fun main () =
+    let val text = "ab:cd:ef"
+        val first = string.index_of_char (&text, 58)
+        val second = string.index_of_char_from (&text, 3, 58)
+        val none = string.index_of_char_from (&text, 6, 58)
+        val missing = string.index_of_char (&text, 33)
+    in print_string (int_to_string (first) ^ " " ^ int_to_string (second) ^ " " ^ int_to_string (none) ^ " " ^ int_to_string (missing))
+    end

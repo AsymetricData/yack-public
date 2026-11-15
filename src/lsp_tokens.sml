@@ -95,6 +95,9 @@ struct
     | Ast.DType {name, fields, ...} =>
         (name, structT) :: fieldKinds fields
     | Ast.DAlias {name, ...} => [(name, typeT)]
+    | Ast.DExternRecord {name, fields, ...} =>
+        (name, structT) :: fieldKinds (List.map (fn (field, ty, _) =>
+                                                   (field, ty)) fields)
     | Ast.DDatatype {name, constructors, ...} =>
         (name, typeT) ::
         List.concat

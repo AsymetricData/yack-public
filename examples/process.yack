@@ -1,0 +1,13 @@
+import yack/process
+import yack/string
+
+fun main () =
+    case process.run
+             (borrow "/bin/sh",
+              Cons (("-c", Cons (("echo out; echo err >&2; exit 3", Nil))))) of
+        Error (message) => print_string (message)
+      | Ok (result) =>
+            let val _ = print_int (result.status)
+                val _ = print_int (string.length (borrow result.stdout))
+            in print_int (string.length (borrow result.stderr))
+            end

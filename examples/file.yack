@@ -1,0 +1,41 @@
+import yack/array
+import yack/bytes
+import yack/file
+import yack/fs
+
+fun main () =
+    let val path = "/tmp/yack-file-example"
+        val _ = fs.remove (borrow path)
+        val opened = file.open (borrow path, file.Write)
+        val written =
+            case opened of
+                Error (_) => -1
+              | Ok (handle) =>
+                    let val payload = bytes.from_string (borrow "hello")
+                        val count =
+                            case file.write (borrow handle, borrow payload) of
+                                Ok (value) => value
+                              | Error (_) => -1
+                        val _ = file.close (handle)
+                    in count
+                    end
+        val reopened = file.open (borrow path, file.Read)
+        val contents =
+            case reopened of
+                Error (_) => "error"
+              | Ok (handle) =>
+                    let val buffer : int8 array = array_make_uninit (5)
+                        val count =
+                            case file.read_chunk (borrow handle, borrow buffer) of
+                                Ok (value) => value
+                              | Error (_) => -1
+                        val _ = file.close (handle)
+                    in if count = 5 then bytes.to_string (buffer) else "bad"
+                    end
+        val _ = print_int (written)
+        val _ = print_string (contents)
+    in
+        case fs.remove (borrow path) of
+            Ok (_) => ()
+          | Error (_) => ()
+    end

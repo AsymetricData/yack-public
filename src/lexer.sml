@@ -70,6 +70,7 @@ struct
      | #"|" => true
      | #"&" => true
      | #"!" => true
+     | #"@" => true
      | _ => false)
 
   fun lex source = lexIn (0, source)

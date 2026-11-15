@@ -1,5 +1,7 @@
 import net/Url
 import yack/char
+import yack/string
+import yack/int
 
 type header : Affine = { name : string, value : string }
 
@@ -17,19 +19,19 @@ type request : Affine =
 
 fun skip_spaces (text : borrow string, index : int, length : int) : int =
     if index >= length then index
-    else if string_char_at_unchecked (text, index) = 32 then
+    else if string.char_at_unchecked (text, index) = 32 then
         skip_spaces (text, index + 1, length)
     else index
 
 fun find_header_end_from (text : borrow string, start : int) : int =
-    let val length = string_length (text)
-        val cr = string_find_char_from (text, start, 13)
+    let val length = string.length (text)
+        val cr = string.index_of_char_from (text, start, 13)
     in
         if cr < 0 then -1
         else if cr + 3 >= length then -1
-        else if string_char_at_unchecked (text, cr + 1) = 10 then
-            if string_char_at_unchecked (text, cr + 2) = 13 then
-                if string_char_at_unchecked (text, cr + 3) = 10 then cr + 4
+        else if string.char_at_unchecked (text, cr + 1) = 10 then
+            if string.char_at_unchecked (text, cr + 2) = 13 then
+                if string.char_at_unchecked (text, cr + 3) = 10 then cr + 4
                 else find_header_end_from (text, cr + 1)
             else find_header_end_from (text, cr + 1)
         else find_header_end_from (text, cr + 1)
@@ -39,16 +41,16 @@ fun header_end (text : borrow string) : int =
     find_header_end_from (text, 0)
 
 fun parse_header_line (line : string) : header =
-    let val length = string_length (borrow line)
-        val colon = string_find_char_from (borrow line, 0, 58)
+    let val length = string.length (borrow line)
+        val colon = string.index_of_char_from (borrow line, 0, 58)
     in
         if colon < 0 then
-            { name = string_slice (borrow line, 0, length), value = "" }
+            { name = string.slice (borrow line, 0, length), value = "" }
         else
             let val value_start = skip_spaces (borrow line, colon + 1, length)
             in
-                { name = string_slice (borrow line, 0, colon)
-                , value = string_slice (borrow line, value_start, length)
+                { name = string.slice (borrow line, 0, colon)
+                , value = string.slice (borrow line, value_start, length)
                 }
             end
     end
@@ -56,12 +58,12 @@ fun parse_header_line (line : string) : header =
 fun parse_headers_from (text : borrow string, start : int, stop : int) : header list =
     if start >= stop then Nil
     else
-        let val cr = string_find_char_from (text, start, 13)
+        let val cr = string.index_of_char_from (text, start, 13)
         in
-            if cr < 0 then Cons ((parse_header_line (string_slice (text, start, stop)), Nil))
-            else if cr >= stop then Cons ((parse_header_line (string_slice (text, start, stop)), Nil))
+            if cr < 0 then Cons ((parse_header_line (string.slice (text, start, stop)), Nil))
+            else if cr >= stop then Cons ((parse_header_line (string.slice (text, start, stop)), Nil))
             else
-                let val line = string_slice (text, start, cr)
+                let val line = string.slice (text, start, cr)
                     val next_start = cr + 2
                 in
                     if next_start >= stop then Cons ((parse_header_line (line), Nil))
@@ -83,12 +85,12 @@ fun header_name_matches_from
     ) : bool =
     if position >= stop then index = name_length
     else
-        let val code = string_char_at_unchecked (text, position)
+        let val code = string.char_at_unchecked (text, position)
         in
             if code = 58 then index = name_length
             else if index >= name_length then false
             else if char.to_lower_code
-                      (string_char_at_unchecked (name, index)) =
+                      (string.char_at_unchecked (name, index)) =
                     char.to_lower_code (code)
             then
                 header_name_matches_from
@@ -100,7 +102,7 @@ fun header_name_matches
     (name : borrow string, text : borrow string, start : int, stop : int)
     : bool =
     header_name_matches_from
-        (name, text, stop, string_length (name), 0, start)
+        (name, text, stop, string.length (name), 0, start)
 
 (* Cherche un en-tête par nom sans construire la liste des en-têtes ni
    minusculer chaque clé. Seuls le nom demandé et la valeur trouvée sont
@@ -110,12 +112,12 @@ fun find_header_in_range
     : string option =
     if start >= stop then None
     else
-        let val cr = string_find_char_from (text, start, 13)
+        let val cr = string.index_of_char_from (text, start, 13)
             val line_stop =
                 if cr < 0 then stop
                 else if cr > stop then stop
                 else cr
-            val colon = string_find_char_from (text, start, 58)
+            val colon = string.index_of_char_from (text, start, 58)
             val colon =
                 if colon < 0 then -1
                 else if colon > line_stop then -1
@@ -129,7 +131,7 @@ fun find_header_in_range
             val next_start = if cr < 0 then stop else cr + 2
         in
             if matches then
-                Some (string_slice (text, value_start, line_stop))
+                Some (string.slice (text, value_start, line_stop))
             else
                 find_header_in_range (text, next_start, stop, name)
         end
@@ -162,9 +164,9 @@ fun content_length (request : request) : int =
             end
 
 fun parse_request (text : string) : request =
-    let val first = string_find_char_from (borrow text, 0, 32)
-        val second = string_find_char_from (borrow text, first + 1, 32)
-        val line_end = string_find_char_from (borrow text, 0, 13)
+    let val first = string.index_of_char_from (borrow text, 0, 32)
+        val second = string.index_of_char_from (borrow text, first + 1, 32)
+        val line_end = string.index_of_char_from (borrow text, 0, 13)
         val end_index = header_end (borrow text)
         val header_start = line_end + 2
         val header_len =
@@ -211,7 +213,7 @@ fun method (request : request) : string =
         , header_start = header_start
         , header_len = header_len
         } =>
-            string_slice (borrow text, start, start + length)
+            string.slice (borrow text, start, start + length)
 
 fun target (request : request) : string =
     case request of
@@ -225,7 +227,7 @@ fun target (request : request) : string =
         , header_start = header_start
         , header_len = header_len
         } =>
-            string_slice (borrow text, start, start + length)
+            string.slice (borrow text, start, start + length)
 
 fun version (request : request) : string =
     case request of
@@ -239,7 +241,7 @@ fun version (request : request) : string =
         , header_start = header_start
         , header_len = header_len
         } =>
-            string_slice (borrow text, start, start + length)
+            string.slice (borrow text, start, start + length)
 
 fun headers (request : request) : header list =
     case request of
@@ -267,26 +269,26 @@ fun request_line (request : request) : string =
         , header_start = header_start
         , header_len = header_len
         } =>
-            string_slice (borrow text, method_start, method_start + method_len) ^
+            string.slice (borrow text, method_start, method_start + method_len) ^
             " " ^
-            string_slice (borrow text, target_start, target_start + target_len) ^
+            string.slice (borrow text, target_start, target_start + target_len) ^
             " " ^
-            string_slice (borrow text, version_start, version_start + version_len)
+            string.slice (borrow text, version_start, version_start + version_len)
 
 fun render_response (body : string) : string =
-    let val length = string_length (borrow body)
+    let val length = string.length (borrow body)
     in
         "HTTP/1.1 200 OK\r\nContent-Length: " ^
-        string_of_int (length) ^
+        int.to_string (length) ^
         "\r\nConnection: close\r\n\r\n" ^
         body
     end
 
 fun render_response_keepalive (body : string) : string =
-    let val length = string_length (borrow body)
+    let val length = string.length (borrow body)
     in
         "HTTP/1.1 200 OK\r\nContent-Length: " ^
-        string_of_int (length) ^
+        int.to_string (length) ^
         "\r\nConnection: keep-alive\r\n\r\n" ^
         body
     end

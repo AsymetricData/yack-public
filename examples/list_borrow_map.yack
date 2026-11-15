@@ -1,8 +1,9 @@
 import yack/list
+import yack/string
 
 fun double (x : int) : int = x * 2
 
-fun size (text : borrow string) : int = string_length (text)
+fun size (text : borrow string) : int = string.length (text)
 
 fun main () =
     let val ints = [1, 2, 3]

@@ -14,12 +14,12 @@ datatype node =
   | Raw of string
 
 fun escape_from (text : borrow string, index : int) : string =
-    let val length = string_length (text)
+    let val length = string.length (text)
     in
         if index >= length then
             ""
         else
-            let val code = string_char_at_unchecked (text, index)
+            let val code = string.char_at_unchecked (text, index)
                 val escaped =
                     if code = 38 then
                         "&amp;"
@@ -29,7 +29,7 @@ fun escape_from (text : borrow string, index : int) : string =
                         "&gt;"
                     else if code = 34 then
                         "&quot;"
-                    else if code = 39 then "&#39;" else string_of_char (code)
+                    else if code = 39 then "&#39;" else string.of_char (code)
             in
                 escaped ^ escape_from (text, index + 1)
             end

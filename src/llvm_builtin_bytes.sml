@@ -309,20 +309,6 @@ struct
           in
             { text = result, ty = resultTy, const = false }
           end
-      | ("send_string",
-         [(fd, _), (value, _), (offset, _), (count, _)]) =>
-          let
-            val data = fresh "bytes.send.data"
-            val length = fresh "bytes.send.len"
-            val _ = emit (data ^ " = extractvalue { ptr, i64, i1 } " ^
-                          #text value ^ ", 0")
-            val _ = emit (length ^ " = extractvalue { ptr, i64, i1 } " ^
-                          #text value ^ ", 1")
-          in
-            transferData
-              ("send", "16448", "send failed", fd, data, length,
-               offset, count)
-          end
       | ("bytes_header_end", [(value, _), (start, _), (limit, _)]) =>
           let
             val data = loadField value 0 "ptr"

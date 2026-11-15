@@ -109,12 +109,12 @@ fun with_session (
 fun method (request : borrow t) : string =
     case request of
         { raw = raw, method_start = start, method_len = length } =>
-            string_slice (raw, start, start + length)
+            string.slice (raw, start, start + length)
 
 fun target (request : borrow t) : string =
     case request of
         { raw = raw, target_start = start, target_len = length } =>
-            string_slice (raw, start, start + length)
+            string.slice (raw, start, start + length)
 
 fun path (request : borrow t) : string =
     case request of
@@ -149,7 +149,7 @@ fun body (request : borrow t) : string =
             header_len = header_len,
             body_start = start
         } =>
-            let val raw_length = string_length (raw)
+            let val raw_length = string.length (raw)
                 val content_end =
                     start + content_length_in (raw, header_start, header_len)
                 val body_end =
@@ -159,7 +159,7 @@ fun body (request : borrow t) : string =
                     ""
                 else if start > raw_length then ""
                 else
-                    string_slice (raw, start, body_end)
+                    string.slice (raw, start, body_end)
             end
 
 (* Copie l'identifiant : `option` ne peut pas transporter un emprunt. *)
@@ -168,7 +168,7 @@ fun session_id (request : borrow t) : string option =
         { session_id = value } =>
             (case value of
                  None => None
-               | Some text => Some (string_slice (text, 0, string_length (text))))
+               | Some text => Some (string.slice (text, 0, string.length (text))))
 
 fun header (request : borrow t, name : string) : string option =
     case request of

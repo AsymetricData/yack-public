@@ -307,6 +307,7 @@ struct
               Ast.EFn
                 (params, result, liftExpression (extended, body), span)
             end
+        | Ast.EExtern _ => expression
 
       and liftLet (environment, bindings, body, span, arena) =
         let
@@ -520,6 +521,7 @@ struct
                 walk
                   (List.map (fn param => #name param) params @ bound,
                    body)
+            | Ast.EExtern _ => ()
         in
           walk (parameters, expression);
           List.rev (!captures)
@@ -682,6 +684,7 @@ struct
                        body)
                   , span
                   )
+            | Ast.EExtern _ => expression
         in
           walk ([], expression)
         end

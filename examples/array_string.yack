@@ -1,3 +1,4 @@
+import yack/string
 fun main () =
   let val values : string array = array_new ()
       val _ = array_push (values, "hello")
@@ -5,5 +6,5 @@ fun main () =
       val _ = array_set (values, 1, "yack")
       val first = array_get_borrow (values, 0)
       val second = array_get_borrow (values, 1)
-  in print_int (string_length (first) + string_length (second))
+  in print_int (string.length (first) + string.length (second))
   end

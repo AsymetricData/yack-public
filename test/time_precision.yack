@@ -1,0 +1,16 @@
+
+
+
+import yack/time
+
+fun sample (remaining : int) : bool =
+    if remaining <= 0 then false
+    else if time.now_ms () % int_to_int64 (1000) <> int_to_int64 (0) then true
+    else
+        let val _ = time.sleep_ms (1)
+        in sample (remaining - 1)
+        end
+
+fun main () =
+    if sample (50) then print_string ("ok")
+    else print_string ("FAIL")

@@ -140,6 +140,42 @@ for memory in heap stack; do
   expect_quarantine_limit "poison_${memory}_quarantine_limit" "$memory"
 done
 
+
+
+
+if build verifier_map_key --memory=stack --arena-debug=poison \
+     test/stack/map_dynamic_key.yack "$TMP/verifier_map_key"; then
+  if run verifier_map_key "$TMP/verifier_map_key"; then
+    pass "poison_stack_verifier_map_key"
+  else
+    fail "poison_stack_verifier_map_key" "$(tail -n 3 "$TMP/verifier_map_key.err")"
+  fi
+else
+  fail "poison_stack_verifier_map_key" "$(tail -n 5 "$TMP/verifier_map_key.build")"
+fi
+
+
+
+
+
+if build file_repeat --memory=stack --arena-debug=poison \
+     examples/file.yack "$TMP/file_repeat"; then
+  repeat_failed=0
+  for _ in $(seq 1 50); do
+    if ! run file_repeat "$TMP/file_repeat"; then
+      repeat_failed=1
+      break
+    fi
+  done
+  if [ "$repeat_failed" -eq 0 ]; then
+    pass "poison_stack_file_50x"
+  else
+    fail "poison_stack_file_50x" "$(tail -n 5 "$TMP/file_repeat.err")"
+  fi
+else
+  fail "poison_stack_file_50x" "$(tail -n 5 "$TMP/file_repeat.build")"
+fi
+
 if [ "$failed" -ne 0 ]; then
   echo "arena poison checks failed"
   exit 1

@@ -13,6 +13,8 @@ struct
     "type " ^ name
     | declarationSummary (Ast.DDatatype {name, ...}) =
     "datatype " ^ name
+    | declarationSummary (Ast.DExternRecord {name, ...}) =
+    "extern record " ^ name
     | declarationSummary (Ast.DImport {path, ...}) =
     "import " ^ String.concatWith "/" path
 

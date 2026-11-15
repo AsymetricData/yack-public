@@ -1,5 +1,19 @@
 structure Lower =
 struct
+
+  fun literalFits width value =
+    case width of
+      8 =>
+        value >= Int64.fromInt ~128 andalso value <= Int64.fromInt 127
+    | 32 =>
+        value >= Int64.fromInt ~2147483648 andalso
+        value <= Int64.fromInt 2147483647
+    | _ => true
+
+  fun literalText value =
+    if value < Int64.fromInt 0 then "-" ^ Int64.toString (Int64.~ value)
+    else Int64.toString value
+
   type input =
     { program : Ast.program
     , functions : (string * Check.funSig) list
@@ -68,6 +82,7 @@ struct
       val currentFunctionName = ref ""
       val traceCounter = ref 0
       val traceSites = ref []
+      val externDeclarations = ref []
       val arenaDepth = ref 0
       val expressionTypeTable = SpanTable.make expressionTypes
       val bindingTypeTable = SpanTable.make bindingTypes
@@ -99,6 +114,7 @@ struct
         | Ir.TToken => true
         | Ir.TResource => true
         | Ir.TString => true
+        | Ir.TCPtr => true
         | Ir.TArray element => regionFreeType element
         | Ir.TMap _ => false
         | Ir.TTuple values => List.all regionFreeType values
@@ -125,6 +141,7 @@ struct
         | Ir.Record (_, ty) => ty
         | Ir.Field (_, _, ty) => ty
         | Ir.TupleIndex (_, _, ty) => ty
+        | Ir.RawField (_, _, ty) => ty
         | Ir.Ctor (_, _, _, ty, _) => ty
         | Ir.Match (_, _, ty) => ty
         | Ir.PrintString _ => Ir.Unit
@@ -254,6 +271,7 @@ struct
         name = "array_kernel_load" orelse
         name = "array_kernel_borrow" orelse
         name = "array_kernel_take" orelse
+        name = "array_kernel_drop" orelse
         name = "array_kernel_write" orelse
         name = "array_kernel_reserve" orelse
         name = "array_kernel_set_length" orelse
@@ -521,6 +539,7 @@ struct
         | Ir.TToken => false
         | Ir.TResource => false
         | Ir.TString => true
+        | Ir.TCPtr => false
         | Ir.TArray _ => true
         | Ir.TMap _ => true
         | Ir.TFun _ => true
@@ -624,6 +643,17 @@ struct
               (List.map (fn (_, subpattern) =>
                 patternVariables subpattern) fields)
 
+      fun lookupExternRecord name =
+        case List.find
+               (fn declaration =>
+                 case declaration of
+                   Ast.DExternRecord {name = candidate, ...} => candidate = name
+                 | _ => false)
+               program of
+          SOME (Ast.DExternRecord {size, fields, ...}) =>
+            SOME (size, List.map (fn (field, _, offset) => (field, offset)) fields)
+        | _ => NONE
+
       val typeLowering =
         LowerTypes.make
           { report = report
@@ -633,6 +663,7 @@ struct
           , dataSeen = dataSeen
           , lookupExpressionType = lookupExpressionType
           , lookupBindingType = lookupBindingType
+          , lookupExternRecord = lookupExternRecord
           , earlyDrops = earlyDrops
           }
 
@@ -728,6 +759,19 @@ struct
           SOME (_, target) => SOME target
         | NONE => NONE
 
+      fun registerExtern (symbol, parameters, result) =
+        if List.exists
+             (fn (declaration : Ir.externDecl) =>
+               #symbol declaration = symbol)
+             (!externDeclarations)
+        then ()
+        else
+          externDeclarations :=
+            { symbol = symbol
+            , parameters = parameters
+            , result = result
+            } :: !externDeclarations
+
       fun peelIrBorrow ty =
         case ty of
           Ir.TBorrow (inner, _) => (inner, true)
@@ -809,8 +853,24 @@ struct
           Ast.PWildcard _ => Ir.PWildcard
         | Ast.PVar (name, span) =>
             Ir.PVar (name, bindingTypeAt substitution span)
-        | Ast.PInt (value, _) =>
-            Ir.PInt (value, expected)
+        | Ast.PInt (value, span) =>
+            let val pattern =
+                    (case expected of
+                       Ir.Int width =>
+                         if literalFits width value then
+                           Ir.PInt (value, expected)
+                         else
+                           ( reportOnce
+                               ("int-pattern:" ^ Pos.toString (#start span))
+                               "E2002"
+                               ("integer pattern " ^ Int64.toString value ^
+                                " does not fit in " ^ Int.toString width ^
+                                " bits")
+                               span [] [];
+                             Ir.PInt (Int64.fromInt 0, expected) )
+                     | _ => Ir.PInt (value, expected))
+            in pattern
+            end
         | Ast.PBool (value, _) => Ir.PBool value
         | Ast.PString (literal, rest, _) =>
             Ir.PString
@@ -956,7 +1016,16 @@ struct
         case expression of
           Ast.EInt (value, span) =>
             (case typeAt substitution span of
-               Ir.Int width => Ir.IntLit (value, Ir.Int width)
+               Ir.Int width =>
+                 if literalFits width value then Ir.IntLit (value, Ir.Int width)
+                 else
+                   ( reportOnce
+                       ("int-literal:" ^ Pos.toString (#start span))
+                       "E2002"
+                       ("integer literal " ^ Int64.toString value ^
+                        " does not fit in " ^ Int.toString width ^ " bits")
+                       span [] [];
+                     Ir.IntLit (Int64.fromInt 0, Ir.Int width) )
              | Ir.Float width =>
                  Ir.FloatLit
                    (Real.fromLargeInt (Int64.toLarge value), Ir.Float width)
@@ -1059,6 +1128,27 @@ struct
             in
               if operator = "^" then traced "string concat" span expression
               else expression
+            end
+
+        | Ast.ENeg (Ast.EInt (value, _), span) =>
+            let val negated = Int64.~ value
+            in
+              case typeAt substitution span of
+                Ir.Int width =>
+                  if literalFits width negated then
+                    Ir.IntLit (negated, Ir.Int width)
+                  else
+                    ( reportOnce
+                        ("int-literal:" ^ Pos.toString (#start span))
+                        "E2002"
+                        ("integer literal " ^ literalText negated ^
+                         " does not fit in " ^ Int.toString width ^ " bits")
+                        span [] [];
+                      Ir.IntLit (Int64.fromInt 0, Ir.Int width) )
+              | ty =>
+                  Ir.Neg
+                    ( lowerExpr substitution (Ast.EInt (value, span))
+                    , ty )
             end
 
         | Ast.ENeg (operand, span) =>
@@ -1169,6 +1259,20 @@ struct
                            ("field:" ^ field)
                            "E0609"
                            ("IR: unknown record field `" ^ field ^ "`")
+                           span
+                           []
+                           [];
+                         Ir.UnitLit ))
+              | Ir.TBorrow (Ir.TRecord (fields, Ir.DExtern (offsets, _)), _) =>
+                  (case List.find (fn (name, _) => name = field) offsets of
+                     SOME (_, offset) =>
+                       Ir.RawField
+                         (lowerExpr substitution base, offset, resultType)
+                   | NONE =>
+                       ( reportOnce
+                           ("extern-field:" ^ field)
+                           "E0609"
+                           ("IR: unknown extern record field `" ^ field ^ "`")
                            span
                            []
                            [];
@@ -1501,6 +1605,44 @@ struct
                 in
                   traced ("string " ^ name) span expression
                 end
+              else if name = "extern_view" then
+                let
+                  val viewType = typeAt substitution span
+                in
+                  case viewType of
+                    Ir.TBorrow (Ir.TRecord (_, Ir.DExtern _), _) =>
+                      Ir.SysBuiltin ("extern_view", loweredArguments, viewType)
+                  | _ =>
+                      ( reportOnce
+                          "extern-view-type"
+                          "E3047"
+                          "extern_view needs an extern record as its result"
+                          span
+                          [ "result type: " ^ Ir.tyToString viewType ]
+                          [ "write `val view : borrow raw_stat = extern_view (buffer)`" ]
+                      ; Ir.UnitLit )
+                end
+              else if name = "extern_view_ptr" then
+                let
+                  val viewType = typeAt substitution span
+                in
+                  case viewType of
+                    Ir.TBorrow (Ir.TRecord (_, Ir.DExtern _), _) =>
+                      Ir.SysBuiltin ("extern_view_ptr", loweredArguments, viewType)
+                  | _ =>
+                      ( reportOnce
+                          "extern-view-ptr-type"
+                          "E3047"
+                          "extern_view_ptr needs an extern record as its result"
+                          span
+                          [ "result type: " ^ Ir.tyToString viewType ]
+                          [ "write `val view : borrow addrinfo = extern_view_ptr (address, 48)`" ]
+                      ; Ir.UnitLit )
+                end
+              else if name = "c_ptr.of_int" orelse
+                      name = "c_ptr.is_null" then
+                Ir.SysBuiltin
+                  (name, loweredArguments, typeAt substitution span)
               else if printable orelse numericConversion orelse tokenBuiltin then
                 Ir.Call (name, loweredArguments, resultType, ref false)
               else
@@ -1664,6 +1806,25 @@ struct
               Ir.Closure (name, functionType)
             end
 
+        | Ast.EExtern {symbol, params, span, ...} =>
+            let
+              val arguments =
+                List.map
+                  (fn (param : Ast.param) =>
+                    Ir.Var
+                      ( #name param
+                      , bindingTypeAt substitution (#span param)
+                      , NONE
+                      ))
+                  params
+              val result = typeAt substitution span
+              val parameterTypes = List.map (fn Ir.Var (_, ty, _) => ty
+                                               | _ => Ir.Unit) arguments
+              val _ = registerExtern (symbol, parameterTypes, result)
+            in
+              Ir.SysBuiltin ("extern:" ^ symbol, arguments, result)
+            end
+
         | Ast.EBorrow (mutable, _, operand, span) =>
             Ir.Borrow
               (mutable, lowerExpr substitution operand, typeAt substitution span)
@@ -1770,6 +1931,293 @@ struct
           roots
       val _ = processQueue ()
       val _ = LowerEscape.annotate (!emitted)
+
+      val _ =
+        if mode <> Memory.Stack then ()
+        else
+          let
+            val zeroSpan = { start = Pos.start, stop = Pos.start }
+            fun rank Ir.NativeStack = 0
+              | rank Ir.Current = 1
+              | rank Ir.Destination = 2
+            fun worst (a, b) =
+              case (a, b) of
+                (NONE, _) => b
+              | (_, NONE) => a
+              | (SOME x, SOME y) => SOME (if rank x <= rank y then x else y)
+            fun nthOption (values, index) =
+              SOME (List.nth (values, index)) handle _ => NONE
+            fun lookup (environment, name) =
+              case List.find (fn (candidate, _) => candidate = name) environment of
+                SOME (_, site) => SOME site
+              | NONE => SOME Ir.Destination
+            fun siteOf (environment, expression) =
+              case expression of
+                Ir.Var (name, ty, _) =>
+                  if LowerEscape.hasPointers ty then lookup (environment, name)
+                  else NONE
+              | Ir.Ctor (_, _, argument, _, siteRef) =>
+                  worst (SOME (!siteRef),
+                         case argument of
+                           SOME value => siteOf (environment, value)
+                         | NONE => NONE)
+              | Ir.Bin (operator, _, _, _, siteRef) =>
+                  if operator = "^" then SOME (!siteRef) else NONE
+              | Ir.StringBuiltin (name, _, _, siteRef) =>
+                  if LowerBuiltins.stringProduces name then SOME (!siteRef)
+                  else NONE
+              | Ir.BytesBuiltin (name, _, _, siteRef) =>
+                  if LowerBuiltins.bytesProducesString name then SOME (!siteRef)
+                  else NONE
+              | Ir.Call (_, _, resultTy, escapes) =>
+                  if LowerEscape.hasPointers resultTy then
+                    SOME (if !escapes then Ir.Destination else Ir.Current)
+                  else NONE
+              | Ir.Apply (_, _, resultTy) =>
+                  if LowerEscape.hasPointers resultTy then SOME Ir.Destination
+                  else NONE
+              | Ir.If (_, thenBranch, elseBranch, ty) =>
+                  if LowerEscape.hasPointers ty then
+                    worst (siteOf (environment, thenBranch),
+                           siteOf (environment, elseBranch))
+                  else NONE
+              | Ir.Let (bindings, body, _) =>
+                  let
+                    fun extend ((name, ty, value), environment) =
+                      case siteOf (environment, value) of
+                        SOME site =>
+                          if LowerEscape.hasPointers ty then
+                            (name, site) :: environment
+                          else environment
+                      | NONE => environment
+                    val extended = List.foldl extend environment bindings
+                  in
+                    siteOf (extended, body)
+                  end
+              | Ir.Match (scrutinee, branches, ty) =>
+                  if not (LowerEscape.hasPointers ty) then NONE
+                  else
+                    let
+                      val scrutineeSite = siteOf (environment, scrutinee)
+                      fun extend (pattern, environment) =
+                        let
+                          fun add (name, environment) =
+                            (name, case scrutineeSite of
+                                     SOME site => site
+                                   | NONE => Ir.Destination) :: environment
+                        in
+                          List.foldl add environment
+                            (LowerEscape.irPatternNames pattern)
+                        end
+                      fun branchSite (pattern, _, body, _) =
+                        siteOf (extend (pattern, environment), body)
+                    in
+                      List.foldl
+                        (fn (branch, site) => worst (site, branchSite branch))
+                        NONE branches
+                    end
+              | Ir.Tuple (values, ty) =>
+                  if LowerEscape.hasPointers ty then
+                    List.foldl
+                      (fn (value, site) =>
+                         worst (site, siteOf (environment, value)))
+                      NONE values
+                  else NONE
+              | Ir.Record (fields, ty) =>
+                  if LowerEscape.hasPointers ty then
+                    List.foldl
+                      (fn ((_, value), site) =>
+                         worst (site, siteOf (environment, value)))
+                      NONE fields
+                  else NONE
+              | Ir.Field (base, _, ty) =>
+                  if LowerEscape.hasPointers ty then siteOf (environment, base)
+                  else NONE
+              | Ir.TupleIndex (base, _, ty) =>
+                  if LowerEscape.hasPointers ty then siteOf (environment, base)
+                  else NONE
+              | Ir.RawField _ => NONE
+              | Ir.Borrow (_, value, _) => siteOf (environment, value)
+              | Ir.Copy (value, _) => siteOf (environment, value)
+              | Ir.Closure _ => NONE
+              | Ir.ClosureRef _ => NONE
+              | _ => NONE
+            fun verifyFunction ({ name, params, result, body, ... } : Ir.funDef) =
+              let
+                val parameterEnvironment =
+                  List.map (fn (parameter, _) => (parameter, Ir.Destination))
+                    params
+                val reported = ref false
+                fun failed (code, message, hint) =
+                  if !reported then ()
+                  else
+                    ( reported := true
+                    ; report code message zeroSpan
+                        ["a value built in the current activation region can be freed before this use"]
+                        [hint]
+                    )
+                fun describe expression =
+                  case expression of
+                    Ir.Var (variable, _, _) => "variable `" ^ variable ^ "`"
+                  | Ir.Ctor (_, constructor, _, _, _) =>
+                      "constructor `" ^ constructor ^ "`"
+                  | Ir.Call (callee, _, _, _) => "call to `" ^ callee ^ "`"
+                  | Ir.StringBuiltin (builtin, _, _, _) => "`" ^ builtin ^ "`"
+                  | Ir.BytesBuiltin (builtin, _, _, _) => "`" ^ builtin ^ "`"
+                  | Ir.Bin ("^", _, _, _, _) => "concatenation"
+                  | Ir.Record _ => "record"
+                  | Ir.Tuple _ => "tuple"
+                  | Ir.Let _ => "let"
+                  | Ir.Match _ => "match"
+                  | _ => "expression"
+                fun requireOut (environment, expression, hint) =
+                  case siteOf (environment, expression) of
+                    SOME Ir.Current =>
+                      failed ("E0701",
+                        "in `" ^ name ^ "`, a " ^ describe expression ^
+                        " built in the activation region may escape",
+                        hint)
+                  | SOME Ir.NativeStack =>
+                      failed ("E0704",
+                        "in `" ^ name ^ "`, a " ^ describe expression ^
+                        " allocated on the native stack may escape",
+                        "construct the value in the destination region")
+                  | _ => ()
+                fun walk environment expression =
+                  case expression of
+                    Ir.Call (callee, arguments, _, escapes) =>
+                      let
+                        fun checkArguments (index, remaining) =
+                          case remaining of
+                            [] => ()
+                          | argument :: rest =>
+                              ( if !escapes andalso
+                                   LowerEscape.calleeKeeps (callee, index)
+                                then
+                                  requireOut (environment, argument,
+                                    "mark the call escaping, or build the argument in the destination region")
+                                else ()
+                              ; checkArguments (index + 1, rest)
+                              )
+                      in
+                        ( checkArguments (0, arguments)
+                        ; List.app (walk environment) arguments
+                        )
+                      end
+                  | Ir.Apply (callee, arguments, _) =>
+                      let
+                        fun checkArguments (functionIndex, remaining) =
+                          case remaining of
+                            [] => ()
+                          | argument :: rest =>
+                              ( if LowerEscape.applyKeeps (name, callee, functionIndex)
+                                then
+                                  requireOut (environment, argument,
+                                    "mark the call escaping, or build the argument in the destination region")
+                                else ()
+                              ; checkArguments (functionIndex + 1, rest)
+                              )
+                      in
+                        ( walk environment callee
+                        ; checkArguments (0, arguments)
+                        )
+                      end
+                  | Ir.ArrayBuiltin (builtin, arguments, _, _) =>
+                      ( if LowerBuiltins.arrayEscapesStoredValue builtin then
+                          case LowerBuiltins.arrayStoreIndex builtin of
+                            SOME index =>
+                              (case nthOption (arguments, index) of
+                                 SOME argument =>
+                                   requireOut (environment, argument,
+                                     "root the value before storing it in a container")
+                               | NONE => ())
+                          | NONE => ()
+                        else ()
+                      ; List.app (walk environment) arguments
+                      )
+                  | Ir.MapBuiltin ("map_set", arguments, _, _) =>
+                      ( List.app
+                          (fn (argument, _) =>
+                             requireOut (environment, argument,
+                               "root the key and value before storing them in a map"))
+                          arguments
+                      ; List.app (fn (argument, _) => walk environment argument)
+                          arguments
+                      )
+                  | Ir.Let (bindings, body, _) =>
+                      let
+                        fun extend ((name, ty, value), environment) =
+                          ( walk environment value
+                          ; case siteOf (environment, value) of
+                              SOME site =>
+                                if LowerEscape.hasPointers ty then
+                                  (name, site) :: environment
+                                else environment
+                            | NONE => environment
+                          )
+                        val extended = List.foldl extend environment bindings
+                      in
+                        walk extended body
+                      end
+                  | Ir.Match (scrutinee, branches, _) =>
+                      ( walk environment scrutinee
+                      ; List.app
+                          (fn (pattern, guard, branchBody, _) =>
+                             ( case guard of
+                                 NONE => ()
+                               | SOME condition => walk environment condition
+                             ; let
+                                 fun add (name, environment) =
+                                   (name, Ir.Destination) :: environment
+                                 val extended =
+                                   List.foldl add environment
+                                     (LowerEscape.irPatternNames pattern)
+                               in
+                                 walk extended branchBody
+                               end
+                             ))
+                          branches
+                      )
+                  | Ir.If (condition, thenBranch, elseBranch, _) =>
+                      ( walk environment condition
+                      ; walk environment thenBranch
+                      ; walk environment elseBranch
+                      )
+                  | Ir.Tuple (values, _) => List.app (walk environment) values
+                  | Ir.Record (fields, _) =>
+                      List.app (fn (_, value) => walk environment value) fields
+                  | Ir.Field (base, _, _) => walk environment base
+                  | Ir.TupleIndex (base, _, _) => walk environment base
+                  | Ir.RawField (base, _, _) => walk environment base
+                  | Ir.Ctor (_, _, argument, _, _) =>
+                      (case argument of
+                         SOME value => walk environment value
+                       | NONE => ())
+                  | Ir.Bin (_, left, right, _, _) =>
+                      ( walk environment left ; walk environment right )
+                  | Ir.Neg (value, _) => walk environment value
+                  | Ir.PrintString (value, _) => walk environment value
+                  | Ir.StringBuiltin (_, arguments, _, _) =>
+                      List.app (fn (value, _) => walk environment value) arguments
+                  | Ir.BytesBuiltin (_, arguments, _, _) =>
+                      List.app (fn (value, _) => walk environment value) arguments
+                  | Ir.SysBuiltin (_, arguments, _) =>
+                      List.app (walk environment) arguments
+                  | Ir.MapBuiltin (_, arguments, _, _) =>
+                      List.app (fn (value, _) => walk environment value) arguments
+                  | Ir.Copy (value, _) => walk environment value
+                  | Ir.Borrow (_, value, _) => walk environment value
+                  | _ => ()
+              in
+                if LowerEscape.hasPointers result then
+                  requireOut (parameterEnvironment, body,
+                    "build the returned value in the destination region, or mark the call escaping")
+                else ();
+                walk parameterEnvironment body
+              end
+          in
+            List.app verifyFunction (!emitted)
+          end
       fun destinationOf (site : traceSite) =
         if not (#allocates site) then
           ("read", "lecture seule")
@@ -1817,6 +2265,7 @@ struct
       { program =
           { datatypes = List.rev (!dataDefinitions)
           , functions = List.rev (!emitted)
+          , externs = List.rev (!externDeclarations)
           }
       , diagnostics = List.map Diag.demangle (List.rev (!diagnostics))
       , sites = List.map finishSite (List.rev (!traceSites))

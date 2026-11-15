@@ -31,11 +31,12 @@
     <main id="content">
         <div class="tut-hero">
             <p class="eyebrow">Guide · CLI · about 15 minutes</p>
-            <h1>Four CLIs, <span class="accent">complete source.</span></h1>
+            <h1>Four command-line programs in Yack</h1>
             <p class="lead">
                 <code>ls -al</code>, <code>cat</code>, <code>wc</code> and a small TUI demo, each shown as the
-                whole file: imports, helpers and <code>main</code>. Nothing is elided, nothing needs a
-                runtime, an argument-parser crate or a garbage collector.
+                whole file: imports, helpers and <code>main</code>. Nothing is left out, and none of
+                them needs a runtime or an argument-parser crate; memory is managed by the
+                generated code.
             </p>
             <ul class="from-langs" aria-label="Written for developers coming from">
                 <li>coming from <strong>Go</strong> <code>flag</code></li>
@@ -48,7 +49,7 @@
             <nav class="toc" aria-label="Guide steps">
                 <p>Steps</p>
                 <ol>
-                    <li><a href="#setup">Three commands</a></li>
+                    <li><a href="#setup">Create a project</a></li>
                     <li><a href="#ls">A complete ls</a></li>
                     <li><a href="#cat">A complete cat</a></li>
                     <li><a href="#wc">A complete wc</a></li>
@@ -62,7 +63,7 @@
             <div class="tut-body">
                 <section class="step" id="setup" aria-labelledby="setup-title">
                     <span class="step-num">Step 01</span>
-                    <h2 id="setup-title">Three commands</h2>
+                    <h2 id="setup-title">Create a project</h2>
                     <p>
                         A CLI is an ordinary Yack project: a folder with <code>yack.toml</code>, one
                         dependency on <code>lib/yack</code>, and a <code>main</code> function. Every
@@ -247,11 +248,12 @@ fun main () =
     5447  src/wc.yack</code></pre>
                     </div>
                     <div class="callout warn">
-                        <strong>What <code>ls</code> cannot do yet.</strong>
-                        The kernel exposes no <code>readdir</code> or <code>stat</code>, so this
-                        example lists the paths you name instead of walking a directory, and
-                        <code>-a</code> is accepted but changes nothing. Directories read as empty.
-                        The missing primitives are tracked in
+                        <strong>What this <code>ls</code> cannot do yet.</strong>
+                        The example predates the directory modules, so it lists the paths you
+                        name instead of walking a directory, and <code>-a</code> is accepted but
+                        changes nothing. Directories read as empty. <code>yack/fs</code> now
+                        provides <code>list_dir</code> and <code>stat</code>, so a later version
+                        can report real metadata; the missing pieces are tracked in
                         <a class="text-link" href="https://github.com/AsymetricData/yack-public/blob/main/docs/stdlib.md#11-primitives-compilateur-manquantes">the standard library plan <span aria-hidden="true">↗</span></a>.
                     </div>
                 </section>
@@ -260,7 +262,7 @@ fun main () =
                     <span class="step-num">Step 03</span>
                     <h2 id="cat-title">A complete cat</h2>
                     <p>
-                        <code>cat</code> is the smallest shape of a CLI: a <code>result</code> from
+                        <code>cat</code> is the smallest of the four programs: a <code>result</code> from
                         <code>io.read_file</code>, raw output through <code>io.print_raw</code>, and
                         error lines on stderr. One function handles a file, the recursive
                         <code>copy_paths</code> threads the list, and <code>finish</code> turns the
@@ -359,7 +361,7 @@ fun main () =
             in os.exit (cli.exit_usage ())
             end
       | Ok (value) =&gt; dispatch (value)</code></pre>
-                        <p class="code-note">Complete file: no helper is hidden.</p>
+                        <p class="code-note">Complete file, including every helper.</p>
                     </div>
                     <div class="code-card">
                         <div class="code-head">
@@ -565,11 +567,11 @@ printf 'a b\nc\n' | ./wc</code></pre>
       2      3      6 -</code></pre>
                     </div>
                     <div class="callout">
-                        <strong>No shared mutable state.</strong>
+                        <strong>No global counters.</strong>
                         <code>count_all</code> sums the failures of <code>count_one</code> and
                         <code>count_paths</code>; <code>finish</code> maps that number to the exit
-                        code. The counters never touch a global: two instances in one process would
-                        not interfere.
+                        code. The counters never touch a global, so two instances in one process
+                        would not interfere.
                     </div>
                 </section>
 
@@ -737,26 +739,26 @@ fun main () =
                     <span class="step-num">Step 07</span>
                     <h2 id="limits-title">What is still missing</h2>
                     <p>
-                        The standard library is honest about its edges. A real <code>ls -al</code>
-                        needs metadata the kernel does not expose yet, and an interactive TUI needs a
-                        raw terminal.
+                        A real <code>ls -al</code> needs directory and metadata calls, which
+                        <code>yack/fs</code> provides now; the programs here predate it and still
+                        list named paths. A raw terminal is still missing.
                     </p>
                     <div class="table-scroll">
                     <table class="compare">
-                        <thead><tr><th>Need</th><th>Status</th><th>Workaround today</th></tr></thead>
+                        <thead><tr><th>Need</th><th>Status</th><th>Workaround in these examples</th></tr></thead>
                         <tbody>
-                            <tr><td><code>readdir</code></td><td>missing</td><td>name the paths on the command line</td></tr>
-                            <tr><td><code>stat</code> (mode, owner, date)</td><td>missing</td><td>size from <code>io.read_file</code> length</td></tr>
+                            <tr><td><code>readdir</code></td><td><code>yack/fs</code> (<code>list_dir</code>)</td><td>name the paths on the command line</td></tr>
+                            <tr><td><code>stat</code> (mode, owner, date)</td><td>partial: <code>yack/fs</code> (size, mtime, kind)</td><td>size from <code>io.read_file</code> length</td></tr>
                             <tr><td>raw mode, <code>read_line</code></td><td>missing</td><td>render a screen, read stdin when piped</td></tr>
-                            <tr><td>spawn a process</td><td>missing</td><td>one binary, no shelling out</td></tr>
-                            <tr><td>clock, date formatting</td><td>missing</td><td>no timestamps in output</td></tr>
+                            <tr><td>spawn a process</td><td><code>yack/process</code> (<code>run</code>)</td><td>one binary, no shelling out</td></tr>
+                            <tr><td>clock, date formatting</td><td><code>yack/time</code></td><td>no timestamps in output</td></tr>
                         </tbody>
                     </table>
                     </div>
                     <p>
-                        These are compiler primitives, not library gaps: each one arrives with
-                        <code>docs/stdlib.md</code> and tests. Everything else on this page is already
-                        in <code>lib/yack</code>.
+                        The missing entry is a compiler primitive and will arrive with
+                        <code>docs/stdlib.md</code> and tests. The modules marked available are
+                        already in <code>lib/yack/src</code>.
                     </p>
                 </section>
 

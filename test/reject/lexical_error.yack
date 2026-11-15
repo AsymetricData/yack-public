@@ -1,2 +1,2 @@
 fun main () =
-    print_int (1 @ 2)
+    print_int (1 $ 2)

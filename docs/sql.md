@@ -1,7 +1,8 @@
 # SQLite
 
-Package optionnel `lib/sql`. Adaptateur SQLite basé sur les builtins
-`sqlite_*`. Le build natif ajoute `-lsqlite3`.
+`lib/sql` est un package optionnel : un adaptateur SQLite au-dessus des builtins
+`sqlite_*`. Le build natif ajoute `-lsqlite3` quand un programme utilise ce
+package.
 
 ## Types
 
@@ -15,8 +16,8 @@ type row = (string, value) list
 type result = row list
 ```
 
-Les flottants et blobs sont rendus en `Text` pour rester indépendants du
-format binaire.
+Les flottants et les blobs passent par `Text`, pour ne pas dépendre d'un format
+binaire.
 
 ## API SQLite
 
@@ -88,8 +89,9 @@ haut) : on ne rend le reader qu'après le `thread_join`.
 active WAL, `busy_timeout` et `synchronous=normal` ; les readers sont ouverts
 en `query_only` avec un `busy_timeout`.
 
-Le pool est volontairement **1 writer**. SQLite ne sait pas écrire en parallèle
-sur une base classique. Les readers peuvent lire en parallèle avec WAL.
+Le pool garde **un seul writer**, parce que SQLite ne sait pas écrire en
+parallèle sur une base classique. Les readers peuvent lire en parallèle avec
+WAL.
 
 `bench/sqlite_pool/main.yack` montre 10 threads lecteurs utilisant chacun une
 connexion du pool, avec le writer dans le thread principal. Chaque reader est

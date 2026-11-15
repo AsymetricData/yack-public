@@ -1,0 +1,21 @@
+
+
+
+
+
+import yack/array
+
+fun make_reply (text : string) : string =
+    "reply-" ^ int_to_string (string_length (borrow text))
+
+fun loop (values : string array, n : int) : int =
+    if n <= 0 then 0
+    else
+        let val text = "payload-0123456789abcdef-" ^ int_to_string (n)
+            val reply = make_reply (text)
+            val values = array.set (values, 0, reply)
+        in loop (values, n - 1) end
+
+fun main () =
+    let val values : string array = array.push (array.new (), "x")
+    in print_int (loop (values, 1000000)) end

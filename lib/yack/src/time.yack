@@ -1,0 +1,103 @@
+(* Millisecondes de l'horloge monotone, idéale pour mesurer une durée.
+   Aucun paramètre. *)
+fun monotonic_ms () : int64 = sys.monotonic_ms ()
+
+(* Millisecondes depuis l'époque Unix (1970-01-01T00:00:00Z), lues avec
+   `clock_gettime (CLOCK_REALTIME)`. Aucun paramètre. *)
+fun now_ms () : int64 = sys.realtime_ms ()
+
+(* Dort au moins `milliseconds` millisecondes.
+   - `milliseconds` : durée positive en millisecondes ; une valeur nulle ou
+     négative ne dort pas. *)
+fun sleep_ms (milliseconds : int) : unit =
+    if milliseconds <= 0 then () else sys.sleep_ms (milliseconds)
+
+(* Division entière arrondie vers le bas, y compris pour un dividende négatif.
+   - `value` : dividende.
+   - `divisor` : diviseur non nul. *)
+fun internal_floor_div (value : int64, divisor : int64) : int64 =
+    let
+        val quotient = value / divisor
+        val remainder = value % divisor
+    in
+        if remainder < int_to_int64 (0) then quotient - int_to_int64 (1)
+        else quotient
+    end
+
+(* Complète un nombre à deux chiffres avec un zéro de tête.
+   - `value` : nombre entre 0 et 99. *)
+fun internal_pad2 (value : int64) : string =
+    if value < int_to_int64 (10) then "0" ^ int64_to_string (value)
+    else int64_to_string (value)
+
+(* Complète un nombre à trois chiffres avec des zéros de tête.
+   - `value` : nombre entre 0 et 999. *)
+fun internal_pad3 (value : int64) : string =
+    if value < int_to_int64 (10) then "00" ^ int64_to_string (value)
+    else if value < int_to_int64 (100) then "0" ^ int64_to_string (value)
+    else int64_to_string (value)
+
+(* Complète une année à quatre chiffres avec des zéros de tête, signe géré.
+   - `value` : année civile. *)
+fun internal_pad4 (value : int64) : string =
+    if value < int_to_int64 (0) then
+        "-" ^ internal_pad4 (int_to_int64 (0) - value)
+    else if value < int_to_int64 (10) then "000" ^ int64_to_string (value)
+    else if value < int_to_int64 (100) then "00" ^ int64_to_string (value)
+    else if value < int_to_int64 (1000) then "0" ^ int64_to_string (value)
+    else int64_to_string (value)
+
+(* Convertit un nombre de jours depuis l'époque en date civile grégorienne.
+   Algorithme de Howard Hinnant, valable aussi avant 1970.
+   - `days` : jours depuis le 1970-01-01.
+
+   Rend le triplet `(année, mois, jour)`. *)
+fun internal_civil_from_days (days : int64) : (int64 * int64 * int64) =
+    let
+        val z = days + int_to_int64 (719468)
+        val era = internal_floor_div (z, int_to_int64 (146097))
+        val doe = z - era * int_to_int64 (146097)
+        val yoe =
+            (doe - doe / int_to_int64 (1460) + doe / int_to_int64 (36524) -
+             doe / int_to_int64 (146096)) / int_to_int64 (365)
+        val y = yoe + era * int_to_int64 (400)
+        val doy =
+            doe -
+            (int_to_int64 (365) * yoe + yoe / int_to_int64 (4) -
+             yoe / int_to_int64 (100))
+        val mp =
+            (int_to_int64 (5) * doy + int_to_int64 (2)) / int_to_int64 (153)
+        val d =
+            doy -
+            (int_to_int64 (153) * mp + int_to_int64 (2)) / int_to_int64 (5) +
+            int_to_int64 (1)
+        val m =
+            if mp < int_to_int64 (10) then mp + int_to_int64 (3)
+            else mp - int_to_int64 (9)
+        val y = if m <= int_to_int64 (2) then y + int_to_int64 (1) else y
+    in
+        (y, m, d)
+    end
+
+(* Formate une époque en UTC, au format ISO 8601 avec millisecondes :
+   `YYYY-MM-DDTHH:MM:SS.mmmZ`.
+   - `epoch_ms` : millisecondes depuis l'époque Unix, négatives avant 1970.
+
+   Rend une chaîne possédée. *)
+fun format_utc (epoch_ms : int64) : string =
+    let
+        val day_ms = int_to_int64 (86400000)
+        val days = internal_floor_div (epoch_ms, day_ms)
+        val ms_of_day = epoch_ms - days * day_ms
+        val seconds = ms_of_day / int_to_int64 (1000)
+        val millis = ms_of_day - seconds * int_to_int64 (1000)
+        val (year, month, day) = internal_civil_from_days (days)
+        val hour = seconds / int_to_int64 (3600)
+        val minute = (seconds / int_to_int64 (60)) % int_to_int64 (60)
+        val second = seconds % int_to_int64 (60)
+    in
+        internal_pad4 (year) ^ "-" ^ internal_pad2 (month) ^ "-" ^
+        internal_pad2 (day) ^ "T" ^ internal_pad2 (hour) ^ ":" ^
+        internal_pad2 (minute) ^ ":" ^ internal_pad2 (second) ^ "." ^
+        internal_pad3 (millis) ^ "Z"
+    end

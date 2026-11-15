@@ -1,0 +1,7 @@
+
+
+
+import yack/time
+
+fun main () =
+    print_string (time.format_utc (-62198755200000))

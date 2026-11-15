@@ -2,6 +2,7 @@ import alpage/AppError
 import alpage/Ctx
 import alpage/Reply
 import alpage/Request
+import yack/string
 
 fun find_param (name : borrow string, params : (string * string) list) : string option =
     case params of
@@ -10,7 +11,7 @@ fun find_param (name : borrow string, params : (string * string) list) : string 
             let val key = pair.0
                 val value = pair.1
             in
-                if string_eq (name, borrow key) then Some (value)
+                if string.equals (name, borrow key) then Some (value)
                 else find_param (name, rest)
             end
 

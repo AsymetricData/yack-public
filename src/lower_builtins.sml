@@ -38,6 +38,7 @@ fun arrayColor name =
   | "array_kernel_load" => SOME ArrayRead
   | "array_kernel_borrow" => SOME ArrayBorrowRead
   | "array_kernel_take" => SOME ArrayMoveOut
+  | "array_kernel_drop" => SOME ArrayMutate
   | "array_kernel_write" => SOME ArrayStoreRooted
   | "array_kernel_reserve" => SOME ArrayMutate
   | "array_kernel_set_length" => SOME ArrayMutate
@@ -48,6 +49,20 @@ fun isArrayBuiltin name = Option.isSome (arrayColor name)
 
 fun isReservedArrayKernel name =
   String.isPrefix "array_kernel_" name
+
+fun isReservedBytes name =
+  name = "bytes_to_string_range" orelse
+  name = "bytes_header_end" orelse
+  name = "bytes_write_string" orelse
+  name = "bytes_write_int"
+
+fun isReservedScratch name =
+  name = "sys.scratch_enter" orelse
+  name = "sys.scratch_enter_all" orelse
+  name = "sys.scratch_leave"
+
+fun isReservedExternView name =
+  name = "extern_view" orelse name = "extern_view_ptr"
 
 fun arrayStoreIndex name =
   case name of
@@ -64,7 +79,8 @@ fun arrayStoreIndex name =
 fun arrayMutatesHeader name =
   name = "array_kernel_reserve" orelse
   name = "array_kernel_set_length" orelse
-  name = "array_kernel_take"
+  name = "array_kernel_take" orelse
+  name = "array_kernel_drop"
 
 fun arrayRootsStoredValue name =
   case arrayColor name of
@@ -158,7 +174,6 @@ fun isBytesBuiltin name =
   name = "bytes_from_string" orelse
   name = "bytes_to_string" orelse
   name = "bytes_to_string_range" orelse
-  name = "send_string" orelse
   name = "bytes_header_end" orelse
   name = "bytes_write_string" orelse
   name = "bytes_write_int"
@@ -186,6 +201,8 @@ fun isSysBuiltin name =
   name = "sys.install_stop_signals" orelse
   name = "sys.stop_requested" orelse
   name = "sys.sleep_ms" orelse
+  name = "sys.monotonic_ms" orelse
+  name = "sys.realtime_ms" orelse
   name = "sys.scratch_enter" orelse
   name = "sys.scratch_enter_all" orelse
   name = "sys.scratch_leave" orelse
@@ -210,6 +227,10 @@ fun isSysBuiltin name =
 
 fun isBuiltinCall name =
   name = "print_int" orelse
+  name = "extern_view" orelse
+  name = "extern_view_ptr" orelse
+  name = "c_ptr.of_int" orelse
+  name = "c_ptr.is_null" orelse
   name = "print_int64" orelse
   name = "print_float" orelse
   name = "print_bool" orelse

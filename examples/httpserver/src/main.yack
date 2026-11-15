@@ -1,6 +1,7 @@
 import net/Buffer
 import net/Http
 import net/Net
+import yack/string
 
 fun main () =
     case Net.listen (8080) of
@@ -25,7 +26,7 @@ fun main () =
                      val request = Http.parse_request (requestText)
                      val response = Http.render_response ("hello")
                      val payload = bytes_from_string (borrow response)
-                     val sent = send_from (Net.stream_fd (borrow stream), payload, 0, string_length (borrow response))
+                     val sent = send_from (Net.stream_fd (borrow stream), payload, 0, string.length (borrow response))
                      val _ = Net.close (stream)
                      val _ = Net.close_listener (listener)
                  in print_string ("served " ^ Http.target (request))

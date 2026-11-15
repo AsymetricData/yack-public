@@ -3,6 +3,7 @@ import alpage/Alpage
 import alpage/Request
 import alpage/Test
 import yack/io
+import yack/string
 
 (* Step 8: test the app in memory. `Test.request` runs the same router,
    middlewares and error mapping as the server; only the socket is gone.
@@ -19,7 +20,7 @@ fun expect (client : Test.client, label : string, raw : string,
             case result.0 of
                 { status = got, headers = _headers, body = text } =>
                     if got = want_status then
-                        if string_eq (borrow text, borrow want_body) then say ("ok " ^ label)
+                        if string.equals (borrow text, borrow want_body) then say ("ok " ^ label)
                         else say ("FAIL " ^ label ^ ": body " ^ text)
                     else say ("FAIL " ^ label ^ ": status " ^ int_to_string (got))
     in

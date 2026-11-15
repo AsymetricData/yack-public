@@ -3,13 +3,14 @@ import alpage/Alpage
 import alpage/Request
 import alpage/Test
 import yack/io
+import yack/string
 
 fun say (message : string) : unit =
     io.print_line (borrow message)
 
 fun text_is (actual : borrow string, expected : string) : bool =
     let val wanted = borrow expected
-    in string_eq (actual, wanted)
+    in string.equals (actual, wanted)
     end
 
 fun has_header_from (name : borrow string, headers : (string * string) list) : bool =
@@ -18,7 +19,7 @@ fun has_header_from (name : borrow string, headers : (string * string) list) : b
       | pair :: rest =>
             let val key = pair.0
             in
-                if string_eq (name, borrow key) then true
+                if string.equals (name, borrow key) then true
                 else has_header_from (name, rest)
             end
 

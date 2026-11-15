@@ -14,8 +14,35 @@ fun to_string (values : int8 array) : string = bytes_to_string (values)
    - `values` : tableau Affine consommé ; il n'est pas rendu.
    - `offset` : indice du premier octet.
    - `count` : nombre d'octets à décoder. *)
-fun to_string_range (values : int8 array, offset : int, count : int) : string =
+fun to_string_range
+    (values : borrow int8 array, offset : int, count : int) : string =
     bytes_to_string_range (values, offset, count)
+
+(* Cherche la fin d’un en-tête HTTP (`\r\n\r\n`) entre `start` et
+   `limit`.
+   - `values` : tableau d’octets emprunté, non consommé.
+   - `start` : premier octet à examiner.
+   - `limit` : borne exclusive.
+   Rend l’indice juste après l’en-tête, ou `-1` si l’en-tête est incomplet. *)
+fun header_end (values : borrow int8 array, start : int, limit : int) : int =
+    bytes_header_end (values, start, limit)
+
+(* Écrit `text` dans le buffer à partir de `offset`, sans dépasser `limit`.
+   - `values` : buffer emprunté, muté en place.
+   Rend le nouvel offset, ou `-1` si le texte ne tient pas. *)
+fun write_string
+    (values : borrow int8 array, offset : int, limit : int,
+     text : borrow string) : int =
+    bytes_write_string (values, offset, limit, text)
+
+(* Écrit `number` en décimal dans le buffer à partir de `offset`, sans
+   dépasser `limit`.
+   - `values` : buffer emprunté, muté en place.
+   Rend le nouvel offset, ou `-1` si le nombre ne tient pas. *)
+fun write_int
+    (values : borrow int8 array, offset : int, limit : int,
+     number : int) : int =
+    bytes_write_int (values, offset, limit, number)
 
 (* Remplace l’octet à l’indice indiqué et rend le tableau modifié.
    - `values` : tableau Affine consommé puis rendu après mutation.

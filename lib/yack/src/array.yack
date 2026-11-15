@@ -123,7 +123,7 @@ fun get_borrow (values : borrow 'a array, index : int) : borrow 'a from 1 =
    - `value` : nouvelle valeur, transférée au tableau. *)
 fun set (values : 'a array, index : int, value : 'a) : 'a array =
     let val _ = internal_check (borrow values, index)
-        val old = array_kernel_take (values, index)
+        val _ = array_kernel_drop (values, index)
         val _ = array_kernel_write (values, index, value)
     in values end
 

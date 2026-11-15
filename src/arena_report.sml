@@ -102,6 +102,7 @@ struct
         | Ast.ETuple (_, s) => s | Ast.ETupleIndex (_, _, s) => s
         | Ast.ECase (_, _, s) => s | Ast.EBorrow (_, _, _, s) => s
         | Ast.EFn (_, _, _, s) => s
+        | Ast.EExtern {span, ...} => span
       fun visit expression =
         case expression of
           Ast.ECall (name, arguments, _) =>

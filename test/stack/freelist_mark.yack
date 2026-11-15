@@ -1,0 +1,29 @@
+
+
+
+
+
+
+
+fun make (n : int) : string array =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "orig-" ^ int_to_string (n) ^ "-0123456789abcdef")
+    in values end
+
+fun replace (values : string array, n : int) : int =
+    let val _ = array_set (values, 0, "new-" ^ int_to_string (n) ^ "-0123456789abcdef")
+    in array_length (values) end
+
+fun main () =
+    let val count = arena
+                        val values = make (1)
+                        val count = replace (values, 2)
+                    in count
+                    end
+        val pad = "BIG-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" ^ "!"
+        val tail = int_to_string (count * 1000000) ^ "ZZZZZZ"
+    in
+        if string_length (borrow pad) > 0
+        then print_string (tail)
+        else print_string ("bad")
+    end

@@ -16,6 +16,7 @@ struct
     | TToken
     | TResource
     | TString
+    | TCPtr
     | TArray of ty
     | TMap of ty
     | TCon of
@@ -159,6 +160,7 @@ struct
     | TToken => false
     | TResource => false
     | TString => false
+    | TCPtr => false
     | TCon {property, fields, ...} =>
         property = Copy andalso
         List.all (fn (_, fieldTy) => isEqualityType fieldTy) fields
@@ -226,6 +228,7 @@ struct
     | (TToken, TToken) => true
     | (TResource, TResource) => true
     | (TString, TString) => true
+    | (TCPtr, TCPtr) => true
     | (TArray inner1, TArray inner2) => unify inner1 inner2
     | (TMap inner1, TMap inner2) => unify inner1 inner2
     | (TCon {name = name1, ...}, TCon {name = name2, ...}) =>
@@ -362,6 +365,7 @@ struct
     | TToken => true
     | TResource => true
     | TString => true
+    | TCPtr => true
     | TCon {fields, ...} =>
         List.all (fn (_, fieldTy) => isConcrete fieldTy) fields
     | TRecord fields =>
@@ -403,6 +407,7 @@ struct
     | TToken => Linear
     | TResource => Affine
     | TString => Affine
+    | TCPtr => Copy
     | TCon {property, ...} => property
     | TRecord fields =>
         joinProperties
@@ -447,6 +452,7 @@ struct
     | TToken => "token"
     | TResource => "resource"
     | TString => "string"
+    | TCPtr => "c_ptr"
     | TArray inner =>
         let
           val text = toString inner

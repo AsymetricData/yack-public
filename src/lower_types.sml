@@ -8,6 +8,7 @@ struct
     , dataSeen : StringSet.t
     , lookupExpressionType : Diag.span -> Types.ty option
     , lookupBindingType : Diag.span -> Types.ty option
+    , lookupExternRecord : string -> (int * (string * int) list) option
     , earlyDrops : (Diag.span * Ownership.earlyDrop list) list
     }
 
@@ -20,6 +21,7 @@ struct
       val dataSeen = #dataSeen env
       val lookupExpressionType = #lookupExpressionType env
       val lookupBindingType = #lookupBindingType env
+      val lookupExternRecord = #lookupExternRecord env
       val earlyDrops = #earlyDrops env
       val earlyDropTable = SpanTable.make earlyDrops
       val builtinSpan = { start = Pos.start, stop = Pos.start }
@@ -81,6 +83,7 @@ fun findFieldIndex name fields =
   | Types.TToken => "token"
   | Types.TResource => "resource"
   | Types.TString => "string"
+  | Types.TCPtr => "c_ptr"
   | Types.TArray inner => "array" ^ typeSuffix inner
   | Types.TMap inner => "map" ^ typeSuffix inner
   | _ => "any"
@@ -124,20 +127,29 @@ fun findFieldIndex name fields =
                 anonymousDiscipline lowered))
         else NONE
       end
-  | Types.TCon {fields, property, ...} =>
+  | Types.TCon {name, fields, property, ...} =>
       let
-        val sorted = sortFields fields
+        val sorted =
+          case lookupExternRecord name of
+            SOME _ => fields
+          | NONE => sortFields fields
         val lowered =
           List.map (fn (field, ty) => (field, lowerType span ty)) sorted
       in
         if List.all (fn (_, SOME _) => true | (_, NONE) => false) lowered then
-          SOME
-            (Ir.TRecord
-               (List.map
-                  (fn (field, SOME value) => (field, value)
-                    | (field, NONE) => (field, Ir.Unit))
-                  lowered,
-                discipline property))
+          let
+            val loweredFields =
+              List.map
+                (fn (field, SOME value) => (field, value)
+                  | (field, NONE) => (field, Ir.Unit))
+                lowered
+            val discipline =
+              case lookupExternRecord name of
+                SOME (size, offsets) => Ir.DExtern (offsets, size)
+              | NONE => discipline property
+          in
+            SOME (Ir.TRecord (loweredFields, discipline))
+          end
         else NONE
       end
   | Types.TData (Types.Data {name, property, ...}) =>
@@ -191,6 +203,7 @@ fun findFieldIndex name fields =
   | Types.TToken => SOME Ir.TToken
   | Types.TResource => SOME Ir.TResource
   | Types.TString => SOME Ir.TString
+  | Types.TCPtr => SOME Ir.TCPtr
   | Types.TArray inner =>
       (case lowerType span inner of
          SOME lowered => SOME (Ir.TArray lowered)

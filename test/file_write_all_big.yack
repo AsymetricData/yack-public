@@ -1,0 +1,42 @@
+
+
+
+import yack/bytes
+import yack/file
+import yack/fs
+import yack/io
+import yack/string
+
+fun main () =
+    case io.read_stdin () of
+        Error (message) => print_string (message)
+      | Ok (text) =>
+            let val path = "/tmp/yack-file-write-big"
+                val _ = fs.remove (borrow path)
+            in
+                case file.open (borrow path, file.Write) of
+                    Error (message) => print_string (message)
+                  | Ok (handle) =>
+                        let val data = bytes.from_string (borrow text)
+                            val wrote = file.write_all (borrow handle, data)
+                            val _ = file.close (handle)
+                        in
+                            case wrote of
+                                Error (message) => print_string (message)
+                              | Ok (count) =>
+                                    let val back =
+                                            case io.read_file
+                                                     (string_copy (borrow path)) of
+                                                Ok (value) => value
+                                              | Error (_) => ""
+                                        val same =
+                                            string.equals
+                                                (borrow back, borrow text)
+                                        val _ = fs.remove (borrow path)
+                                    in
+                                        let val _ = print_int (count)
+                                        in print_int (if same then 1 else 0)
+                                        end
+                                    end
+                        end
+            end

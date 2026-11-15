@@ -17,6 +17,7 @@ struct
     , enterStoreRoot : unit -> unit
     , leaveStoreRoot : unit -> unit
     , stackMode : bool
+    , inArena : unit -> bool
     , coerce : value * Ir.ty -> value
     , needsDrop : Ir.ty -> bool
     , dropValue : value * Ir.ty -> unit
@@ -38,6 +39,7 @@ struct
       val enterStoreRoot = #enterStoreRoot env
       val leaveStoreRoot = #leaveStoreRoot env
       val stackMode = #stackMode env
+      val inArena = #inArena env
       val coerce = #coerce env
       val needsDrop = #needsDrop env
       val dropValue = #dropValue env
@@ -57,6 +59,16 @@ struct
         in
           owner
         end
+
+      fun isDataType ty =
+        case ty of
+          Ir.TData (_, _, _) => true
+        | _ => false
+
+      fun dataNameOf ty =
+        case ty of
+          Ir.TData (name, _, _) => name
+        | _ => ""
 
       fun allocRegion () =
         case !siteRef of
@@ -92,9 +104,13 @@ struct
       fun ownerValue () =
         if stackMode then allocRegion () else "null"
 
+      fun allocationOwner arrayValue =
+        if stackMode andalso inArena () then "@yack_root_region"
+        else ownerOf arrayValue
+
       fun lowerInOwner (arrayValue, argument) =
         let
-          val owner = ownerOf arrayValue
+          val owner = allocationOwner arrayValue
           val elementTy =
             case #ty arrayValue of
               Ir.TArray ty => ty
@@ -134,7 +150,11 @@ struct
                 val previousRoot = !storeRoot
                 val needsRoot = mayContainString elementTy
                 val _ =
-                  if stackMode then currentDestArg := allocRegion () else ()
+                  if stackMode then
+                    currentDestArg :=
+                      (if inArena () then "@yack_root_region"
+                       else allocRegion ())
+                  else ()
                 val _ = storeRoot := needsRoot
                 val _ = if needsRoot then enterStoreRoot () else ()
                 val value = lowerExpr locals valueArgument
@@ -381,6 +401,33 @@ struct
             end
         end
 
+      fun lowerKernelDrop array index =
+        let
+          val elementTy = elementTypeOf array
+          val data = loadField array 0 "ptr"
+          val indexValue = index64 index
+          val element = loadElement (data, indexValue, elementTy)
+          val _ =
+            if stackMode andalso elementTy = Ir.TString then
+              emit ("call void @yack_owner_recycle_string(ptr " ^
+                    ownerOf array ^ ", { ptr, i64, i1 } " ^
+                    #text element ^ ")")
+            else if stackMode andalso isDataType elementTy then
+              emit ("call void @yack_owner_drop_" ^ dataNameOf elementTy ^
+                    "(ptr " ^ ownerOf array ^ ", ptr " ^ #text element ^ ")")
+            else if needsDrop elementTy then
+              dropValue (element, elementTy)
+            else ()
+          val pointer = fresh "arr.drop.elementp"
+          val _ = emit (pointer ^ " = getelementptr " ^
+                        storageTy elementTy ^ ", ptr " ^ data ^
+                        ", i64 " ^ indexValue)
+          val _ = emit ("store " ^ storageTy elementTy ^
+                        " zeroinitializer, ptr " ^ pointer)
+        in
+          unitValue
+        end
+
       fun dropRejected (value, elementTy) () =
         if needsDrop elementTy then dropValue (value, elementTy) else ()
 
@@ -394,9 +441,22 @@ struct
           val _ = abortUnlessBelowAfter
                     (indexValue, length, dropRejected (value, elementTy))
           val _ =
-            if needsDrop elementTy then
-              dropValue (loadElement (data, indexValue, elementTy), elementTy)
-            else ()
+            if not (needsDrop elementTy) then ()
+            else
+              let val old = loadElement (data, indexValue, elementTy) in
+                if stackMode andalso elementTy = Ir.TString then
+
+                  emit ("call void @yack_owner_recycle_string(ptr " ^
+                        ownerOf array ^
+                        ", { ptr, i64, i1 } " ^ #text old ^ ")")
+                else if stackMode andalso isDataType elementTy then
+
+                  emit ("call void @yack_owner_drop_" ^
+                        dataNameOf elementTy ^ "(ptr " ^ ownerOf array ^
+                        ", ptr " ^ #text old ^ ")")
+                else
+                  dropValue (old, elementTy)
+              end
         in
           storeElement (data, indexValue, value, elementTy);
           unitValue
@@ -470,9 +530,12 @@ struct
           val _ =
             if stackMode then
               ( emit (grown ^ " = call ptr @yack_region_alloc_direct(ptr " ^
-                      ownerOf array ^ ", i64 " ^ bytes ^ ")")
+                      allocationOwner array ^ ", i64 " ^ bytes ^ ")")
               ; emit ("call void @memcpy(ptr " ^ grown ^ ", ptr " ^ data0 ^
                       ", i64 " ^ oldBytes ^ ")")
+              ; emit ("call void @yack_owner_recycle_block(ptr " ^
+                      allocationOwner array ^ ", ptr " ^ data0 ^ ", i64 " ^
+                      oldBytes ^ ")")
               )
             else
               emit (grown ^ " = call ptr @yack_root_realloc(ptr " ^ data0 ^
@@ -587,9 +650,12 @@ struct
           val _ =
             if stackMode then
               ( emit (grown ^ " = call ptr @yack_region_alloc_direct(ptr " ^
-                      ownerOf array ^ ", i64 " ^ bytes ^ ")")
+                      allocationOwner array ^ ", i64 " ^ bytes ^ ")")
               ; emit ("call void @memcpy(ptr " ^ grown ^ ", ptr " ^ data0 ^
                       ", i64 " ^ copiedBytes ^ ")")
+              ; emit ("call void @yack_owner_recycle_block(ptr " ^
+                      allocationOwner array ^ ", ptr " ^ data0 ^ ", i64 " ^
+                      oldBytes ^ ")")
               )
             else
               emit (grown ^ " = call ptr @yack_root_realloc(ptr " ^ data0 ^
@@ -799,21 +865,38 @@ struct
 
             val noHuge = fresh "arr.uninit.nohuge"
             val noHugeAddr = fresh "arr.uninit.nohuge.addr"
-            val noHugePage = fresh "arr.uninit.nohuge.page"
-            val noHugePtr = fresh "arr.uninit.nohuge.ptr"
-            val noHugeSize = fresh "arr.uninit.nohuge.size"
             val noHugeEnd = fresh "arr.uninit.nohuge.end"
+            val noHugePage = fresh "arr.uninit.nohuge.page"
+            val noHugeStart = fresh "arr.uninit.nohuge.start"
+            val noHugeStop = fresh "arr.uninit.nohuge.stop"
+            val noHugeSize = fresh "arr.uninit.nohuge.size"
+            val noHugeEmpty = fresh "arr.uninit.nohuge.empty"
+            val noHugePtr = fresh "arr.uninit.nohuge.ptr"
+            val noHugeDo = freshLabel "arr.uninit.nohuge.do"
+            val noHugeSkip = freshLabel "arr.uninit.nohuge.skip"
             val _ = emit (noHugeAddr ^ " = ptrtoint ptr " ^ data ^
                           " to i64")
-            val _ = emit (noHugePage ^ " = and i64 " ^ noHugeAddr ^
+            val _ = emit (noHugeEnd ^ " = add i64 " ^ noHugeAddr ^
+                          ", " ^ bytes)
+            val _ = emit (noHugePage ^ " = add i64 " ^ noHugeAddr ^
+                          ", 4095")
+            val _ = emit (noHugeStart ^ " = and i64 " ^ noHugePage ^
                           ", -4096")
-            val _ = emit (noHugePtr ^ " = inttoptr i64 " ^ noHugePage ^
+            val _ = emit (noHugeStop ^ " = and i64 " ^ noHugeEnd ^
+                          ", -4096")
+            val _ = emit (noHugeSize ^ " = sub i64 " ^ noHugeStop ^
+                          ", " ^ noHugeStart)
+            val _ = emit (noHugeEmpty ^ " = icmp uge i64 " ^ noHugeStart ^
+                          ", " ^ noHugeStop)
+            val _ = emit ("br i1 " ^ noHugeEmpty ^ ", label %" ^
+                          noHugeSkip ^ ", label %" ^ noHugeDo)
+            val _ = emit (noHugeDo ^ ":")
+            val _ = emit (noHugePtr ^ " = inttoptr i64 " ^ noHugeStart ^
                           " to ptr")
-            val _ = emit (noHugeEnd ^ " = add i64 " ^ bytes ^ ", 4095")
-            val _ = emit (noHugeSize ^ " = and i64 " ^ noHugeEnd ^
-                          ", -4096")
             val _ = emit (noHuge ^ " = call i32 @madvise(ptr " ^ noHugePtr ^
                           ", i64 " ^ noHugeSize ^ ", i32 15)")
+            val _ = emit ("br label %" ^ noHugeSkip)
+            val _ = emit (noHugeSkip ^ ":")
             val header = allocBytes "32"
             val dataPointer = fieldPointer { text = header, ty = resultTy
                                            , const = false } 0
@@ -868,6 +951,7 @@ struct
       | ("array_kernel_borrow", [array, index]) =>
           lowerKernelBorrow (array, index, resultTy)
       | ("array_kernel_take", [array, index]) => lowerKernelTake (array, index)
+      | ("array_kernel_drop", [array, index]) => lowerKernelDrop array index
       | ("array_kernel_write", [array, index, value]) =>
           lowerKernelWrite (array, index, value)
       | ("array_kernel_reserve", [array, capacity]) =>

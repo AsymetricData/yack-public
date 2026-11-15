@@ -1,3 +1,4 @@
+import yack/bytes
 type buffer : Affine = { data : int8 array, length : int, capacity : int }
 
 fun buffer_new (capacity : int) : buffer =
@@ -17,7 +18,7 @@ fun buffer_append (b : buffer, value : int8) : buffer =
 fun buffer_string (b : buffer) : string =
     case b of
         { data = data, length = length, capacity = capacity } =>
-            bytes_to_string_range (data, 0, length)
+            bytes.to_string_range (borrow data, 0, length)
 
 fun main () =
     let val b = buffer_new (8)

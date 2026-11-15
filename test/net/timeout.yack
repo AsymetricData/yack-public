@@ -1,0 +1,40 @@
+
+
+import net/Net
+import yack/string
+
+fun check_negative () : bool =
+    case Net.connect_timeout (borrow "127.0.0.1", 1, -1) of
+        Error (message) =>
+            if string.contains (borrow message, borrow "net.connect_timeout")
+            then string.contains (borrow message, borrow "timeout")
+            else false
+      | Ok (stream) =>
+            let val _ = Net.close (stream)
+            in false
+            end
+
+fun check_connect () : bool =
+    case Net.listen (0) of
+        Error (_) => false
+      | Ok (listener) =>
+            let val port = Net.local_port (borrow listener)
+            in
+                case Net.connect_timeout
+                         (borrow "127.0.0.1", port, 1000) of
+                    Error (_) =>
+                        let val _ = Net.close_listener (listener)
+                        in false
+                        end
+                  | Ok (stream) =>
+                        let val _ = Net.close (stream)
+                            val _ = Net.close_listener (listener)
+                        in true
+                        end
+            end
+
+fun main () =
+    if check_negative () then
+        if check_connect () then print_string ("ok")
+        else print_string ("FAIL connect")
+    else print_string ("FAIL timeout")

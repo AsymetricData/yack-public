@@ -24,6 +24,8 @@ struct
         bool * bool * value * Ir.pattern * string * string * localEntry list
         -> localEntry list * cleanup list * cleanup list
     , canTailCall : unit -> bool
+    , irType : Ir.expr -> Ir.ty
+    , safeLocalScope : Ir.expr -> bool
     }
 
   fun tailPositions expression =
@@ -62,6 +64,8 @@ struct
   val dropValueSkipping = #dropValueSkipping env
   val testPattern = #testPattern env
   val canTailCall = #canTailCall env
+  val irType = #irType env
+  val safeLocalScope = #safeLocalScope env
 
 fun scalarType ty =
   case ty of
@@ -83,6 +87,7 @@ fun safeTailType ty =
   | Ir.TToken => true
   | Ir.TResource => true
   | Ir.TString => true
+  | Ir.TCPtr => true
   | Ir.TArray _ => true
 
   | Ir.TMap element => safeTailType element
@@ -207,11 +212,22 @@ fun safeTailArgument roots safeNames expression =
              else safeNames)
             body)
         branches
-  | Ir.Call (_, arguments, ty, escapes) =>
+  | Ir.Call (name, arguments, ty, escapes) =>
       if scalarType ty then true
       else
         !escapes andalso safeTailType ty andalso
-        List.all safeOrRoot arguments
+        let
+
+          fun check (index, remaining) =
+            case remaining of
+              [] => true
+            | argument :: rest =>
+                (not (LowerEscape.calleeDepends (name, index)) orelse
+                 safeOrRoot argument) andalso
+                check (index + 1, rest)
+        in
+          check (0, arguments)
+        end
   | Ir.Ctor (_, _, argument, _, siteRef) =>
       !siteRef = Ir.Destination andalso
       (case argument of
@@ -222,6 +238,7 @@ fun safeTailArgument roots safeNames expression =
       List.all (fn (_, value) => safe value) fields
   | Ir.Field (base, _, _) => safe base
   | Ir.TupleIndex (base, _, _) => safe base
+  | Ir.RawField (base, _, _) => safe base
   | Ir.Copy (value, _) => safe value
   | Ir.StringBuiltin (name, arguments, ty, _) =>
       if LowerBuiltins.stringProduces name then safeTailType ty
@@ -283,6 +300,7 @@ fun expressionMentions names expression =
           List.exists (fn (_, value) => loop value) fields
       | Ir.Field (base, _, _) => loop base
       | Ir.TupleIndex (base, _, _) => loop base
+      | Ir.RawField (base, _, _) => loop base
       | Ir.Ctor (_, _, NONE, _, _) => false
       | Ir.Ctor (_, _, SOME value, _, _) => loop value
       | Ir.Match (scrutinee, branches, _) =>
@@ -368,6 +386,7 @@ fun knownType expression =
   | Ir.Call (_, _, ty, _) => SOME ty
   | Ir.Field (_, _, ty) => SOME ty
   | Ir.TupleIndex (_, _, ty) => SOME ty
+  | Ir.RawField (_, _, ty) => SOME ty
   | Ir.StringBuiltin (_, _, ty, _) => SOME ty
   | Ir.ArrayBuiltin (_, _, ty, _) => SOME ty
   | Ir.MapBuiltin (_, _, ty, _) => SOME ty
@@ -475,6 +494,25 @@ fun lowerTailExprWith pendingDrops safeNames roots locals expression =
           (lowerExpr locals expression, false, false)
         else
           let
+            val useMark =
+              stackMode andalso
+              not (LowerEscape.hasPointers (irType body)) andalso
+              List.exists
+                (fn (_, ty, value) =>
+                   LowerEscape.hasPointers ty andalso safeLocalScope value)
+                bindings andalso
+              safeLocalScope body
+            val markSlot =
+              if useMark then SOME (allocStack (Ir.Int 64)) else NONE
+            val _ =
+              case markSlot of
+                SOME slot =>
+                  let val mark = fresh "let.mark"
+                  in
+                    emit (mark ^ " = call i64 @yack_region_mark(ptr %region)");
+                    emit ("store i64 " ^ mark ^ ", ptr " ^ slot)
+                  end
+              | NONE => ()
             fun bindOne ((name, _, valueExpr), environment) =
               bindLocal environment name (lowerExpr environment valueExpr)
             val extended = List.foldl bindOne locals bindings
@@ -492,6 +530,18 @@ fun lowerTailExprWith pendingDrops safeNames roots locals expression =
             val _ =
               if returned orelse handled then ()
               else emitLocalDrops (extended, drops @ pendingDrops)
+            val _ =
+              if returned then ()
+              else
+                case markSlot of
+                  SOME slot =>
+                    let val mark = fresh "let.mark"
+                    in
+                      emit (mark ^ " = load i64, ptr " ^ slot);
+                      emit ("call void @yack_region_release(ptr %region, i64 " ^
+                            mark ^ ")")
+                    end
+                | NONE => ()
           in
             (value, returned, true)
           end

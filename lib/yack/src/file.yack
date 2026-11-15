@@ -1,0 +1,225 @@
+import yack/array
+import yack/bytes as byte_array
+import yack/string
+
+(* Mode d'ouverture.
+   `Read` ouvre en lecture seule, `Write` crée ou tronque, `Append` crée et
+   ajoute à la fin. *)
+datatype mode = Read | Write | Append
+
+(* Descripteur de fichier Linear. `owned` est faux pour les handles
+   standard (`stdin`, `stdout`, `stderr`), dont `close` ne ferme pas le
+   descripteur du processus. *)
+type handle : Linear = { descriptor : int, owned : bool }
+
+(* Point de départ d'un déplacement d'offset.
+   `Start` depuis le début, `Current` depuis la position courante, `End`
+   depuis la fin. *)
+datatype whence = Start | Current | End
+
+extern fun open_raw (path : borrow string, flags : int, mode : int) : int = "open"
+extern fun read_raw
+    (descriptor : int, buffer : borrow int8 array, length : int64) : int64 =
+    "read"
+extern fun write_raw
+    (descriptor : int, buffer : borrow int8 array, length : int64) : int64 =
+    "write"
+extern fun lseek_raw
+    (descriptor : int, offset : int64, whence : int) : int64 =
+    "lseek"
+extern fun fsync_raw (descriptor : int) : int = "fsync"
+extern fun close_raw (descriptor : int) : int = "close"
+
+(* Traduit un mode en flags `open (2)` et en permissions.
+   - `mode` : mode d'ouverture demandé. *)
+fun internal_flags (mode : mode) : (int * int) =
+    case mode of
+        Read => (524288, 0)
+      | Write => (524865, 438)
+      | Append => (525377, 438)
+
+(* Ouvre un fichier et rend son descripteur Linear.
+   - `path` : chemin emprunté.
+   - `mode` : mode d'ouverture. *)
+fun open (path : borrow string, mode : mode) : handle result =
+    let
+        val (flags, permissions) = internal_flags (mode)
+        val descriptor = open_raw (path, flags, permissions)
+    in
+        if descriptor < 0 then
+            let val code = sys.errno () in
+                Error ("file.open: open failed (errno " ^
+                       int_to_string (code) ^ ")")
+            end
+        else Ok ({ descriptor = descriptor, owned = true })
+    end
+
+(* Handle Linear sur l'entrée standard. `close` ne ferme pas le
+   descripteur 0. Aucun paramètre. *)
+fun stdin () : handle = { descriptor = 0, owned = false }
+
+(* Handle Linear sur la sortie standard. `close` ne ferme pas le
+   descripteur 1. Aucun paramètre. *)
+fun stdout () : handle = { descriptor = 1, owned = false }
+
+(* Handle Linear sur la sortie d'erreur. `close` ne ferme pas le
+   descripteur 2. Aucun paramètre. *)
+fun stderr () : handle = { descriptor = 2, owned = false }
+
+(* Traduit un point de départ en constante `lseek (2)`.
+   - `value` : point de départ demandé. *)
+fun internal_whence (value : whence) : int =
+    case value of
+        Start => 0
+      | Current => 1
+      | End => 2
+
+(* Déplace l'offset du descripteur.
+   - `descriptor` : descripteur ouvert.
+   - `offset` : déplacement en octets.
+   - `origin` : point de départ.
+
+   Rend la nouvelle position, ou l'errno. *)
+fun internal_seek
+    (descriptor : int, offset : int64, origin : int) : int64 result =
+    let val position = lseek_raw (descriptor, offset, origin)
+    in
+        if position < int_to_int64 (0) then
+            let val code = sys.errno ()
+            in
+                if code = 4 then internal_seek (descriptor, offset, origin)
+                else
+                    Error ("file.seek: lseek failed (errno " ^
+                           int_to_string (code) ^ ")")
+            end
+        else Ok (position)
+    end
+
+(* Déplace l'offset du descripteur.
+   - `file` : descripteur emprunté, non consommé.
+   - `offset` : déplacement en octets.
+   - `origin` : point de départ.
+
+   Rend la nouvelle position en octets. *)
+fun seek (file : borrow handle, offset : int64, origin : whence) : int64 result =
+    internal_seek (file.descriptor, offset, internal_whence (origin))
+
+(* Lit jusqu'à `length (buffer)` octets dans le buffer.
+   - `file` : descripteur emprunté, non consommé.
+   - `buffer` : buffer possédé, rempli par le noyau et non consommé.
+
+   Rend le nombre d'octets lus ; `0` signale la fin du fichier. *)
+fun read_chunk (file : borrow handle, buffer : borrow int8 array) : int result =
+    let
+        val length = array.length (buffer)
+        val count = read_raw (file.descriptor, buffer, int_to_int64 (length))
+    in
+        if count < int_to_int64 (0) then
+            let val code = sys.errno ()
+            in
+                if code = 4 then read_chunk (file, buffer)
+                else
+                    Error ("file.read_chunk: read failed (errno " ^
+                           int_to_string (code) ^ ")")
+            end
+        else Ok (int64_to_int (count))
+    end
+
+(* Écrit tout le buffer, en reprenant sur EINTR et écriture partielle.
+   Le buffer est découpé en tranches de 64 Kio à partir d'une chaîne
+   possédée : une écriture partielle ne recopie pas tout le reste.
+   - `file` : descripteur emprunté, non consommé.
+   - `buffer` : buffer possédé, consommé par l'écriture.
+
+   Rend le nombre total d'octets écrits (la longueur du buffer). *)
+fun write_all (file : borrow handle, buffer : int8 array) : int result =
+    let
+        val text = byte_array.to_string (buffer)
+        val size = string_length (borrow text)
+        fun loop
+            (descriptor : int, offset : int, total : int,
+             limit : int) : int result =
+            if offset >= size then Ok (total)
+            else
+                let
+                    val remaining = size - offset
+                    val count =
+                        if remaining > limit then limit else remaining
+                    val piece =
+                        string.slice (borrow text, offset, offset + count)
+                    val data = byte_array.from_string (borrow piece)
+                    val written =
+                        write_raw
+                            (descriptor, borrow data,
+                             int_to_int64 (count))
+                in
+                    if written < int_to_int64 (0) then
+                        let val code = sys.errno ()
+                        in
+                            if code = 4 then
+                                loop (descriptor, offset, total, limit)
+                            else
+                                Error
+                                    ("file.write_all: write failed (errno " ^
+                                     int_to_string (code) ^ ")")
+                        end
+                    else if written = int_to_int64 (0) then
+                        Error ("file.write_all: short write")
+                    else
+                        let val done = int64_to_int (written)
+                            val nextLimit =
+                                if done < limit then done else limit
+                        in
+                            loop
+                                (descriptor, offset + done,
+                                 total + done, nextLimit)
+                        end
+                end
+    in loop (file.descriptor, 0, 0, 65536)
+    end
+
+(* Écrit tout le buffer, sauf écriture partielle signalée par le résultat.
+   - `file` : descripteur emprunté, non consommé.
+   - `buffer` : buffer emprunté, non consommé.
+
+   Rend le nombre d'octets écrits. *)
+fun write (file : borrow handle, buffer : borrow int8 array) : int result =
+    let
+        val length = array.length (buffer)
+        val count = write_raw (file.descriptor, buffer, int_to_int64 (length))
+    in
+        if count < int_to_int64 (0) then
+            let val code = sys.errno () in
+                Error ("file.write: write failed (errno " ^
+                       int_to_string (code) ^ ")")
+            end
+        else Ok (int64_to_int (count))
+    end
+
+(* Force les données et métadonnées du fichier sur le disque.
+   - `file` : descripteur emprunté, non consommé. *)
+fun sync (file : borrow handle) : unit result =
+    if fsync_raw (file.descriptor) = 0 then Ok (())
+    else
+        let val code = sys.errno ()
+        in
+            if code = 4 then sync (file)
+            else
+                Error ("file.sync: fsync failed (errno " ^
+                       int_to_string (code) ^ ")")
+        end
+
+(* Ferme le descripteur. Obligatoire : `handle` est Linear. Un handle
+   standard (`stdin`, `stdout`, `stderr`) n'est pas fermé.
+   - `file` : descripteur consommé. *)
+fun close (file : handle) : unit result =
+    case file of
+        { descriptor = descriptor, owned = owned } =>
+            if owned then
+                if close_raw (descriptor) = 0 then Ok (())
+                else
+                    let val code = sys.errno () in
+                        Error ("file.close: close failed (errno " ^
+                               int_to_string (code) ^ ")")
+                    end
+            else Ok (())

@@ -1,7 +1,8 @@
+import yack/string
 type holder : Affine = { name : string, table : string map }
 
 fun length_of (value : borrow string) : int =
-    string_length (value)
+    string.length (value)
 
 fun main () =
     let val h : holder = { name = "hello", table = map_new () }
@@ -11,5 +12,5 @@ fun main () =
         val size = map_length (h.table)
         val pair = ("yack", 41)
         val tag = borrow pair.0
-    in print_int (name_len + size * 100 + string_length (tag))
+    in print_int (name_len + size * 100 + string.length (tag))
     end

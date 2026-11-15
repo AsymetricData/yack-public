@@ -1,0 +1,691 @@
+import yack/array
+import yack/bytes as byte_array
+import yack/fs
+import yack/io
+import yack/list
+import yack/random
+import yack/string
+
+(* Résultat d'un programme : sorties capturées et code de sortie.
+   `status` vaut -1 si `pclose` a échoué. *)
+type output = { stdout : string, stderr : string, status : int }
+
+(* Entrée standard du programme lancé.
+   `Inherit` garde celle du processus appelant, `Text` écrit un fichier
+   temporaire, `Fd` duplique un descripteur déjà ouvert. *)
+datatype input = Inherit | Text of string | Fd of int
+
+(* Destination d'un flux du programme.
+   `Capture` le lit dans le résultat de `run_with`, `To_fd` l'écrit dans un
+   descripteur déjà ouvert par l'appelant. *)
+datatype destination = Capture | To_fd of int
+
+(* Options de `run_with` : source de stdin, destination de stdout et de
+   stderr. *)
+type options = { input : input, output : destination, errors : destination }
+
+(* Redirection préparée avant `popen`.
+   - `command` : fragment ajouté à la ligne de commande du shell.
+   - `capture` : vrai si le flux est lu par `run_with`.
+   - `descriptor` : descripteur dupliqué à fermer après `pclose`, ou -1. *)
+type redirection = { command : string, capture : bool, descriptor : int }
+
+(* Les trois redirections d'un appel, dans l'ordre stdin, stdout, stderr. *)
+type prepared = { input : redirection, output : redirection, errors : redirection }
+
+extern fun popen_raw
+    (command : borrow string, mode : borrow string) : c_ptr =
+    "popen"
+
+extern fun pclose_raw (stream : c_ptr) : int = "pclose"
+
+extern fun fileno_raw (stream : c_ptr) : int = "fileno"
+
+extern fun read_raw
+    (descriptor : int, buffer : borrow int8 array, length : int64) : int64 =
+    "read"
+
+extern fun write_raw
+    (descriptor : int, buffer : borrow int8 array, length : int64) : int64 =
+    "write"
+
+extern fun open_raw (path : borrow string, flags : int, mode : int) : int = "open"
+
+extern fun close_raw (descriptor : int) : int = "close"
+
+extern fun dup_raw (descriptor : int) : int = "dup"
+
+(* Cherche un octet NUL : un tel argument serait tronqué par `popen`.
+   - `text` : mot emprunté.
+   - `index` : prochain octet à tester.
+   - `stop` : longueur du mot. *)
+fun internal_has_nul (text : borrow string, index : int, stop : int) : bool =
+    if index >= stop then false
+    else if string_char_at_unchecked (text, index) = 0 then true
+    else internal_has_nul (text, index + 1, stop)
+
+(* Découpe un mot en morceaux échappés pour les quotes simples, en ordre
+   inverse. Un `'` devient `'\''` ; les suites sans quote restent des
+   tranches.
+   - `text` : mot emprunté.
+   - `index` : prochain octet à traiter.
+   - `start` : début de la tranche courante.
+   - `stop` : longueur du mot.
+   - `acc` : morceaux déjà vus, en ordre inverse. *)
+fun internal_quote_pieces
+    (text : borrow string, index : int, start : int, stop : int,
+     acc : string list) : string list =
+    if index >= stop then
+        if start < stop then
+            Cons ((string.slice (text, start, stop), acc))
+        else acc
+    else if string_char_at_unchecked (text, index) = 39 then
+        let val acc =
+                if start < index then
+                    Cons ((string.slice (text, start, index), acc))
+                else acc
+            val acc = Cons (("'\\''", acc))
+        in
+            internal_quote_pieces (text, index + 1, index + 1, stop, acc)
+        end
+    else internal_quote_pieces (text, index + 1, start, stop, acc)
+
+(* Compte les quotes simples à échapper.
+   - `text` : mot emprunté.
+   - `index` : prochain octet à traiter.
+   - `stop` : longueur du mot.
+   - `acc` : quotes déjà comptées. *)
+fun internal_quote_extra
+    (text : borrow string, index : int, stop : int, acc : int) : int =
+    if index >= stop then acc
+    else if string_char_at_unchecked (text, index) = 39 then
+        internal_quote_extra (text, index + 1, stop, acc + 1)
+    else internal_quote_extra (text, index + 1, stop, acc)
+
+(* Copie les morceaux bout à bout, sans séparateur.
+   - `pieces` : morceaux consommés.
+   - `buffer` : buffer de sortie, muté et rendu.
+   - `offset` : prochain octet à écrire.
+   - `total` : taille du buffer. *)
+fun internal_concat
+    (pieces : string list, buffer : int8 array, offset : int,
+     total : int) : int8 array =
+    case pieces of
+        Nil => buffer
+      | Cons (piece, rest) =>
+            let
+                val after =
+                    byte_array.write_string
+                        (borrow buffer, offset, total, borrow piece)
+            in internal_concat (rest, buffer, after, total)
+            end
+
+(* Échappe un mot pour le shell POSIX entre quotes simples. Les morceaux
+   sont collectés puis concaténés une seule fois, donc la fonction est
+   terminale et linéaire en mémoire.
+   - `text` : mot emprunté. *)
+fun shell_quote (text : borrow string) : string result =
+    let val size = string_length (text)
+    in
+        if internal_has_nul (text, 0, size) then
+            Error ("process.run_with: argument contains a NUL byte")
+        else
+            let
+                val total =
+                    size + 2 + 3 * internal_quote_extra (text, 0, size, 0)
+                val reversed =
+                    internal_quote_pieces (text, 0, 0, size, Nil)
+                val reversed = Cons (("'", reversed))
+                val pieces =
+                    Cons (("'", list.reverse (reversed)))
+                val buffer : int8 array = array_make_uninit (total)
+                val filled = internal_concat (pieces, buffer, 0, total)
+            in Ok (byte_array.to_string (filled))
+            end
+    end
+
+(* Échappe les arguments, les rend en ordre inverse et compte leur longueur
+   avec une espace après chacun.
+   - `arguments` : liste possédée consommée.
+   - `acc` : mots déjà échappés, en ordre inverse.
+   - `total` : longueur déjà comptée. *)
+fun internal_quote_arguments
+    (arguments : string list, acc : string list, total : int) :
+    (string list * int) result =
+    case arguments of
+        Nil => Ok ((acc, total))
+      | Cons (argument, rest) =>
+            case shell_quote (borrow argument) of
+                Error (message) => Error (message)
+              | Ok (quoted) =>
+                    let val size = string_length (borrow quoted)
+                    in
+                        internal_quote_arguments
+                            (rest, Cons ((quoted, acc)), total + size + 1)
+                    end
+
+(* Copie les mots séparés par une espace dans `buffer`.
+   - `pieces` : mots consommés.
+   - `buffer` : buffer de sortie, muté et rendu.
+   - `offset` : prochain octet à écrire.
+   - `total` : taille du buffer. *)
+fun internal_copy_pieces
+    (pieces : string list, buffer : int8 array, offset : int,
+     total : int) : int8 array =
+    case pieces of
+        Nil => buffer
+      | Cons (piece, rest) =>
+            let
+                val after =
+                    byte_array.write_string
+                        (borrow buffer, offset, total, borrow piece)
+                val spaced = array.set (buffer, after, 32)
+            in internal_copy_pieces (rest, spaced, after + 1, total)
+            end
+
+(* Cherche la fin d'une entrée d'environnement, séparée par NUL.
+   - `text` : environnement emprunté.
+   - `index` : début de l'entrée. *)
+fun internal_nul_at (text : borrow string, index : int) : int =
+    if index >= string_length (text) then index
+    else if string_char_at_unchecked (text, index) = 0 then index
+    else internal_nul_at (text, index + 1)
+
+(* Cherche `TMPDIR=` au début d'une entrée de l'environnement.
+   - `text` : environnement emprunté.
+   - `index` : début de l'entrée courante. *)
+fun internal_scan_tmpdir (text : borrow string, index : int) : string =
+    if index >= string_length (text) then "/tmp"
+    else
+        let
+            val stop = internal_nul_at (text, index)
+            val prefix = "TMPDIR="
+            val size = string_length (borrow prefix)
+        in
+            if index + size <= stop then
+                if string.matches_at (text, borrow prefix, index, 0, size) then
+                    let
+                        val value = string.slice (text, index + size, stop)
+                    in
+                        if string_length (borrow value) = 0 then "/tmp"
+                        else value
+                    end
+                else internal_scan_tmpdir (text, stop + 1)
+            else internal_scan_tmpdir (text, stop + 1)
+        end
+
+(* Répertoire des fichiers temporaires : `TMPDIR` s'il est non vide, sinon
+   `/tmp`. Aucun paramètre. *)
+fun internal_temp_dir () : string =
+    case io.read_file "/proc/self/environ" of
+        Error (_) => "/tmp"
+      | Ok (raw) => internal_scan_tmpdir (borrow raw, 0)
+
+(* Écrit tout un tableau d'octets, en reprenant après une écriture partielle.
+   - `descriptor` : descripteur ouvert en écriture.
+   - `data` : octets restant à écrire, consommés. *)
+fun internal_write_all (descriptor : int, data : int8 array) : unit result =
+    let
+        val total = array.length (borrow data)
+        val count = write_raw (descriptor, borrow data, int_to_int64 (total))
+    in
+        if count < int_to_int64 (0) then
+            let val code = sys.errno ()
+            in
+                if code = 4 then internal_write_all (descriptor, data)
+                else
+                    Error ("process.run_with: write failed (errno " ^
+                           int_to_string (code) ^ ")")
+            end
+        else if count = int_to_int64 (total) then Ok (())
+        else if count = int_to_int64 (0) then
+            Error ("process.run_with: short write")
+        else
+            let
+                val written = int64_to_int (count)
+                val rest = byte_array.slice (data, written, total)
+            in internal_write_all (descriptor, rest)
+            end
+    end
+
+(* Crée un fichier temporaire 0600 exclusif et y écrit `contents`.
+   - `path` : chemin emprunté, créé par `open (2)` avec `O_EXCL`.
+   - `contents` : contenu possédé, consommé. *)
+fun internal_write_temp (path : borrow string, contents : string) : unit result =
+    let
+        val descriptor = open_raw (path, 524481, 384)
+    in
+        if descriptor < 0 then
+            Error ("process.run_with: cannot create " ^ string_copy (path) ^
+                   " (errno " ^ int_to_string (sys.errno ()) ^ ")")
+        else
+            let
+                val data = byte_array.from_string (borrow contents)
+                val outcome = internal_write_all (descriptor, data)
+                val closed = close_raw (descriptor)
+            in
+                case outcome of
+                    Error (message) => Error (message)
+                  | Ok (_) =>
+                        if closed < 0 then
+                            Error ("process.run_with: close failed (errno " ^
+                                   int_to_string (sys.errno ()) ^ ")")
+                        else Ok (())
+            end
+    end
+
+(* Duplique un descripteur au-dessus de 2, avec l'errno de `dup` capturé
+   avant tout `close` de nettoyage.
+   - `descriptor` : descripteur source. *)
+fun internal_dup_high (descriptor : int) : (int * int) =
+    let val candidate = dup_raw (descriptor)
+    in
+        if candidate < 0 then (candidate, sys.errno ())
+        else if candidate >= 3 then (candidate, 0)
+        else
+            let val (high, code) = internal_dup_high (descriptor)
+                val _ = close_raw (candidate)
+            in (high, code) end
+    end
+
+(* Duplique un descripteur source en gardant l'errno de `dup` en cas d'échec.
+   - `descriptor` : descripteur source. *)
+fun internal_duplicate (descriptor : int) : int result =
+    if descriptor < 0 then
+        Error ("process.run_with: descriptor is negative")
+    else
+        let val (duplicated, code) = internal_dup_high (descriptor)
+        in
+            if duplicated < 0 then
+                Error ("process.run_with: dup failed (errno " ^
+                       int_to_string (code) ^ ")")
+            else Ok (duplicated)
+        end
+
+(* Redirection vers un chemin temporaire, échappé par `shell_quote`.
+   - `prefix` : fragment shell (` < ` ou ` 2> `), emprunté.
+   - `capture` : vrai si le flux est capturé.
+   - `path` : chemin emprunté. *)
+fun internal_path_redirect
+    (prefix : borrow string, capture : bool, path : borrow string) :
+    redirection result =
+    case shell_quote (path) of
+        Error (message) => Error (message)
+      | Ok (quoted) =>
+            Ok ({ command = string_copy (prefix) ^ quoted,
+                  capture = capture,
+                  descriptor = -1 })
+
+(* Redirection depuis un fichier temporaire de texte.
+   - `contents` : contenu possédé, consommé.
+   - `path` : chemin emprunté. *)
+fun internal_text_input (contents : string, path : borrow string) : redirection result =
+    case internal_write_temp (path, contents) of
+        Ok (_) => internal_path_redirect (borrow " < ", false, path)
+      | Error (message) => Error (message)
+
+(* Redirection depuis un descripteur dupliqué.
+   - `descriptor` : descripteur source. *)
+fun internal_fd_input (descriptor : int) : redirection result =
+    case internal_duplicate (descriptor) of
+        Error (message) => Error (message)
+      | Ok (copy) =>
+            Ok ({ command = " <&" ^ int_to_string (copy) ^
+                           " " ^ int_to_string (copy) ^ "<&-",
+                  capture = false,
+                  descriptor = copy })
+
+(* Construit la redirection d'entrée standard.
+   - `source` : entrée demandée, consommée.
+   - `path` : fichier temporaire pour `Text`, emprunté. *)
+fun internal_input_redirect
+    (source : input, path : borrow string) : redirection result =
+    case source of
+        Inherit => Ok ({ command = "", capture = false, descriptor = -1 })
+      | Text (contents) => internal_text_input (contents, path)
+      | Fd (descriptor) => internal_fd_input (descriptor)
+
+(* Redirection de stderr vers un fichier temporaire 0600.
+   - `path` : chemin emprunté, créé exclusivement. *)
+fun internal_capture_stderr (path : borrow string) : redirection result =
+    case internal_write_temp (path, "") of
+        Ok (_) => internal_path_redirect (borrow " 2> ", true, path)
+      | Error (message) => Error (message)
+
+(* Redirection d'un flux vers un descripteur dupliqué.
+   - `descriptor` : descripteur source.
+   - `stderr` : vrai pour `stderr`, faux pour `stdout`. *)
+fun internal_fd_output (descriptor : int, stderr : bool) : redirection result =
+    case internal_duplicate (descriptor) of
+        Error (message) => Error (message)
+      | Ok (copy) =>
+            if stderr then
+                Ok ({ command = " 2>&" ^ int_to_string (copy) ^
+                               " " ^ int_to_string (copy) ^ ">&-",
+                      capture = false,
+                      descriptor = copy })
+            else
+                Ok ({ command = " >&" ^ int_to_string (copy) ^
+                               " " ^ int_to_string (copy) ^ ">&-",
+                      capture = false,
+                      descriptor = copy })
+
+(* Construit la redirection d'un flux de sortie et dit s'il est capturé.
+   - `target` : destination demandée, consommée.
+   - `stderr` : vrai pour `stderr`, faux pour `stdout`.
+   - `path` : fichier temporaire pour `stderr`, emprunté. *)
+fun internal_redirect
+    (target : destination, stderr : bool, path : borrow string) :
+    redirection result =
+    case target of
+        Capture =>
+            if stderr then internal_capture_stderr (path)
+            else Ok ({ command = "", capture = true, descriptor = -1 })
+      | To_fd (descriptor) => internal_fd_output (descriptor, stderr)
+
+(* Ferme les descripteurs dupliqués d'une liste.
+   - `descriptors` : descripteurs à fermer, -1 ignoré. *)
+fun internal_close_fds (descriptors : int list) : unit =
+    case descriptors of
+        Nil => ()
+      | Cons (descriptor, rest) =>
+            let val _ =
+                    if descriptor >= 0 then close_raw (descriptor) else 0
+            in internal_close_fds (rest)
+            end
+
+(* Ferme les descripteurs dupliqués de redirections.
+   - `parts` : redirections possédées, consommées. *)
+fun internal_release (parts : redirection list) : unit =
+    case parts of
+        Nil => ()
+      | Cons (part, rest) =>
+            let val _ = internal_close_fds ([part.descriptor])
+            in internal_release (rest)
+            end
+
+(* Prépare stdin, stdout et stderr avant `popen`.
+   - `inputSource` : entrée demandée, consommée.
+   - `outputTarget` : destination de stdout, consommée.
+   - `errorTarget` : destination de stderr, consommée.
+   - `stdinPath` : fichier temporaire pour `Text`, emprunté.
+   - `stderrPath` : fichier temporaire pour stderr, emprunté. *)
+fun internal_prepare
+    (inputSource : input, outputTarget : destination,
+     errorTarget : destination, stdinPath : borrow string,
+     stderrPath : borrow string) : prepared result =
+    case internal_input_redirect (inputSource, stdinPath) of
+        Error (message) => Error (message)
+      | Ok (inputPart) =>
+            case internal_redirect (outputTarget, false, borrow "") of
+                Error (message) =>
+                    let val _ = internal_release ([inputPart])
+                    in Error (message)
+                    end
+              | Ok (outputPart) =>
+                    case internal_redirect
+                             (errorTarget, true, stderrPath) of
+                        Error (message) =>
+                            let val _ =
+                                    internal_release
+                                        ([inputPart, outputPart])
+                            in Error (message)
+                            end
+                      | Ok (errorPart) =>
+                            Ok ({ input = inputPart
+                                , output = outputPart
+                                , errors = errorPart
+                                })
+
+(* Lit les morceaux de stdout jusqu'à EOF, avec leur taille totale.
+   - `descriptor` : descripteur ouvert en lecture.
+   - `acc` : morceaux déjà lus, en ordre inverse, consommés.
+   - `total` : octets déjà lus. *)
+fun internal_chunks
+    (descriptor : int, acc : string list, total : int) :
+    (string list * int) result =
+    let
+        val buffer : int8 array = array_make_uninit (4096)
+        val count = read_raw (descriptor, borrow buffer, int_to_int64 (4096))
+    in
+        if count < int_to_int64 (0) then
+            let val code = sys.errno ()
+            in
+                if code = 4 then internal_chunks (descriptor, acc, total)
+                else
+                    Error ("process.run_with: read failed (errno " ^
+                           int_to_string (code) ^ ")")
+            end
+        else if count = int_to_int64 (0) then
+            Ok ((list.reverse (acc), total))
+        else
+            let
+                val size = int64_to_int (count)
+                val chunk = byte_array.to_string_range (borrow buffer, 0, size)
+            in internal_chunks (descriptor, Cons ((chunk, acc)), total + size)
+            end
+    end
+
+(* Copie les morceaux bout à bout dans un buffer de taille totale.
+   - `chunks` : morceaux consommés.
+   - `buffer` : buffer de sortie, emprunté puis rendu.
+   - `offset` : prochain octet à écrire.
+   - `total` : taille totale du buffer. *)
+fun internal_fill
+    (chunks : string list, buffer : int8 array, offset : int,
+     total : int) : int8 array =
+    case chunks of
+        Nil => buffer
+      | Cons (chunk, rest) =>
+            let
+                val next =
+                    byte_array.write_string (borrow buffer, offset, total, borrow chunk)
+            in internal_fill (rest, buffer, next, total)
+            end
+
+(* Concatène les morceaux en une seule chaîne, en temps et mémoire linéaires.
+   - `chunks` : morceaux ordonnés, consommés.
+   - `total` : taille totale des morceaux. *)
+fun internal_join (chunks : string list, total : int) : string =
+    if total = 0 then ""
+    else
+        let
+            val buffer : int8 array = array_make_uninit (total)
+            val filled = internal_fill (chunks, buffer, 0, total)
+        in byte_array.to_string (filled)
+        end
+
+(* Aspire un descripteur jusqu'à EOF.
+   - `descriptor` : descripteur ouvert en lecture. *)
+fun internal_drain (descriptor : int) : string result =
+    case internal_chunks (descriptor, Nil, 0) of
+        Error (message) => Error (message)
+      | Ok (pair) =>
+            let val (chunks, total) = pair
+            in Ok (internal_join (chunks, total))
+            end
+
+(* Décode le statut rendu par `pclose`.
+   - `raw` : statut brut `wait (2)`. *)
+fun internal_status (raw : int) : int =
+    if raw < 0 then -1
+    else if raw % 256 = 0 then raw / 256
+    else 128 + (raw % 128)
+
+(* Construit la commande shell d'un programme et de ses arguments.
+   - `program` : programme ou chemin emprunté.
+   - `arguments` : liste possédée, consommée. *)
+fun internal_command
+    (program : borrow string, arguments : string list) : string result =
+    case shell_quote (program) of
+        Error (message) => Error (message)
+      | Ok (programText) =>
+            case internal_quote_arguments (arguments, Nil, 0) of
+                Error (message) => Error (message)
+              | Ok (pair) =>
+                    let
+                        val (reversed, argumentSize) = pair
+                        val programSize = string_length (borrow programText)
+                        val pieces =
+                            Cons ((programText, list.reverse (reversed)))
+                        val total = programSize + 1 + argumentSize
+                        val buffer : int8 array = array_make_uninit (total)
+                        val filled =
+                            internal_copy_pieces (pieces, buffer, 0, total)
+                    in Ok (byte_array.to_string (filled))
+                    end
+
+(* Lance `program` avec `arguments` et les options données.
+   - `program` : programme ou chemin emprunté.
+   - `arguments` : liste possédée, consommée.
+   - `options` : entrée et destinations, consommées.
+
+   Rend `stdout`, `stderr` et le code de sortie. Un flux envoyé par `To_fd`
+   n'est pas capturé : sa chaîne correspondante est vide. *)
+fun run_with
+    (program : borrow string, arguments : string list, options : options) :
+    output result =
+    case random.token_hex (8) of
+        Error (message) => Error ("process.run_with: " ^ message)
+      | Ok (suffix) =>
+            let
+                val prefix =
+                    internal_temp_dir () ^ "/yack-process-" ^ suffix
+                val stdinPath = string_copy (borrow prefix) ^ "-stdin"
+                val stderrPath = string_copy (borrow prefix) ^ "-stderr"
+                val { input = inputSource
+                    , output = outputTarget
+                    , errors = errorTarget
+                    } = options
+            in
+                case internal_command (program, arguments) of
+                    Error (message) =>
+                        let val _ = fs.remove (borrow stdinPath)
+                            val _ = fs.remove (borrow stderrPath)
+                        in Error (message)
+                        end
+                  | Ok (command) =>
+                        case internal_prepare
+                                 (inputSource, outputTarget, errorTarget,
+                                  borrow stdinPath, borrow stderrPath) of
+                            Error (message) =>
+                                let val _ = fs.remove (borrow stdinPath)
+                                    val _ = fs.remove (borrow stderrPath)
+                                in Error (message)
+                                end
+                          | Ok (prepared) =>
+                                let
+                                    val inputDescriptor =
+                                        prepared.input.descriptor
+                                    val outputDescriptor =
+                                        prepared.output.descriptor
+                                    val errorDescriptor =
+                                        prepared.errors.descriptor
+                                    val captureStdout =
+                                        prepared.output.capture
+                                    val captureStderr =
+                                        prepared.errors.capture
+                                    val fullCommand =
+                                        command ^ prepared.input.command ^
+                                        prepared.output.command ^
+                                        prepared.errors.command
+                                    val commandSize =
+                                        string_length (borrow fullCommand)
+                                in
+                                    if commandSize >= 131072 then
+                                        let
+                                            val _ =
+                                                internal_close_fds
+                                                    ([inputDescriptor,
+                                                      outputDescriptor,
+                                                      errorDescriptor])
+                                            val _ = fs.remove (borrow stdinPath)
+                                            val _ = fs.remove (borrow stderrPath)
+                                        in
+                                            Error
+                                                ("process.run_with: command is too long (" ^
+                                                 int_to_string (commandSize) ^
+                                                 " bytes, limit 131071)")
+                                        end
+                                    else
+                                        let
+                                            val stream =
+                                                popen_raw
+                                                    (borrow fullCommand,
+                                                     borrow "r")
+                                        in
+                                    if c_ptr.is_null (stream) then
+                                        let
+                                            val code = sys.errno ()
+                                            val _ =
+                                                internal_close_fds
+                                                    ([inputDescriptor,
+                                                      outputDescriptor,
+                                                      errorDescriptor])
+                                            val _ = fs.remove (borrow stdinPath)
+                                            val _ = fs.remove (borrow stderrPath)
+                                        in
+                                            Error
+                                                ("process.run_with: popen failed (errno " ^
+                                                 int_to_string (code) ^ ")")
+                                        end
+                                    else
+                                        let
+                                            val descriptor = fileno_raw (stream)
+                                            val drained =
+                                                if captureStdout then
+                                                    if descriptor < 0 then
+                                                        Error
+                                                            ("process.run_with: fileno failed")
+                                                    else internal_drain (descriptor)
+                                                else Ok ("")
+                                            val rawStatus = pclose_raw (stream)
+                                            val status = internal_status (rawStatus)
+                                            val readErrors =
+                                                if captureStderr then
+                                                    let
+                                                        val file =
+                                                            string_copy
+                                                                (borrow stderrPath)
+                                                    in
+                                                        case io.read_file (file) of
+                                                            Ok (text) => Ok (text)
+                                                          | Error (message) =>
+                                                                Error
+                                                                    ("process.run_with: " ^
+                                                                     message)
+                                                    end
+                                                else Ok ("")
+                                            val _ =
+                                                internal_close_fds
+                                                    ([inputDescriptor,
+                                                      outputDescriptor,
+                                                      errorDescriptor])
+                                            val _ = fs.remove (borrow stdinPath)
+                                            val _ = fs.remove (borrow stderrPath)
+                                        in
+                                            case drained of
+                                                Error (message) => Error (message)
+                                              | Ok (stdoutText) =>
+                                                    case readErrors of
+                                                        Error (message) =>
+                                                            Error (message)
+                                                      | Ok (stderrText) =>
+                                                            Ok ({ stdout = stdoutText
+                                                                , stderr = stderrText
+                                                                , status = status
+                                                                })
+                                        end
+                                        end
+                                end
+            end
+
+(* Lance `program` avec `arguments`, sans entrée et en capturant les sorties.
+   - `program` : programme ou chemin emprunté.
+   - `arguments` : liste possédée, consommée.
+
+   Rend `stdout`, `stderr` et le code de sortie. *)
+fun run (program : borrow string, arguments : string list) : output result =
+    run_with
+        (program, arguments,
+         { input = Inherit, output = Capture, errors = Capture })

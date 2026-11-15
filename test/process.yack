@@ -1,0 +1,209 @@
+
+
+
+
+import yack/file
+import yack/fs
+import yack/io
+import yack/process
+import yack/string
+
+fun report (label : borrow string, ok : bool) : unit =
+    if ok then print_string ("ok " ^ string_copy (label))
+    else print_string ("FAIL " ^ string_copy (label))
+
+fun all (checks : bool list) : bool =
+    case checks of
+        [] => true
+      | check :: rest =>
+            if check then all (rest) else false
+
+fun check_streams () : unit =
+    case process.run
+             (borrow "/bin/sh",
+              ["-c", "printf out; printf err >&2; exit 3"]) of
+        Error (_) => report (borrow "streams", false)
+      | Ok (result) =>
+            report
+                (borrow "streams",
+                 all ([result.status = 3,
+                       string.equals (borrow result.stdout, borrow "out"),
+                       string.equals (borrow result.stderr, borrow "err")]))
+
+fun check_quoting () : unit =
+    case process.run
+             (borrow "/bin/sh",
+              ["-c", "printf '%s' \"$1\"",
+               "sh", "a b'c; $HOME"]) of
+        Error (_) => report (borrow "quoting", false)
+      | Ok (result) =>
+            report
+                (borrow "quoting",
+                 all ([result.status = 0,
+                       string.equals (borrow result.stdout, borrow "a b'c; $HOME"),
+                       string.is_empty (borrow result.stderr)]))
+
+fun check_empty () : unit =
+    case process.run (borrow "/bin/true", []) of
+        Error (_) => report (borrow "empty", false)
+      | Ok (result) =>
+            report
+                (borrow "empty",
+                 all ([result.status = 0,
+                       string.is_empty (borrow result.stdout),
+                       string.is_empty (borrow result.stderr)]))
+
+fun check_missing () : unit =
+    case process.run (borrow "/nonexistent-yack-command", []) of
+        Error (_) => report (borrow "missing", false)
+      | Ok (result) =>
+            report
+                (borrow "missing",
+                 all ([result.status = 127,
+                       string.is_empty (borrow result.stdout),
+                       string.length (borrow result.stderr) > 0]))
+
+fun check_signal () : unit =
+    case process.run (borrow "/bin/sh", ["-c", "kill -TERM $$"]) of
+        Error (_) => report (borrow "signal", false)
+      | Ok (result) =>
+            report
+                (borrow "signal",
+                 all ([result.status = 143,
+                       string.is_empty (borrow result.stdout)]))
+
+fun check_big_stdout () : unit =
+    case process.run
+             (borrow "/bin/sh",
+              ["-c", "head -c 8000000 /dev/zero"]) of
+        Error (_) => report (borrow "big_stdout", false)
+      | Ok (result) =>
+            report
+                (borrow "big_stdout",
+                 all ([result.status = 0,
+                       string_length (borrow result.stdout) = 8000000,
+                       string.is_empty (borrow result.stderr)]))
+
+fun check_nul_argument () : unit =
+    let val nul = string_of_char (0)
+    in
+        case process.run (borrow "/bin/true", [nul]) of
+            Error (message) =>
+                report
+                    (borrow "nul_argument",
+                     string.contains (borrow message, borrow "NUL"))
+          | Ok (_) => report (borrow "nul_argument", false)
+    end
+
+fun check_stdin_text () : unit =
+    case process.run_with
+             (borrow "/bin/cat", [],
+              { input = process.Text ("hello\nworld\n"),
+                output = process.Capture,
+                errors = process.Capture }) of
+        Error (_) => report (borrow "stdin_text", false)
+      | Ok (result) =>
+            report
+                (borrow "stdin_text",
+                 all ([result.status = 0,
+                       string.equals
+                           (borrow result.stdout, borrow "hello\nworld\n"),
+                       string.is_empty (borrow result.stderr)]))
+
+fun check_stdin_fd () : unit =
+    let val path = "/tmp/yack-process-test-in"
+        val _ = fs.remove (borrow path)
+        val _ =
+            case io.write_file (string_copy (borrow path), "from-fd") of
+                Ok (_) => ()
+              | Error (_) => ()
+    in
+        case file.open (borrow path, file.Read) of
+            Error (_) => report (borrow "stdin_fd", false)
+          | Ok (handle) =>
+                let val outcome =
+                        process.run_with
+                            (borrow "/bin/cat", [],
+                             { input = process.Fd (handle.descriptor),
+                               output = process.Capture,
+                               errors = process.Capture })
+                    val _ = file.close (handle)
+                    val _ = fs.remove (borrow path)
+                in
+                    case outcome of
+                        Error (_) => report (borrow "stdin_fd", false)
+                      | Ok (result) =>
+                            report
+                                (borrow "stdin_fd",
+                                 all ([result.status = 0,
+                                       string.equals
+                                           (borrow result.stdout,
+                                            borrow "from-fd")]))
+                end
+    end
+
+fun check_output_fds () : unit =
+    let val outPath = "/tmp/yack-process-test-out"
+        val errPath = "/tmp/yack-process-test-err"
+        val _ = fs.remove (borrow outPath)
+        val _ = fs.remove (borrow errPath)
+    in
+        case file.open (borrow outPath, file.Write) of
+            Error (_) => report (borrow "output_fds", false)
+          | Ok (outHandle) =>
+                case file.open (borrow errPath, file.Write) of
+                    Error (_) =>
+                        let val _ = file.close (outHandle)
+                        in report (borrow "output_fds", false)
+                        end
+                  | Ok (errHandle) =>
+                        let val outcome =
+                                process.run_with
+                                    (borrow "/bin/sh",
+                                     ["-c", "printf out; printf err >&2"],
+                                     { input = process.Inherit,
+                                       output = process.To_fd (outHandle.descriptor),
+                                       errors = process.To_fd (errHandle.descriptor) })
+                            val _ = file.close (outHandle)
+                            val _ = file.close (errHandle)
+                            val outText =
+                                case io.read_file (string_copy (borrow outPath)) of
+                                    Ok (text) => text
+                                  | Error (_) => ""
+                            val errText =
+                                case io.read_file (string_copy (borrow errPath)) of
+                                    Ok (text) => text
+                                  | Error (_) => ""
+                            val _ = fs.remove (borrow outPath)
+                            val _ = fs.remove (borrow errPath)
+                        in
+                            case outcome of
+                                Error (_) =>
+                                    report (borrow "output_fds", false)
+                              | Ok (result) =>
+                                    report
+                                        (borrow "output_fds",
+                                         all ([result.status = 0,
+                                               string.is_empty
+                                                   (borrow result.stdout),
+                                               string.is_empty
+                                                   (borrow result.stderr),
+                                               string.equals
+                                                   (borrow outText, borrow "out"),
+                                               string.equals
+                                                   (borrow errText, borrow "err")]))
+                        end
+    end
+
+fun main () =
+    let val _ = check_streams ()
+        val _ = check_quoting ()
+        val _ = check_empty ()
+        val _ = check_missing ()
+        val _ = check_signal ()
+        val _ = check_stdin_text ()
+        val _ = check_stdin_fd ()
+        val _ = check_big_stdout ()
+        val _ = check_nul_argument ()
+    in check_output_fds ()
+    end

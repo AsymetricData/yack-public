@@ -57,11 +57,12 @@ struct
                 List.app (fn (_, value) => walk value) fields
             | Ir.Field (base, _, _) => walk base
             | Ir.TupleIndex (base, _, _) => walk base
+            | Ir.RawField (base, _, _) => walk base
             | Ir.Ctor (_, _, argument, _, site) =>
                 ( (case !site of
                      Ir.Current => region := true
                    | Ir.Destination => dest := true
-                   | Ir.NativeStack => dest := true)
+                   | Ir.NativeStack => ()  )
                 ; (case argument of
                      NONE => ()
                    | SOME value => walk value)
@@ -102,7 +103,17 @@ struct
                   else ()
                 ; List.app (fn (value, _) => walk value) arguments
                 )
-            | Ir.SysBuiltin (_, arguments, _) => List.app walk arguments
+            | Ir.SysBuiltin (name, arguments, _) =>
+                (
+
+                  if String.isPrefix "extern:" name then region := true else ()
+                ; if name = "sys.scratch_enter" orelse
+                     name = "sys.scratch_enter_all" orelse
+                     name = "sys.scratch_leave"
+                  then region := true
+                  else ()
+                ; List.app walk arguments
+                )
             | Ir.ArrayBuiltin (name, arguments, _, site) =>
                 ( (case LowerBuiltins.arrayColor name of
                      SOME LowerBuiltins.ArrayAlloc =>
@@ -137,7 +148,10 @@ struct
             | Ir.Closure _ => ()
             | Ir.ClosureRef _ => ()
             | Ir.Apply (callee, arguments, _) =>
-                ( apply := true
+                (
+
+                  apply := true
+                ; region := true
                 ; walk callee
                 ; List.app walk arguments
                 )

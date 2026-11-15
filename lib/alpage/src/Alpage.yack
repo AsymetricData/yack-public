@@ -31,7 +31,8 @@ type scan : Affine = {
 
 type config : Copy = {
     port : int,
-    workers : int
+    workers : int,
+    reuse_port : bool
 }
 
 fun new () : t =
@@ -43,10 +44,21 @@ fun new () : t =
     }
 
 fun config (port : int) : config =
-    { port = port, workers = 1 }
+    { port = port, workers = 1, reuse_port = false }
 
 fun workers (settings : config, count : int) : config =
-    { port = settings.port, workers = count }
+    { port = settings.port, workers = count, reuse_port = settings.reuse_port }
+
+(* Active SO_REUSEPORT : plusieurs processus peuvent partager le port et le
+   noyau répartit les connexions entre eux.
+
+   Désactivé par défaut : une seconde instance échoue avec EADDRINUSE
+   (errno 98) au lieu de mélanger une ancienne et une nouvelle version. *)
+fun reuse_port (settings : config, enabled : bool) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = enabled
+    }
 
 fun add
     (app : t
@@ -141,7 +153,7 @@ fun match_segments
                 val is_wildcard = string.starts_with (borrow segment, borrow star)
             in
                 if is_wildcard then
-                    let val name = string_slice (borrow segment, 1, string_length (borrow segment))
+                    let val name = string.slice (borrow segment, 1, string.length (borrow segment))
                         val value = string.join ("/", path)
                     in Some (Cons (((name, value), params)))
                     end
@@ -152,10 +164,10 @@ fun match_segments
                             if is_param then
                                 let val name =
                                         string_slice
-                                            (borrow segment, 1, string_length (borrow segment))
+                                            (borrow segment, 1, string.length (borrow segment))
                                 in match_segments (rest, tail, Cons (((name, value), params)))
                                 end
-                            else if string_eq (borrow segment, borrow value) then
+                            else if string.equals (borrow segment, borrow value) then
                                 match_segments (rest, tail, params)
                             else None
             end
@@ -193,8 +205,8 @@ fun scan_from
                 let val inspected =
                         let val route_method = array.get_borrow (borrow methods, index)
                             val route_path = array.get_borrow (borrow patterns, index)
-                            val same_method = string_eq (route_method, method)
-                            val same_path = string_eq (route_path, path)
+                            val same_method = string.equals (route_method, method)
+                            val same_path = string.equals (route_path, path)
                             val matched =
                                 if is_literal_pattern (route_path) then
                                     if same_path then Some (Nil) else None
@@ -341,7 +353,8 @@ fun dispatch_text (text : consume string, app : consume t) : string * t =
 
 fun run (app : t, settings : config) : unit result =
     let val dispatcher = { run = dispatch_text }
-        val server_settings = Http.config (settings.port)
+        val server_settings =
+            Http.reuse_port (Http.config (settings.port), settings.reuse_port)
     in
         Http.run (dispatcher, app, server_settings)
     end

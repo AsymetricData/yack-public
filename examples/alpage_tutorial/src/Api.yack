@@ -66,7 +66,7 @@ fun denied () : Reply.t =
 
 fun token_ok (token : string option) : bool =
     case token of
-        Some value => string_eq (&value, &"secret")
+        Some value => string.equals (&value, &"secret")
       | None => false
 
 fun require_token (ctx : Ctx.t, request : Request.t) : Request.t * Reply.t option =

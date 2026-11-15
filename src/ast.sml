@@ -70,6 +70,13 @@ struct
 
     | EFn of param list * ty option * expr * Diag.span
 
+    | EExtern of
+        { symbol : string
+        , params : param list
+        , result : ty
+        , span : Diag.span
+        }
+
   and binding =
       BVal of
         { name : string
@@ -147,6 +154,14 @@ struct
         , span : Diag.span
         }
 
+    | DExternRecord of
+        { name : string
+        , nameSpan : Diag.span
+        , size : int
+        , fields : (string * ty * int) list
+        , span : Diag.span
+        }
+
   type program = decl list
 
   fun exprSpan (EInt (_, span)) = span
@@ -168,6 +183,7 @@ struct
     | exprSpan (ECase (_, _, span)) = span
     | exprSpan (EBorrow (_, _, _, span)) = span
     | exprSpan (EFn (_, _, _, span)) = span
+    | exprSpan (EExtern {span, ...}) = span
 
   fun patternSpan (PVar (_, span)) = span
     | patternSpan (PWildcard span) = span
@@ -185,6 +201,7 @@ struct
     | declSpan (DAlias {span, ...}) = span
     | declSpan (DDatatype {span, ...}) = span
     | declSpan (DImport {span, ...}) = span
+    | declSpan (DExternRecord {span, ...}) = span
 
   fun tyToString (TyInt width) =
         if width = 32 then "int" else "int" ^ Int.toString width

@@ -1,0 +1,11 @@
+
+
+fun depth (n : int) : int =
+    if n <= 0 then 0
+    else
+        let val s = int_to_string (n)
+            val k = string_length (borrow s)
+        in k - k + 1 + depth (n - 1)
+        end
+
+fun main () = print_int (depth (100000))

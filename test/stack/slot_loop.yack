@@ -1,0 +1,13 @@
+
+
+fun loop (values : string array, n : int) : int =
+    if n <= 0 then 0
+    else
+        let val _ = array_set (values, 0, int_to_string (n))
+        in loop (values, n - 1)
+        end
+
+fun main () =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "start")
+    in print_int (loop (values, 1000000)) end

@@ -1,18 +1,18 @@
 # Yack
 
-Yack est un langage de la famille ML, à la syntaxe proche de SML et OCaml :
-agréable et simple, où l'on se sent chez soi, confortable à écrire, avec peu de
-cérémonie sauf celle que les types imposent. Les types affines et linéaires, des
-idées reprises de Rust sans sa lourdeur syntaxique, remplacent le
-ramasse-miettes.
+Yack est un langage de la famille ML, avec une syntaxe proche de SML et
+d'OCaml. Il veut être agréable à écrire, un endroit où l'on se sent chez soi,
+avec peu de cérémonie en dehors de celle que les types demandent. Il reprend
+de Rust l'idée des types affines et linéaires, sans la syntaxe qui va avec, et
+s'en sert à la place d'un ramasse-miettes.
 
-L'ownership, les emprunts et les durées de vie sont vérifiés **dès le
-frontend**, sur l'AST typé, plutôt que reconstruits dans un backend. Les
-libérations sont déterministes, la compilation passe par LLVM jusqu'à un
-exécutable natif, et les erreurs sont des diagnostics structurés avec des codes
-stables, des notes et des suggestions. Un formateur et un language server sont
-intégrés au binaire. Le projet reste expérimental ; la version courante est
-`0.2.0`.
+Le vérificateur d'ownership, d'emprunts et de durées de vie travaille sur l'AST
+typé, dans le frontend, au lieu de reconstruire ces informations dans le
+backend. Les libérations sont donc déterministes. La compilation passe par LLVM
+et produit un exécutable natif. Les erreurs sont des diagnostics structurés avec
+des codes stables, des notes et des suggestions, et le binaire embarque aussi un
+formateur et un language server. Le projet reste expérimental : la version
+courante est `0.2.0`.
 
 La motivation et le modèle mémoire sont racontés plus longuement dans
 [les idées derrière Yack](site/idees.html).
@@ -32,9 +32,14 @@ $ ./yack build examples/fact.yack fact && ./fact
 
 ## Installer
 
-Yack produit de l'IR LLVM puis appelle `clang` pour l'exécutable final. Le
-compilateur lui-même est un binaire Linux x86_64 statique ; les trois
-méthodes ci-dessous donnent le même `yack`.
+Yack produit de l'IR LLVM, puis appelle `clang` pour obtenir l'exécutable final.
+Le compilateur lui-même est un binaire Linux x86_64 statique. Les trois méthodes
+ci-dessous installent le même `yack`.
+
+Le compilateur ne tourne que sur Linux x86-64. `yack build`, `yack run` et
+`yack llvm` refusent de démarrer ailleurs, parce que les `extern record` de la
+stdlib codent les offsets de cette ABI. `check`, `fmt` et `lsp` restent
+utilisables sur les autres plateformes.
 
 ### Binaire précompilé
 
@@ -56,14 +61,16 @@ Sur la machine qui compile les programmes Yack, il faut ensuite :
 - `clang` 15 ou plus récent. L'IR émis utilise les pointeurs opaques (`ptr`,
   et non plus `i8*`) : vérifié sur la sortie de `yack llvm`, et clang 15 est
   la première version qui les accepte ;
-- `libsqlite3-dev` pour le paquet `sql` (l'édition de liens ajoute
-  `-lsqlite3`) ;
+- `libsqlite3-dev` pour le paquet `sql` (l'édition de liens n'ajoute
+  `-lsqlite3` que lorsque le programme utilise ce paquet) ;
 - `libc6-dev` (ou l'équivalent) pour les en-têtes et les objets de démarrage.
 
 ### Docker
 
-L'image par défaut contient `clang`, `libc6-dev` et `libsqlite3-dev` : rien
-d'autre à installer pour compiler.
+L'image par défaut contient `clang`, `libc6-dev` et `libsqlite3-dev` : il n'y a
+rien d'autre à installer pour compiler. Le `Dockerfile` épingle la version de
+MLton (`mlton-20241230`) et construit le compilateur dans l'image, donc la
+chaîne de build est reproductible.
 
 ```sh
 docker build -t yack .
@@ -78,8 +85,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work yack run
 `yack build <fichier> <sortie>` écrit l'exécutable dans le répertoire de
 travail monté. Le binaire produit est lié à la libc de l'image : exécutez-le
 sur une distribution au moins aussi récente (Ubuntu 24.04) ou dans le
-conteneur. Pour obtenir le binaire Yack statique, sans MLton ni image
-runtime :
+conteneur. La cible `release` produit l'archive publiée dans les releases,
+`yack-linux-x86_64.tar.gz`, sans MLton ni image runtime :
 
 ```sh
 docker build --target release \
@@ -102,8 +109,9 @@ commandes de test dans [Tests](#tests).
 
 ## État du projet
 
-Yack est un projet de recherche, pas encore un langage prêt pour la production.
-Version courante : `0.2.0`.
+Yack est un projet de recherche. Le langage et l'outillage couvrent maintenant
+l'essentiel du noyau décrit ci-dessous, mais rien n'est figé. Version courante :
+`0.2.0`.
 
 | Domaine | État |
 |---|---|
@@ -118,7 +126,7 @@ Version courante : `0.2.0`.
 | Modules, imports qualifiés/sélectifs/alias, packages et dépendances | ✅ |
 | IR typé, LLVM, exécutables natifs | ✅ |
 | Pile/tas, drops déterministes, vérification ASan | ✅ |
-| Bibliothèque standard `yack/*` (23 modules documentés) | ✅ |
+| Bibliothèque standard `yack/*` (29 modules documentés) | ✅ |
 | Mode d'allocation sans heap (`--memory=stack`) | 🟡 expérimental |
 | Formateur `yack fmt` | ✅ |
 | LSP intégré (`yack lsp`) : diagnostics, hints, complétion, rename, quick fixes | ✅ |
@@ -129,6 +137,24 @@ Version courante : `0.2.0`.
 | Patterns de chaîne (`"préfixe/" ^ reste`) et de bytes (`<<"GET ", reste>>`) | ✅ |
 | Fermetures capturantes | ⛔ hors modèle |
 
+
+### Est-ce prêt pour la production ?
+
+Pas encore. Les blocages du dernier audit sont corrigés dans le runtime : un
+échec d'allocation arrête le programme avec un message, un échec de création de
+thread est signalé, et le serveur HTTP s'arrête proprement sur SIGINT/SIGTERM et
+recule quand `accept` rend `EMFILE`. Pour un service dont quelqu'un dépend, il
+manque encore :
+
+- une API de stdlib stable et versionnée (tous les modules sont en `0.1.0`) ;
+- le support d'une plateforme autre que Linux x86-64 ;
+- un LSP qui résiste à une trame malformée ;
+- un serveur HTTP qui accepte des requêtes et des réponses de plus de 4 Kio
+  (au-delà, la connexion est fermée sans réponse) ;
+- une CI qui lance les suites de tests.
+
+En l'état, Yack convient aux expérimentations, aux outils et aux projets
+personnels.
 
 ## Démarrage rapide
 
@@ -145,7 +171,7 @@ cd hello
 ../yack run
 ```
 
-Ou directement sur les exemples :
+Vous pouvez aussi partir directement des exemples :
 
 ```sh
 ./yack check examples/hello.yack
@@ -208,7 +234,7 @@ glyphes Unicode, et `YACK_PROGRESS=0` les animations.
 `--write` / `-w` réécrit le fichier sur place, et `--check` / `-c` renvoie le
 code `1` si le fichier n'est pas déjà formaté (utile en CI).
 
-Les règles sont volontairement simples et déterministes : indentation de
+Les règles sont simples et déterministes : indentation de
 4 espaces, largeur cible de 88 colonnes, une déclaration par bloc séparée par
 une ligne vide, imports consécutifs regroupés sans ligne vide entre eux (mais
 avec une ligne vide après le bloc), `let`/`case`/`if` structurés sur plusieurs
@@ -351,15 +377,17 @@ Le noyau couvre les fonctions de niveau module, la récursion (y compris
 mutuelle), `let` déstructurant, `if`, `case` avec gardes, le pipe `|>`, les
 records, tuples, datatypes génériques, les entiers de largeur explicite
 (`int1` … `int64`), `float`/`float32`/`float64`, les emprunts
-(`borrow`/`&`, `mut`, `from`) et les propriétés `Copy`/`Affine`/`Linear`.
+(`borrow`/`&`, `mut`, `from`) et les propriétés `Copy`/`Affine`/`Linear`. Un
+littéral entier qui ne tient pas dans son type est refusé à la compilation
+(`E2002`) au lieu d'être tronqué.
 
-Les fonctions se passent **par nom** (`list.map (double, values)`) ou sous
-forme inline avec `x => ...` (`list.map (x => x * 2, values)`). Une valeur de
-fonction ne capture aucun environnement : utiliser une variable libre est
-rejeté avec `E0511`. La syntaxe `fn` n'existe pas ; il n'y a ni fermeture, ni
+Une fonction se passe par son nom (`list.map (double, values)`) ou s'écrit
+inline avec `x => ...` (`list.map (x => x * 2, values)`). Dans les deux cas, la
+valeur de fonction ne capture aucun environnement : une variable libre est
+rejetée avec `E0511`. Il n'y a pas de syntaxe `fn`, donc ni fermeture ni
 application partielle.
 
-Les fonctions locales sont supportées par lambda lifting :
+Les fonctions locales passent par un lambda lifting :
 
 ```yack
 fun main () =
@@ -441,15 +469,15 @@ util = { path = "../lib" }
 mode = "heap"   # or "stack"
 ```
 
-La bibliothèque standard est dans [`lib/yack/src`](lib/yack/src), avec 23
-modules et 509 déclarations documentées :
+La bibliothèque standard est dans [`lib/yack/src`](lib/yack/src), avec 29
+modules et 660 déclarations documentées :
 
 | Domaine | Modules |
 |---|---|
 | Bases | `bool`, `int`, `char`, `float`, `string`, `bytes` |
 | Collections | `list`, `array`, `map`, `sort` |
 | Erreurs | `option`, `result` |
-| Système | `io`, `os`, `path` |
+| Système | `io`, `os`, `path`, `fs`, `file`, `process`, `net`, `time`, `random` |
 | Texte et formats | `fmt`, `math`, `json` |
 | Terminal et CLI | `ansi`, `args`, `cli`, `term`, `tui` |
 
@@ -458,30 +486,44 @@ Le package optionnel [`lib/net`](lib/net) fournit `net/Net`, `net/Http`,
 
 Le package optionnel [`lib/web`](lib/web) fournit un framework HTTP minimal :
 `Request`, `Response`, `Router`, `Middleware`, `Cookie`, `Session`, `Html` et
-`Server`. API, exemples et limites dans [`docs/web.md`](docs/web.md).
+`Server`. API, exemples et limites dans [`docs/web.md`](docs/web.md). Le
+serveur ferme les connexions lentes, inactives ou qui ne lisent pas leur
+réponse, et s'arrête proprement sur SIGINT/SIGTERM. `make test-http-fuzz` lance
+un fuzzer de clients hostiles contre le serveur d'exemple.
 
 L'API et les limites de chaque module sont décrites dans
 [`docs/stdlib.md`](docs/stdlib.md).
+
+Les modules système (`fs`, `file`, `process`, `net`, `time`, `random`) sont
+écrits en Yack au-dessus d'appels libc déclarés `extern`. Ces déclarations et
+les `extern record` sont réservés à la stdlib : un programme utilisateur qui en
+déclare une est refusé (`E3042`). Le détail est dans
+[`docs/sys-plan.md`](docs/sys-plan.md).
 
 ## LSP
 
 `yack lsp` expose le frontend comme language server JSON-RPC sur `stdin` /
 `stdout`. Le serveur est natif : il ne dépend ni de Node ni d'un autre
-compilateur, et réutilise exactement le même chargement de modules, la même
-inférence et le même borrow checker que `yack check`.
+compilateur, et réutilise le chargement de modules, l'inférence et le borrow
+checker de `yack check`.
 
 Fonctionnalités :
 
 - diagnostics `yack check` publiés à l'ouverture et à chaque modification
   (lexer, parser, résolution, types, ownership) ;
 - inlay hints des types inférés pour les paramètres, `val` et patterns non
-  annotés ;
+  annotés, et noms d'arguments aux appels ;
 - complétion des mots-clés, builtins, prélude, déclarations locales, modules
   importés, membres qualifiés (`string.`, `json.`), chemins d'import
   (`import yack/`), champs de payload record et constructeurs de `case`, avec
   signature et documentation des déclarations ;
 - hover avec signature, commentaire `(* ... *)` placé juste au-dessus, ou type
   inféré de l'expression/liaison sous le curseur ;
+- définition, déclaration, type definition, références, surlignage, symboles du
+  document, pliage, liens de module, semantic tokens, signature help et call
+  hierarchy ;
+- rename, y compris à travers les fichiers chargés ;
+- formatage du document entier ou d'une plage avec le formateur de `yack fmt` ;
 - quick fixes pour les erreurs courantes : branches de `case` manquantes
   (constructeurs et champs de record), branche `_ =>`, branche inatteignable,
   annotation `Copy`/`Affine` à corriger, `main` manquant, et ajout de
@@ -489,8 +531,7 @@ Fonctionnalités :
 
 Les sources non sauvegardées sont servies depuis les buffers du client, y
 compris pour les modules importés. Les positions suivent UTF-16 comme le veut
-le protocole. La synchronisation est « full text » pour rester simple et
-robuste.
+le protocole, et la synchronisation est incrémentale (`change: 2`).
 
 ```json
 {
@@ -528,7 +569,7 @@ Modules principaux :
   `hints`, `actions`) ;
 - `src/driver.sml`, `src/main.sml` : CLI.
 
-Le backend monomorphise les fonctions génériques et numériques, place en pile
+Le backend monomorphise les fonctions génériques et numériques, garde en pile
 les valeurs qui ne s'échappent pas, et émet les `free` après le dernier
 propriétaire. Les performances du frontend et les points encore à optimiser
 sont documentés dans [`docs/performance.md`](docs/performance.md).
@@ -541,12 +582,13 @@ make test-lsp         # smoke test JSON-RPC du language server
 make test-stdlib-docs # couverture documentation de lib/yack/src
 make test-asan        # compilation + exécution sous AddressSanitizer
 make test-stack       # mode heap-free : comparaison heap/stack et IR sans malloc
+make test-http-fuzz   # clients lents et hostiles contre le serveur d'exemple
 ```
 
-La suite vérifie les 116 exemples `.yack` de `examples/` (compilation et
-exécution natives), les 98 programmes de `test/reject/` avec leur code
+La suite vérifie les 152 exemples `.yack` de `examples/` (compilation et
+exécution natives), les 156 programmes de `test/reject/` avec leur code
 d'erreur, les projets multi-modules et multi-packages, le formateur (dont
-l'idempotence), le LSP, et la documentation des 509 déclarations de
+l'idempotence), le LSP, et la documentation des 660 déclarations de
 `lib/yack/src`.
 
 ## Documentation
@@ -555,6 +597,8 @@ l'idempotence), le LSP, et la documentation des 509 déclarations de
 - [`docs/performance.md`](docs/performance.md) : complexité et pistes
   d'optimisation du frontend ;
 - [`docs/stdlib.md`](docs/stdlib.md) : bibliothèque standard `yack/*` ;
+- [`docs/sys-plan.md`](docs/sys-plan.md) : fonctions système et `extern`
+  réservé à la stdlib ;
 - [`docs/args-tutorial.md`](docs/args-tutorial.md) : mini-tuto CLI avec
   `yack/args` et les spec lists ;
 - [`docs/lsp.md`](docs/lsp.md) : language server intégré ;
@@ -582,15 +626,17 @@ make watch-once   # un seul check, code de sortie 1 en cas d'erreur
 
 - fonctions par nom ou `x => ...` sans capture (pas de fermetures) ;
 - fonctions locales par lambda lifting, mais pas de closure capturante (`E0518`) ;
-- pas de boucles, de threads ni de concurrence ;
+- pas de boucles. Les threads se limitent à `sys.thread_spawn` et
+  `sys.thread_join` (voir [`docs/threads.md`](docs/threads.md)), sans
+  concurrence de plus haut niveau ;
 - pas de varargs ni d'interfaces/type classes ;
-- la bibliothèque standard est utilisable mais partielle, notamment pour le
-  réseau, les dates et l'encodage ;
-- le LSP est en synchronisation full text et ne fournit pas encore `rename`,
-  `references`, `documentSymbol` ni `formatting` ;
+- la bibliothèque standard reste partielle : réseau TCP sans TLS, dates en UTC
+  seulement, pas d'encodage base64 ni hexadécimal ;
+- le LSP ne parcourt pas les autres paquets pour `references` et `rename`, et
+  une trame malformée peut faire tomber le serveur ;
 - le mode `--memory=stack` est expérimental : l'analyse inter-procédurale
   des valeurs qui sortent d'un bloc `arena` n'est pas encore complète ;
-- le backend cible Linux/POSIX.
+- le backend cible Linux x86-64.
 
 ## Licence
 

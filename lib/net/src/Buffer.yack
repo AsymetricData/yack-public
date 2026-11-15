@@ -1,4 +1,5 @@
 import yack/array
+import yack/bytes
 
 type buffer : Affine = { data : int8 array, length : int, capacity : int }
 
@@ -28,7 +29,7 @@ fun buffer_append (value : buffer, byte : int8) : buffer =
 fun buffer_to_string (value : buffer) : string =
     case value of
         { data = data, length = length, capacity = capacity } =>
-            bytes_to_string_range (data, 0, length)
+            bytes.to_string_range (borrow data, 0, length)
 
 fun buffer_clear (value : buffer) : buffer =
     case value of

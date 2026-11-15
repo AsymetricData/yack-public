@@ -1,0 +1,40 @@
+
+
+
+
+import yack/io
+import yack/process
+import yack/string
+
+fun make_args (remaining : int, acc : string list) : string list =
+    if remaining <= 0 then acc
+    else make_args (remaining - 1, Cons (("0123456789", acc)))
+
+fun main () =
+    let
+        val text =
+            case io.read_stdin () of
+                Ok (value) => value
+              | Error (_) => ""
+        val quoted =
+            case process.shell_quote (borrow text) of
+                Ok (value) => string_length (borrow value)
+              | Error (_) => -1
+    in
+        let val _ = print_int (quoted)
+            val _ =
+                case process.run (borrow "/bin/true", [text]) of
+                    Error (message) =>
+                        if string.contains (borrow message, borrow "too long")
+                        then print_string ("ok")
+                        else print_string (message)
+                  | Ok (_) => print_string ("FAIL")
+        in
+            case process.run (borrow "/bin/true", make_args (10000, [])) of
+                Error (message) => print_string (message)
+              | Ok (result) =>
+                    let val _ = print_int (result.status)
+                    in print_string ("ok")
+                    end
+        end
+    end

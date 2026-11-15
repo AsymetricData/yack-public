@@ -43,8 +43,8 @@ fun serve_static (request : Request.t, prefix : string, root : string) : Request
     let val path = Request.path (borrow request)
     in
         if starts_with_text (borrow path, borrow prefix) then
-            let val prefix_length = string_length (borrow prefix)
-                val rest = string_slice (borrow path, prefix_length, string_length (borrow path))
+            let val prefix_length = string.length (borrow prefix)
+                val rest = string.slice (borrow path, prefix_length, string.length (borrow path))
                 val forbidden = ".."
                 val unsafe =
                     let val text = borrow rest
@@ -226,7 +226,7 @@ fun run_from
                     val allowed =
                         case header of
                             None => false
-                          | Some value => string_eq (borrow value, borrow expected)
+                          | Some value => string.equals (borrow value, borrow expected)
                 in
                     if allowed then
                         run_from (layers, index + 1, core, request, params)
@@ -243,8 +243,8 @@ fun run_from
                     val spec = hook (())
                     val separator = "|"
                     val split = string.index_of_from (borrow spec, borrow separator, 0)
-                    val prefix = string_slice (borrow spec, 0, split)
-                    val root = string_slice (borrow spec, split + 1, string_length (borrow spec))
+                    val prefix = string.slice (borrow spec, 0, split)
+                    val root = string.slice (borrow spec, split + 1, string.length (borrow spec))
                     val inspected = serve_static (request, prefix, root)
                     val request = inspected.0
                     val handled = inspected.1

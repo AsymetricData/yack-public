@@ -19,6 +19,7 @@ struct
     | Ast.DType _ => 23
     | Ast.DAlias _ => 5
     | Ast.DDatatype _ => 10
+    | Ast.DExternRecord _ => 23
     | Ast.DImport _ => 2
 
   fun selectionSpan declaration =
@@ -56,6 +57,16 @@ struct
                 , span
                 ))
             constructors
+      | Ast.DExternRecord {fields, span, ...} =>
+          List.map
+            (fn (field, ty, offset) =>
+              child
+                ( field
+                , Ast.tyToString ty ^ " @" ^ Int.toString offset
+                , 8
+                , span
+                ))
+            fields
       | _ => []
     end
 

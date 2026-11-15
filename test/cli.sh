@@ -33,6 +33,36 @@ for program in ls cat wc main; do
 done
 
 
+needs_sqlite() {
+  readelf -d "$1" 2>/dev/null | grep -q 'libsqlite3'
+}
+
+if command -v readelf >/dev/null 2>&1; then
+  if needs_sqlite "$TMP/wc"; then
+    fail "wc does not link libsqlite3"
+  else
+    pass "wc does not link libsqlite3"
+  fi
+else
+  pass "wc does not link libsqlite3 (readelf absent, skipped)"
+fi
+
+if ( cd test/sql && "$YACK" build open_temp_path.yack "$TMP/sql-open" >/dev/null 2>&1 ); then
+  pass "build sql open_temp_path"
+  if command -v readelf >/dev/null 2>&1; then
+    if needs_sqlite "$TMP/sql-open"; then
+      pass "sql program links libsqlite3"
+    else
+      fail "sql program links libsqlite3"
+    fi
+  else
+    pass "sql program links libsqlite3 (readelf absent, skipped)"
+  fi
+else
+  fail "build sql open_temp_path"
+fi
+
+
 actual=$(cd examples/cli && "$TMP/ls" -al README.md src/ls.yack)
 status=$?
 readme=$(stat -c %s examples/cli/README.md)

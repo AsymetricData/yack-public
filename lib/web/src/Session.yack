@@ -20,7 +20,7 @@ fun lookup_from
       | entry :: rest =>
           let val entry_id = entry.0
               val data = entry.1
-              val same = string_eq (id, borrow entry_id)
+              val same = string.equals (id, borrow entry_id)
           in
               if same then
                   let val copied =
@@ -56,7 +56,7 @@ fun remove_from_acc
       | entry :: rest =>
           let val entry_id = entry.0
               val data = entry.1
-              val same = string_eq (id, borrow entry_id)
+              val same = string.equals (id, borrow entry_id)
           in
               if same then
                   remove_from_acc (id, rest, acc)
@@ -95,8 +95,8 @@ fun parse_line (line : string) : (string, string) =
         if equal < 0 then
             (line, "")
         else
-            ( string_slice (borrow line, 0, equal),
-              string_slice (borrow line, equal + 1, string_length (borrow line))
+            ( string.slice (borrow line, 0, equal),
+              string.slice (borrow line, equal + 1, string.length (borrow line))
             )
     end
 
@@ -133,7 +133,7 @@ fun get_from
           let val key = pair.0
               val value = pair.1
           in
-              if string_eq (borrow key, name) then Some (value)
+              if string.equals (borrow key, name) then Some (value)
               else get_from (rest, name)
           end
 
@@ -149,7 +149,7 @@ fun remove_name
           let val key = pair.0
               val value = pair.1
           in
-              if string_eq (borrow key, name) then
+              if string.equals (borrow key, name) then
                   remove_name (name, rest)
               else Cons (((key, value), remove_name (name, rest)))
           end

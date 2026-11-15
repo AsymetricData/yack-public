@@ -1,14 +1,15 @@
+import yack/string
 type header_span : Copy = { name_start : int, name_len : int, value_start : int, value_len : int }
 
 fun skip_spaces (text : borrow string, index : int, length : int) : int =
     if index >= length then index
-    else if string_char_at_unchecked (text, index) = 32 then
+    else if string.char_at_unchecked (text, index) = 32 then
         skip_spaces (text, index + 1, length)
     else index
 
 fun parse_header (line : borrow string) : header_span =
-    let val length = string_length (line)
-        val colon = string_find_char (line, 58)
+    let val length = string.length (line)
+        val colon = string.index_of_char (line, 58)
         val valueStart = skip_spaces (line, colon + 1, length)
     in
         { name_start = 0

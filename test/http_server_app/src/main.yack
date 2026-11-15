@@ -4,6 +4,7 @@ import alpage/Reply
 import alpage/Request
 import alpage/Response
 import yack/io
+import yack/os
 
 fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
     Reply.ok (Response.text ("hello"))
@@ -16,7 +17,36 @@ fun application () : Alpage.t =
     |> Alpage.get ("/", home)
     |> Alpage.post ("/sum", sum)
 
+
+
+fun configured_port () : int =
+    let val text = os.getenv_or ("YACK_HTTP_PORT", "18092")
+    in
+        case string_to_int (borrow text) of
+            Some value => value
+          | None => 18092
+    end
+
+
+
+fun reuse_port_enabled () : bool =
+    let val text = os.getenv_or ("YACK_HTTP_REUSE_PORT", "0")
+    in
+        case string_to_int (borrow text) of
+            Some value => value = 1
+          | None => false
+    end
+
 fun main () =
-    case Alpage.run (application (), Alpage.config (18092)) of
-        Ok _ => ()
-      | Error message => io.print_line (borrow message)
+    let val settings =
+            if reuse_port_enabled () then
+                Alpage.reuse_port (Alpage.config (configured_port ()), true)
+            else Alpage.config (configured_port ())
+    in
+        case Alpage.run (application (), settings) of
+            Ok _ => ()
+          | Error message =>
+                let val _ = io.print_line (borrow message)
+                in os.exit (1)
+                end
+    end

@@ -1,0 +1,3 @@
+extern fun getpid_raw () : int = "getpid"
+
+fun main () = print_int (getpid_raw ())

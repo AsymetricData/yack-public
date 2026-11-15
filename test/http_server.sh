@@ -24,6 +24,11 @@ cleanup() {
         kill "$pid" 2>/dev/null || true
         wait "$pid" 2>/dev/null || true
     fi
+    local guard
+    for guard in ${guard_pids:-}; do
+        kill "$guard" 2>/dev/null || true
+        wait "$guard" 2>/dev/null || true
+    done
 }
 trap cleanup EXIT
 
@@ -105,7 +110,92 @@ run_variant() {
 
 build heap
 build stack --memory=stack --arena-reserve=64M
+
+
+
+bind_guard() {
+    local name=heap
+    if curl -s -m 0.2 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+        echo "http_server: port $PORT already in use" >&2
+        return 1
+    fi
+    "$OUT/$name" >"$OUT/$name-guard.log" 2>&1 &
+    pid=$!
+    wait_port "$name"
+
+    local second_log="$OUT/$name-second.log"
+    local status=0
+    timeout 5 "$OUT/$name" >"$second_log" 2>&1 || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "http_server: second instance bound port $PORT" >&2
+        cat "$second_log" >&2
+        return 1
+    fi
+    if [ "$status" -eq 124 ]; then
+        echo "http_server: second instance did not fail" >&2
+        cat "$second_log" >&2
+        return 1
+    fi
+    if ! grep -q "errno 98" "$second_log"; then
+        echo "http_server: second instance did not report errno 98" >&2
+        cat "$second_log" >&2
+        return 1
+    fi
+    local code
+    code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' \
+        "http://127.0.0.1:$PORT/")
+    if [ "$code" != "200" ]; then
+        echo "http_server: first instance answered '$code' after failed bind" >&2
+        return 1
+    fi
+
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    pid=""
+    sleep 0.2
+
+
+    YACK_HTTP_PORT="$PORT" YACK_HTTP_REUSE_PORT=1 "$OUT/$name" \
+        >"$OUT/$name-shared-a.log" 2>&1 &
+    local first=$!
+    guard_pids="$first"
+    local i
+    for i in $(seq 1 100); do
+        if curl -s -m 0.2 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
+            break
+        fi
+        sleep 0.02
+    done
+    YACK_HTTP_PORT="$PORT" YACK_HTTP_REUSE_PORT=1 "$OUT/$name" \
+        >"$OUT/$name-shared-b.log" 2>&1 &
+    local second=$!
+    guard_pids="$first $second"
+    sleep 0.5
+    if ! kill -0 "$first" 2>/dev/null; then
+        echo "http_server: first reuse_port instance died" >&2
+        cat "$OUT/$name-shared-a.log" >&2
+        return 1
+    fi
+    if ! kill -0 "$second" 2>/dev/null; then
+        echo "http_server: second reuse_port instance did not start" >&2
+        cat "$OUT/$name-shared-b.log" >&2
+        return 1
+    fi
+    code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' \
+        "http://127.0.0.1:$PORT/")
+    if [ "$code" != "200" ]; then
+        echo "http_server: shared port answered '$code'" >&2
+        return 1
+    fi
+    kill -TERM "$first" "$second" 2>/dev/null || true
+    wait "$first" 2>/dev/null || true
+    wait "$second" 2>/dev/null || true
+    guard_pids=""
+    echo "ok http_server reuse_port"
+}
+
 run_variant heap
 run_variant stack
+bind_guard
 
 echo "ok http_server"

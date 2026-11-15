@@ -1,6 +1,7 @@
 # Threads
 
-Yack expose deux builtins POSIX minimaux :
+Pour un service qui a besoin de plusieurs threads, Yack expose deux builtins
+POSIX :
 
 ```yack
 sys.thread_spawn : ((int64) -> unit) * int64 -> int64

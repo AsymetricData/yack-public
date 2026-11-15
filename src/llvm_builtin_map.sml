@@ -22,6 +22,7 @@ struct
     , leaveStoreRoot : unit -> unit
     , currentFunctionName : string
     , stackMode : bool
+    , inArena : unit -> bool
     }
 
   fun lower (env : env) (locals, name, arguments, resultTy, siteRef) =
@@ -45,6 +46,7 @@ struct
       val leaveStoreRoot = #leaveStoreRoot env
       val currentFunctionName = #currentFunctionName env
       val stackMode = #stackMode env
+  val inArena = #inArena env
       val unitValue = { text = "", ty = Ir.Unit, const = true }
       val headerTy = "{ ptr, i64, i64, i64, ptr }"
       val rootRegion = "@yack_root_region"
@@ -115,7 +117,9 @@ struct
               val previous = !currentDestArg
               val _ =
                 if stackMode then
-                  currentDestArg := ownerOf mapValue
+                  currentDestArg :=
+                    (if inArena () then "@yack_root_region"
+                     else ownerOf mapValue)
                 else ()
               val valueValue = lowerExpr locals valueExpression
               val _ = leaveStoreRoot ()
@@ -232,8 +236,33 @@ struct
           emit ("store i32 " ^ Int.toString state ^ ", ptr " ^ pointer)
         end
 
-      fun dropKey key =
-        emit ("call void @yack_drop_string({ ptr, i64, i1 } " ^ key ^ ")")
+      fun dropKey (owner, key) =
+
+        if stackMode then
+          emit ("call void @yack_owner_recycle_string(ptr " ^ owner ^
+                ", { ptr, i64, i1 } " ^ key ^ ")")
+        else
+          emit ("call void @yack_drop_string({ ptr, i64, i1 } " ^ key ^ ")")
+
+      fun isDataType ty =
+        case ty of
+          Ir.TData (_, _, _) => true
+        | _ => false
+
+      fun dataNameOf ty =
+        case ty of
+          Ir.TData (name, _, _) => name
+        | _ => ""
+
+      fun dropReplacedValue (owner, value, valueTy) =
+        if stackMode andalso valueTy = Ir.TString then
+          emit ("call void @yack_owner_recycle_string(ptr " ^ owner ^
+                ", { ptr, i64, i1 } " ^ #text value ^ ")")
+        else if stackMode andalso isDataType valueTy then
+          emit ("call void @yack_owner_drop_" ^ dataNameOf valueTy ^
+                "(ptr " ^ owner ^ ", ptr " ^ #text value ^ ")")
+        else
+          dropValue (value, valueTy)
 
       fun hashKey key =
         let val reg = fresh "map.hash" in
@@ -336,7 +365,8 @@ struct
           val _ =
             if stackMode then
               emit (newData ^ " = call ptr @yack_region_alloc_direct(ptr " ^
-                    ownerOf map ^ ", i64 " ^ bytes ^ ")")
+                    (if inArena () then "@yack_root_region" else ownerOf map) ^
+                    ", i64 " ^ bytes ^ ")")
             else
               emit (newData ^ " = call ptr @yack_root_alloc(i64 " ^
                     bytes ^ ")")
@@ -406,7 +436,21 @@ struct
           val _ = storeEntryValue (probeEntry, valueTy, entryValue)
           val _ = emit ("br label %" ^ moveSkip)
           val _ = emit (moveDone ^ ":")
-          val _ = emit ("call void @yack_free(ptr " ^ oldData ^ ")")
+          val _ =
+            if stackMode then
+              let
+                val oldBytes = fresh "map.grow.oldbytes"
+                val _ = emit (oldBytes ^ " = mul i64 " ^ oldCapacity ^
+                              ", " ^ entrySize valueTy)
+                val _ = emit ("call void @yack_owner_recycle_block(ptr " ^
+                              (if inArena () then "@yack_root_region"
+                               else ownerOf map) ^ ", ptr " ^ oldData ^
+                              ", i64 " ^ oldBytes ^ ")")
+              in
+                ()
+              end
+            else
+              emit ("call void @yack_free(ptr " ^ oldData ^ ")")
           val _ = emit ("store ptr " ^ newData ^ ", ptr " ^ dataPointer)
           val _ = emit ("store i64 " ^ newCapacity ^ ", ptr " ^
                         capacityPointer)
@@ -491,8 +535,8 @@ struct
           ()
         end
 
-      fun dropConsumedKey (key, consume) =
-        if consume then dropKey (#text key) else ()
+      fun dropConsumedKey (owner, key, consume) =
+        if consume then dropKey (owner, #text key) else ()
     in
       case (name, lowered) of
         ("map_new", _) =>
@@ -696,7 +740,7 @@ struct
             val _ = emit (doneLabel ^ ":")
             val result = fresh "map.has"
             val _ = emit (result ^ " = load i1, ptr " ^ slot)
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             { text = result, ty = Ir.Bool, const = false }
           end
@@ -732,7 +776,7 @@ struct
                         ", ptr " ^ slot);
                   { text = reg, ty = valueTy, const = false }
                 end
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             result
           end
@@ -768,7 +812,7 @@ struct
                         ", ptr " ^ slot);
                   { text = reg, ty = valueTy, const = false }
                 end
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             result
           end
@@ -789,7 +833,7 @@ struct
             val _ = emit (doneLabel ^ ":")
             val result = fresh "map.has"
             val _ = emit (result ^ " = load i1, ptr " ^ slot)
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             { text = result, ty = Ir.Bool, const = false }
           end
@@ -837,7 +881,7 @@ struct
                 end
               else
                 { text = slot, ty = resultTy, const = false }
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             result
           end
@@ -885,7 +929,7 @@ struct
                 end
               else
                 { text = slot, ty = resultTy, const = false }
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             result
           end
@@ -901,8 +945,8 @@ struct
                     let
                       val storedKey = loadEntryKey (entry, valueTy)
                       val storedValue = loadEntryValue (entry, valueTy)
-                      val _ = dropKey storedKey
-                      val _ = dropValue (storedValue, valueTy)
+                      val _ = dropKey (ownerOf map, storedKey)
+                      val _ = dropReplacedValue (ownerOf map, storedValue, valueTy)
                       val _ = storeEntryState (entry, valueTy, 2)
                       val length = fresh "map.remove.len"
                       val nextLength = fresh "map.remove.next"
@@ -918,7 +962,7 @@ struct
                     end
                 , fn _ => emit ("br label %" ^ doneLabel) )
             val _ = emit (doneLabel ^ ":")
-            val _ = dropConsumedKey (key, consume)
+            val _ = dropConsumedKey (ownerOf map, key, consume)
           in
             unitValue
           end
@@ -955,8 +999,8 @@ struct
                 , fn entry =>
                     let
                       val previous = loadEntryValue (entry, valueTy)
-                      val _ = dropKey (#text key)
-                      val _ = dropValue (previous, valueTy)
+                      val _ = dropKey (ownerOf map, #text key)
+                      val _ = dropReplacedValue (ownerOf map, previous, valueTy)
                       val _ = storeEntryValue (entry, valueTy, value)
                     in
                       emit ("br label %" ^ doneLabel)

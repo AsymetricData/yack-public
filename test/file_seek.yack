@@ -1,0 +1,65 @@
+
+
+import yack/array
+import yack/bytes as byte_array
+import yack/file
+import yack/fs
+import yack/string
+
+fun read_at
+    (path : borrow string, origin : file.whence,
+     offset : int64) : string =
+    case file.open (path, file.Read) of
+        Error (_) => ""
+      | Ok (reader) =>
+            case file.seek (borrow reader, offset, origin) of
+                Error (_) =>
+                    let val _ = file.close (reader)
+                    in ""
+                    end
+              | Ok (_) =>
+                    let
+                        val buffer : int8 array = array_make_uninit (5)
+                        val count =
+                            file.read_chunk (borrow reader, borrow buffer)
+                        val _ = file.close (reader)
+                    in
+                        case count of
+                            Error (_) => ""
+                          | Ok (size) =>
+                                let val text = byte_array.to_string (buffer)
+                                in string.slice (borrow text, 0, size)
+                                end
+                    end
+
+fun main () =
+    let val path = "/tmp/yack-file-seek"
+        val _ = fs.remove (borrow path)
+    in
+        case file.open (borrow path, file.Write) of
+            Error (message) => print_string (message)
+          | Ok (writer) =>
+                let val data = byte_array.from_string (borrow "hello world")
+                    val wrote = file.write_all (borrow writer, data)
+                    val _ = file.close (writer)
+                in
+                    case wrote of
+                        Error (message) => print_string (message)
+                      | Ok (_) =>
+                            let
+                                val start =
+                                    read_at (borrow path, file.Start,
+                                             int_to_int64 (6))
+                                val current =
+                                    read_at (borrow path, file.Current,
+                                             int_to_int64 (6))
+                                val ending =
+                                    read_at (borrow path, file.End,
+                                             int_to_int64 (-5))
+                                val _ = fs.remove (borrow path)
+                            in
+                                print_string
+                                    (start ^ current ^ ending)
+                            end
+                end
+    end

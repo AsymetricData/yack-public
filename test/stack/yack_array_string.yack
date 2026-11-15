@@ -1,0 +1,17 @@
+
+
+
+import yack/array
+
+fun loop (values : string array, n : int) : int =
+    if n <= 0 then 0
+    else
+        let val values = array.set (values, 0, int_to_string (n) ^ "-std")
+            val length = string_length (array.get_borrow (borrow values, 0))
+        in loop (values, n - 1)
+        end
+
+fun main () =
+    let val values = array.new ()
+        val values = array.push (values, "start")
+    in print_int (loop (values, 1000000)) end

@@ -1,0 +1,18 @@
+
+
+
+datatype box = Box of int
+
+fun make (n : int) : box = Box (n)
+
+fun loop (n : int, acc : int) : int =
+    if n <= 0 then acc
+    else
+        let val value = make (n)
+            val added =
+                case value of
+                    Box (x) => x - n + 1
+        in loop (n - 1, acc + added)
+        end
+
+fun main () = print_int (loop (1000000, 0))

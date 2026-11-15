@@ -1,10 +1,11 @@
+import yack/string
 fun main () =
     let val name = "ada"
         val count : int64 = 42
         val ratio = 1.5
         val text = "copy"
         val message = sprintf ("%s has %ld apples (%d%%)", (name, count, 100))
-        val copied = string_copy (borrow text)
+        val copied = string.copy (borrow text)
         val _ = print_string (message)
         val _ = print_int64 (int_to_int64 (7))
         val _ = print_int (int64_to_int (count))

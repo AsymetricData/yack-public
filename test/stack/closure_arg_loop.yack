@@ -1,0 +1,22 @@
+
+
+
+
+import yack/array
+
+fun transform (text : borrow string) : string =
+    int_to_string (string_length (text))
+
+fun run (f : borrow string -> string, text : borrow string) : string = f (text)
+
+fun loop (values : string array, n : int) : int =
+    if n <= 0 then 0
+    else
+        let val text = "payload-0123456789abcdef-" ^ int_to_string (n)
+            val out = run (transform, borrow text)
+            val values = array.set (values, 0, out)
+        in loop (values, n - 1) end
+
+fun main () =
+    let val values : string array = array.push (array.new (), "x")
+    in print_int (loop (values, 1000000)) end

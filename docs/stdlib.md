@@ -1,16 +1,17 @@
 # Yack : bibliothèque standard (`yack/*`)
 
-> **Statut : draft de conception + première tranche compilable.**
-> Le paquet vit dans `lib/yack/`, pas dans `Driver.preludeText`.
-> Les modules déjà écrits compilent avec le compilateur actuel ; les modules
-> marqués ⏳ dépendent de primitives qui n'existent pas encore.
+> **Statut : référence de l'API livrée, avec un plan pour le reste.**
+> Le paquet vit dans `lib/yack/`, pas dans `Driver.preludeText`. Les 29 modules
+> de `lib/yack/src` compilent avec le compilateur actuel et sont documentés pour
+> le LSP ; les entrées marquées ⏳ ci-dessous décrivent des modules encore à
+> écrire.
 
 ## 1. Principes
 
-La stdlib de Go est un bon catalogue de référence, pas un modèle directement
-portable. Go s'appuie sur des interfaces, la réflexion, les goroutines, les
-closures et un GC. Yack n'a aujourd'hui aucune de ces briques. La stdlib Yack
-doit donc être :
+La stdlib de Go est un bon catalogue de référence, mais elle n'est pas
+directement portable. Go s'appuie sur des interfaces, la réflexion, les
+goroutines, les closures et un GC, et Yack n'a aujourd'hui aucune de ces
+briques. La stdlib Yack suit donc quelques règles :
 
 - **explicite** : pas de prélude magique, pas d'import global implicite ;
 - **possédée** : les signatures disent qui possède, qui emprunte, qui consomme ;
@@ -33,8 +34,8 @@ Aujourd'hui `Driver.preludeText` injecte :
 - les fonctions `list_length`, `list_tail`, `list_head`, `option_is_some`,
   `result_is_ok`.
 
-Le draft déplace **toute l'API de bibliothèque** dans `lib/yack/`. La prelude
-doit rester le noyau du langage :
+Le plan sort **toute l'API de bibliothèque** de la prelude et la place dans
+`lib/yack/`. La prelude doit rester le noyau du langage :
 
 - types primitifs (`int`, `float`, `bool`, `string`, `unit`, …) ;
 - builtins (`print_int`, `print_int64`, `array_*`, `map_*`, `io_*`, `sys.*`,
@@ -96,15 +97,14 @@ yack = { path = "../../lib/yack" }
 
 ## 4. Contraintes du langage qui dictent l'API
 
-Ces contraintes ne sont pas des détails : elles expliquent la forme de chaque
-module.
+Ces contraintes expliquent la forme de chaque module.
 
 ### 4.1 Fonctions passées par nom, sans capture
 
 Une fonction de niveau module peut être passée comme valeur
 (`list.map (predicate, values)`), et une fonction inline sans capture peut être
-écrite `x => ...`. En revanche une fonction ne capture aucun environnement :
-utiliser une variable libre est rejeté avec `E0511`. Donc :
+écrite `x => ...`. Une fonction ne capture aucun environnement : une variable
+libre est rejetée avec `E0511`. Voici ce que cela implique :
 
 - `list.map`, `list.filter`, `list.filter_map`, `list.foldl`, `list.foldr`
   et `list.zip` existent ;
@@ -122,7 +122,7 @@ Conséquences :
   (`sum_int`, `contains_string`, …).
 - `yack/sort` expose `sort_int`, `sort_int_list`, `sort_string_list`, etc.
 - Le décodage JSON utilise un `decoder` **datatype** (defunctionalisation), pas
-  une fonction. Voir §8.
+  une fonction. Voir §9.
 
 ### 4.2 Pas d'interfaces ni de type classes
 
@@ -170,9 +170,9 @@ sont documentées comme **consommatrices**.
 
 ### 4.4 Emprunt nommé puis déplacement
 
-Le vérificateur suit maintenant la valeur qui porte un emprunt : un emprunt
-nommé meurt à son dernier usage (alias et agrégats compris), et non à la fin
-de sa portée. Le programme suivant est donc accepté :
+Le vérificateur suit la valeur qui porte un emprunt : un emprunt nommé meurt à
+son dernier usage (alias et agrégats compris), et non à la fin de sa portée. Le
+programme suivant est donc accepté :
 
 ```yack
 fun first_and_owner (line : string) : string =
@@ -193,7 +193,7 @@ sélection n'est pas suivie garde le loan jusqu'au dernier usage du porteur
 entier ; les builtins hors de l'allowlist `releasesLoanAtCall` ne rendent pas
 un emprunt d'argument avant la fin de l'appel.
 
-L'exemple `strip_cr` ci-dessous passe depuis toujours : `string_length`,
+L'exemple `strip_cr` ci-dessous passe : `string_length`,
 `string_char_at_unchecked` et `string_slice` font partie des builtins dont les
 emprunts d'arguments sont relâchés à la fin de l'appel.
 
@@ -230,12 +230,15 @@ ce style.
 
 - Pas de `and` pour la récursion mutuelle : les fonctions d'un module sont
   toutes mutuellement visibles, il suffit de les déclarer séparément.
-- Pas de `val (a, b) = …` : utiliser `val pair = …`, puis `pair.0`, `pair.1`.
+- `val (a, b) = …` et `val { x = px, y = py } = …` déstructurent un tuple ou un
+  record ; le motif doit être exhaustif.
 - Les constructeurs à argument tuple demandent des doubles parenthèses :
   `Cons ((value, rest))`, pas `Cons (value, rest)`.
-- `borrow` ne s'applique qu'à une place locale :
-  `val key = "name"` puis `borrow key` ; pas `borrow "name"`.
-- `print_int` ajoute un saut de ligne ; `print_string` non.
+- `borrow` s'applique à une place locale ou à un littéral de chaîne
+  (`val key = "name"` puis `borrow key`, ou directement `borrow "name"`), mais
+  pas à un appel : `borrow (f x)` est rejeté avec `E0500`.
+- `print_int` et `print_string` ajoutent un saut de ligne ; `io.print_raw` écrit
+  sans.
 - `map_get` rend la valeur zéro si la clé manque ; tester `map_has` d'abord.
 
 ## 5. Arborescence
@@ -261,6 +264,12 @@ lib/yack/
     map.yack        🟡
     sort.yack       🟡
     io.yack         🟡
+    fs.yack         ✅
+    file.yack       ✅
+    process.yack    🟡
+    net.yack        🟡
+    time.yack       ✅
+    random.yack     ✅
     ansi.yack       ✅
     args.yack       ✅
     cli.yack        ✅
@@ -268,27 +277,26 @@ lib/yack/
     term.yack       🟡
     tui.yack        🟡
     json.yack       🟡
-    dynamic.yack    ⏳
-    encoding/hex.yack      ⏳
-    encoding/base64.yack   ⏳
-    csv.yack               ⏳
-    toml.yack              ⏳
-    url.yack               🟡
-    set.yack               ⏳
-    net.yack               🟡
-    http.yack              🟡
-    server.yack            🟡
-    buffer.yack            🟡
-    lsp.yack               ⏳
-    lsp/rpc.yack           ⏳
-    time.yack              ⏳
-    random.yack            ⏳
-    log.yack               ⏳
-    test.yack              ⏳
+
+  prévus (⏳) :
+    dynamic.yack
+    encoding/hex.yack
+    encoding/base64.yack
+    csv.yack
+    toml.yack
+    url.yack
+    set.yack
+    http.yack
+    server.yack
+    buffer.yack
+    lsp.yack
+    lsp/rpc.yack
+    log.yack
+    test.yack
 ```
 
 `✅` compilable et utilisable aujourd'hui, `🟡` partiel ou avec limites
-documentées, `⏳` en attente de primitives compilateur.
+documentées, `⏳` pas encore écrit.
 
 ## 6. Catalogue complet, aligné sur Go
 
@@ -303,14 +311,17 @@ documentées, `⏳` en attente de primitives compilateur.
 | `math` | `yack/math` | ✅ | sqrt Newton ; floor/ceil manquants |
 | `path/filepath` | `yack/path` | ✅ | POSIX |
 | `fmt` | `yack/fmt` | ✅ | pas de varargs |
-| `io` | `yack/io` | 🟡 | fichiers/stdin ; handles manquants |
-| `os` | `yack/os` | 🟡 | args/env via /proc, `exit`, `cwd` ; stat/chdir manquants |
-| `time` | `yack/time` | ⏳ | clock/sleep/format |
-| `encoding/json` | `yack/json`, `yack/dynamic`, `yack/json/derive` | 🟡 | voir §8 |
+| `io` | `yack/io` | 🟡 | fichiers/stdin ; `yack/file` pour les handles en flux |
+| `os` | `yack/os` | 🟡 | args/env via /proc, `exit`, `cwd` ; chdir manquant, `yack/fs` pour stat/mkdir/list_dir |
+| `io/fs` | `yack/fs` | ✅ | `exists`, `stat`, `mkdir_all`, `remove`, `rename`, `list_dir`, `append_file` |
+| `os.File` | `yack/file` | ✅ | handle Linear : `open`, `read_chunk`, `write_all`, `seek`, `sync`, `close` |
+| `os/exec` | `yack/process` | 🟡 | `run` par popen/pclose ; `run_with` pour stdin texte/fd et stdout/stderr vers un fd |
+| `time` | `yack/time` | ✅ | horloges milliseconde, `sleep_ms`, `format_utc` ; UTC seulement |
+| `encoding/json` | `yack/json`, `yack/dynamic`, `yack/json/derive` | 🟡 | voir §9 |
 | `encoding/hex` | `yack/encoding/hex` | ⏳ | pur, facile |
 | `encoding/base64` | `yack/encoding/base64` | ⏳ | pur, facile |
 | `encoding/csv` | `yack/csv` | ⏳ | pur |
-| `net` | `yack/net` | 🟡 | existe dans `lib/net` |
+| `net` | `yack/net` | 🟡 | `resolve`, `connect`, `connect_timeout` ; TCP seulement |
 | `net/http` | `yack/http`, `yack/server` | 🟡 | existe dans `lib/net` |
 | `net/http` (framework) | `web/*` | 🟡 | `lib/web` : Router, Response, Middleware, Cookie, Session, Html |
 | `net/url` | `yack/url` | 🟡 | existe dans `lib/net` |
@@ -322,6 +333,7 @@ documentées, `⏳` en attente de primitives compilateur.
 | `testing` | `yack/test` | ⏳ | assertions ; exit/argv |
 | `regexp` | `yack/regexp` | ⏳ | moteur à écrire |
 | `crypto/*` | `yack/crypto` | ⏳ | bitwise + RNG + constant-time |
+| `crypto/rand` | `yack/random` | ✅ | `bytes`, `token_hex`, `int_below` par getrandom |
 | `compress/*` | `yack/compress` | ⏳ | bitwise |
 | `archive/*` | `yack/archive` | ⏳ | bitwise + IO |
 | `image/*` | `yack/image` | ⏳ | bas niveau |
@@ -586,15 +598,23 @@ builtin à utiliser.
 ```yack
 from_string : borrow string -> int8 array
 to_string : int8 array -> string
-to_string_range : int8 array * offset * count -> string
+to_string_range : borrow int8 array * offset * count -> string
+header_end : borrow int8 array * start * limit -> int
+write_string : borrow int8 array * offset * limit * borrow string -> int
+write_int : borrow int8 array * offset * limit * int -> int
 set, set_unchecked : int8 array * int * int8 -> int8 array
 copy, equal, compare, slice : ...
 ```
 
 `to_string_range (values, offset, count)` copie `count` octets à partir de
 l'indice `offset` ; la borne de fin est `offset + count`, pas une borne
-absolue. Le builtin `bytes_to_string_range` a la même signature
-`(values, offset, count)`.
+absolue. Le buffer est emprunté, pas consommé.
+
+`header_end`, `write_string` et `write_int` sont les primitives des
+réponses HTTP et des buffers de processus ; `limit` est une borne absolue
+dans le tableau. Ils rendent le prochain offset, ou `-1` si la valeur ne
+tient pas. Les builtins `bytes_*` correspondants restent internes au
+compilateur.
 
 ### `yack/io`
 
@@ -608,12 +628,131 @@ eprint, eprint_line : borrow string -> unit
 ```
 
 `print_string` ajoute un saut de ligne ; `print_raw` utilise `print_span` et
-écrit brut. C'est indispensable pour le TUI et les séquences ANSI.
+écrit brut. C'est ce qu'il faut pour le TUI et les séquences ANSI.
 `print_lines` écrit une ligne par élément, pour une liste de résultats déjà
 calculée.
 
-`read_stdin` lit **tout** stdin ; pour le LSP il faudra `read_line` et
-`read_exact`.
+`read_stdin` lit **tout** stdin. Pour lire un flux par morceaux, passer par
+`yack/file`.
+
+### `yack/fs`
+
+Opérations sur les chemins, sans handle ouvert :
+
+```yack
+datatype kind = File | Directory | Symlink | Other
+type info = { size : int64, mtime_ms : int64, kind : kind }
+exists : borrow string -> bool
+stat : borrow string -> info result
+mkdir : borrow string -> unit result
+mkdir_all : borrow string -> unit result
+remove : borrow string -> unit result
+rename : borrow string * borrow string -> unit result
+list_dir : borrow string -> string list result
+append_file : borrow string * borrow string -> unit result
+```
+
+`exists` ne suit pas les liens symboliques, donc un lien cassé existe.
+`mkdir_all` accepte `EEXIST` quand le chemin est déjà un répertoire. `stat`
+suit les liens et rend la taille, la date de modification en millisecondes et
+le type de l'entrée. `remove` essaie `unlink` puis `rmdir` : il enlève un
+fichier, un lien ou un répertoire vide. `list_dir` lit `getdents64` et ne garde
+pas de `DIR*` ouvert. Les échecs rendent `Error` avec l'opération et, quand
+`errno` en donne un, son numéro.
+
+### `yack/file`
+
+Descripteurs en flux. `handle` est **Linear**, donc `close` est obligatoire sur
+chaque chemin :
+
+```yack
+datatype mode = Read | Write | Append
+datatype whence = Start | Current | End
+type handle : Linear = { descriptor : int, owned : bool }
+open : borrow string * mode -> handle result
+stdin, stdout, stderr : unit -> handle
+seek : borrow handle * int64 * whence -> int64 result
+read_chunk : borrow handle * borrow int8 array -> int result
+write_all : borrow handle * int8 array -> int result
+write : borrow handle * borrow int8 array -> int result
+sync : borrow handle -> unit result
+close : handle -> unit result
+```
+
+`read_chunk` remplit un buffer fourni par l'appelant et rend le nombre d'octets
+lus ; `0` signale la fin du fichier. `write_all` reprend sur `EINTR` et sur une
+écriture partielle, `write` s'arrête au premier `write (2)`. Les handles
+`stdin`/`stdout`/`stderr` ne possèdent pas le descripteur du processus :
+`close` les accepte et ne ferme rien. Une lecture ou une écriture ne prend
+qu'un `borrow handle`, l'offset avance côté noyau.
+
+### `yack/process`
+
+```yack
+type output = { stdout : string, stderr : string, status : int }
+datatype input = Inherit | Text of string | Fd of int
+datatype destination = Capture | To_fd of int
+type options = { input : input, output : destination, errors : destination }
+shell_quote : borrow string -> string result
+run : borrow string * string list -> output result
+run_with : borrow string * string list * options -> output result
+```
+
+`run` et `run_with` passent par `/bin/sh -c` et `popen`/`pclose`. `stdout` est
+lu en flux, `stderr` passe par un fichier temporaire créé en `0600` avec
+`O_EXCL | O_CLOEXEC` sous `TMPDIR`, puis supprimé sur tous les chemins.
+`shell_quote` entoure l'argument de quotes simples et échoue sur un octet NUL ;
+`run` l'applique à chaque argument, donc un argument ne peut pas devenir du
+shell. `run_with` choisit en plus l'entrée (héritée, texte ou descripteur) et
+la destination de `stdout`/`stderr` (capturée ou descripteur existant). Un flux
+envoyé par `To_fd` n'est pas capturé et sa chaîne est vide. Une commande de
+plus de 131071 octets est refusée.
+
+### `yack/net`
+
+```yack
+type connection : Linear = { descriptor : int }
+resolve : borrow string -> string list result
+connect : borrow string * int -> connection result
+connect_timeout : borrow string * int * int -> connection result
+connection_fd : borrow connection -> int
+into_fd : connection -> int
+close : connection -> unit
+```
+
+`resolve` passe par `getaddrinfo` et rend les adresses sous forme de chaînes.
+`connect` essaie chaque adresse et rend une connexion **Linear**, donc `close`
+est obligatoire ; `connect_timeout` rend `errno 110` quand le délai expire.
+`connection_fd` lit le descripteur sans fermer, `into_fd` en transfère la
+propriété à l'appelant, ce qui sert à `net/Net` pour envelopper la connexion
+dans son propre type Linear. Le module ne fait que du TCP.
+
+### `yack/time`
+
+```yack
+monotonic_ms : unit -> int64
+now_ms : unit -> int64
+sleep_ms : int -> unit
+format_utc : int64 -> string
+```
+
+`monotonic_ms` sert aux durées, `now_ms` lit `CLOCK_REALTIME` en millisecondes
+depuis l'époque Unix. `sleep_ms` ne dort pas pour une valeur nulle ou négative.
+`format_utc` est du calcul pur en Yack et rend une date ISO 8601 avec
+millisecondes, en UTC seulement.
+
+### `yack/random`
+
+```yack
+bytes : int -> int8 array result
+token_hex : int -> string result
+int_below : int -> int result
+```
+
+Les octets viennent de `getrandom` et le wrapper vérifie la lecture. `token_hex`
+rend `2 * n` caractères hexadécimaux, pour un nom de fichier temporaire ou un
+identifiant de session. `int_below` rejette les tirages hors de la plage pour
+rester uniforme.
 
 ### `yack/sort`
 
@@ -631,7 +770,7 @@ tri d'un **tableau** de chaînes exige encore `array_swap` pour déplacer un
 
 ## 8. CLI, ANSI et mini-TUI
 
-Le paquet fournit une chaîne complète pour écrire un CLI sans dépendance :
+Le paquet fournit de quoi écrire un CLI sans dépendance :
 
 | Module | Rôle |
 |---|---|
@@ -682,8 +821,8 @@ Les accesseurs rendent `(valeur, parsed restant)` :
 - `take_option_or : parsed * string * string -> string * parsed`
 - `positionals : parsed -> string list` (consomme le reste)
 
-C'est volontaire : les listes sont Affine, et un accesseur qui rendrait juste
-`bool` consommerait le `parsed`. Le style `pair.0` / `pair.1` est explicite et
+Les listes sont Affine, et un accesseur qui rendrait juste `bool`
+consommerait le `parsed`. Le style `pair.0` / `pair.1` est explicite et
 compatible avec le vérificateur actuel.
 
 Syntaxe reconnue : `--long`, `--long=value`, `--long value`, `-s`,
@@ -758,7 +897,7 @@ mode raw (`termios`). On peut déjà rendre un écran, un menu, une barre de
 progression et un spinner, et lire une ligne avec `io.read_stdin` quand
 l'entrée est un pipe/fichier.
 
-Important : `string_of_char` est **octet** (0–255). Pour les caractères UTF-8
+Important : `string_of_char` est **octet** (0 à 255). Pour les caractères UTF-8
 de cadre (`─`, `│`, `┌`, …), utiliser des littéraux de chaîne, pas
 `string_of_char 9472`. `tui` le fait déjà.
 
@@ -803,7 +942,7 @@ date. `make test-cli` construit et vérifie les quatre programmes.
 
 ## 9. JSON, dynamic et génération de décodeurs
 
-### 8.1 Ce que fait Gleam
+### 9.1 Ce que fait Gleam
 
 Gleam sépare deux paquets :
 
@@ -831,10 +970,11 @@ let cat_decoder = {
 json.parse(from: json_string, using: cat_decoder)
 ```
 
-### 8.2 Adaptation Yack
+### 9.2 Adaptation Yack
 
-Yack n'a ni `use`, ni closure capturante, ni `Decoder(t)` fonction. Le draft reprend la
-**séparation en deux couches** et remplace les fonctions par des valeurs.
+Yack n'a ni `use`, ni closure capturante, ni `Decoder(t)` fonction. Le plan
+reprend la **séparation en deux couches** et remplace les fonctions par des
+valeurs.
 
 #### `yack/json` : arbre et syntaxe
 
@@ -1038,30 +1178,29 @@ fun json.field (name : string, codec : codec 'a) : codec 'a = ...
 génériques comme à Gleam, et `Decoder(t)` peut remplacer le datatype fermé.
 Le générateur reste utile pour éviter d'écrire les codecs à la main.
 
-### 8.3 JSON pour le LSP
+### 9.3 JSON pour le LSP
 
 Le LSP est le premier consommateur réel. Il impose :
 
 - objets et tableaux imbriqués ;
 - chaînes avec `\"`, `\\`, `\/`, `\n`, `\r`, `\t`, `\b`, `\f` ;
-- échappements `\uXXXX` (le draft gère le BMP, pas les paires de surrogates) ;
+- échappements `\uXXXX` (l'implémentation actuelle gère le BMP, pas les paires de surrogates) ;
 - entiers (`id`, `line`, `character`, `Content-Length`) ;
 - `null` ;
 - union `id : int | string` (JSON-RPC) ;
 - messages volumineux, donc un parseur linéaire et sans allocation inutile ;
 - erreurs localisées (position) pour diagnostiquer un message malformé.
 
-Le draft `yack/json` couvre ces points sauf les paires de surrogates et les
+`yack/json` couvre ces points sauf les paires de surrogates et les
 floats. `Number` en texte permet de garder `Content-Length` et les entiers LSP
 sans dépendre de `float_to_string`.
 
 ## 10. Paquet LSP
 
-> **Note (0.2).** Le compilateur embarque désormais un LSP natif en SML
-> (`yack lsp`, voir `docs/lsp.md`). Cette section décrit un futur LSP
-> auto-hébergé écrit en Yack, avec `yack/lsp/rpc` et `yack/jsonderive`. Les
-> deux peuvent coexister : le serveur natif reste la référence pour les
-> diagnostics et les types.
+> **Note (0.2).** Le compilateur embarque un LSP natif en SML (`yack lsp`,
+> voir `docs/lsp.md`). Cette section décrit un futur LSP auto-hébergé écrit en
+> Yack, avec `yack/lsp/rpc` et `yack/jsonderive`. Les deux peuvent coexister,
+> et le serveur natif reste la référence pour les diagnostics et les types.
 
 ```text
 yack/lsp/rpc     lecture/écriture des trames JSON-RPC
@@ -1070,7 +1209,7 @@ yack/lsp/server  boucle principale et dispatch
 yack/lsp/capabilities
 ```
 
-### 9.1 Framing JSON-RPC
+### 10.1 Framing JSON-RPC
 
 ```text
 Content-Length: 123\r\n
@@ -1087,11 +1226,11 @@ Le module `yack/lsp/rpc` doit :
 - ignorer les en-têtes inconnus ;
 - gérer `\r\n` et `\n`.
 
-Primitives manquantes : `io.read_line`, `io.read_exact`, `io.write_stdout`,
-`io.flush`. `io.read_stdin` actuel lit tout stdin, ce qui ne suffit pas pour un
-serveur interactif.
+Il manque encore `io.read_line`, `io.read_exact` et `io.flush`. `yack/file`
+fournit déjà `stdout` et `read_chunk`, donc un serveur interactif est
+possible, mais la couche `io` ligne à ligne reste à écrire.
 
-### 9.2 Types et décodeurs
+### 10.2 Types et décodeurs
 
 Les messages LSP sont des records avec beaucoup de champs. C'est le cas
 d'usage idéal de `yack json derive` :
@@ -1108,7 +1247,7 @@ fun range_from_json (value : json.value) : range result
 Pour les unions (`id : int | string`, `params` polymorphe), le générateur émet
 un `one_of` ou un `dynamic` laissé à l'utilisateur.
 
-### 9.3 Boucle serveur
+### 10.3 Boucle serveur
 
 Le serveur LSP reste mono-thread : une boucle récursive terminale lit une
 trame, dispatche, écrit la réponse, recommence. `sys.thread_spawn` existe pour
@@ -1119,53 +1258,47 @@ produisent pas de réponse. Les requêtes produisent une réponse avec le même
 Les handlers sont des fonctions de module, pas des valeurs : le dispatch est un
 `case` sur `method` qui appelle la fonction correspondante.
 
-## 11. Primitives compilateur manquantes
+## 11. Ce qui manque encore
 
-Classées par impact stdlib.
+Classé par impact sur la stdlib.
 
-### Bloquantes pour le LSP
+### Pour le LSP et le terminal
 
-1. `io.read_line : unit -> string result`
-2. `io.read_exact : int -> string result`
-3. `io.write_stderr : borrow string -> unit`
-4. `io.flush : unit -> unit`
-5. `string_to_float` / `float_to_string` (JSON nombres)
-6. `io.is_tty : unit -> bool`, taille du terminal (`ioctl TIOCGWINSZ`)
-7. mode raw / `termios`, `io.read_key`, `io.read_line` non bloquant
-8. décodage complet des paires de surrogates `\uD800\uDC00`
-9. `string_of_codepoint`/UTF-8 (car `string_of_char` est un octet)
+- `io.read_line` et `io.read_exact` : `yack/file.read_chunk` couvre le
+  streaming, mais `yack/io` n'a pas encore de lecture ligne à ligne ;
+- `io.is_tty` et la taille du terminal (`ioctl TIOCGWINSZ`) ;
+- mode raw / `termios`, `io.read_key`, `io.read_line` non bloquant ;
+- décodage complet des paires de surrogates `\uD800\uDC00` ;
+- `string_of_codepoint` et UTF-8, car `string_of_char` est un octet.
 
-### Bloquantes pour les collections
+### Pour les collections
 
-7. `array_swap : 'a array * int * int -> unit`
-8. variantes `borrow` de `array_get`/`array_length`/`array_set`/`map_get`/…
-9. `map_values`, `map_entries` (itération)
-10. map générique (hash/eq de clé)
+- `array_swap : 'a array * int * int -> unit`, qui bloque le tri d'un tableau
+  de chaînes ;
+- `map_values`, `map_entries` (itération) ;
+- une map générique (hash/eq de clé).
 
-### Bloquantes pour les types et l'ergonomie
+### Pour les types et l'ergonomie
 
-12. ✅ durées de vie non lexicales (emprunt nommé qui meurt au dernier usage)
-13. `clone`/`copy` explicite pour les types Affine
-14. `pub`/privé pour cacher `internal_*`
-15. alias de types (`type byte = int8`)
-16. `string_builder` pour la concaténation amortie
-17. fermetures capturantes (`E0511`)
-18. interfaces / type classes
-19. `val` déstructurant les tuples
-20. attributs (`@json`, `@derive`) ou macro pour `yack json derive`
+- ✅ durées de vie non lexicales (emprunt nommé qui meurt au dernier usage) ;
+- `clone`/`copy` explicite pour les types Affine ;
+- `pub`/privé pour cacher `internal_*` ;
+- alias de types (`type byte = int8`) ;
+- `string_builder` pour la concaténation amortie ;
+- fermetures capturantes (`E0511`) ;
+- interfaces / type classes ;
+- attributs (`@json`, `@derive`) ou macro pour `yack json derive`.
 
-### Bloquantes pour crypto/compress
+### Pour crypto/compress
 
-21. opérateurs bitwise `&`, `|`, `^`, `<<`, `>>`, `~`
-22. RNG de qualité cryptographique
-23. constant-time compare
+- opérateurs bitwise `&`, `|`, `^`, `<<`, `>>`, `~` ;
+- constant-time compare.
 
-### Bloquantes pour os/time
+### Pour os/time
 
-24. `chdir`, `stat`, `mkdir`, `remove`, `rename`, `readdir`
-25. `argv`/`env` natifs (le draft passe par `/proc` sur Linux)
-26. `open`/`close`/`read`/`write`/`seek` sur handles
-27. `clock`, `sleep`, `format_time`
+- `chdir` ;
+- `argv`/`env` natifs (aujourd'hui `yack/os` passe par `/proc` sur Linux) ;
+- fuseaux horaires et formats de date locaux, `format_utc` ne rend que l'UTC.
 
 ## 12. Conventions
 
@@ -1192,7 +1325,7 @@ Classées par impact stdlib.
 
 ## 13. Migration depuis la prelude
 
-Phase 0 (draft actuel) :
+Phase 0 (état actuel) :
 
 - `lib/yack` existe et compile ;
 - la prelude reste inchangée ;
@@ -1229,8 +1362,9 @@ Phase 2 :
   sortie 2 sur erreur ;
 - un test LSP de framing avec un flux `Content-Length` synthétique.
 
-Pas de framework de test pour l'instant : `yack/test` fournira des assertions
-et un `main` qui renvoie un code de sortie, quand `os.exit` existera.
+Pas de framework de test pour l'instant : `yack/test` n'existe pas encore. Les
+tests de la stdlib sont des programmes qui impriment un résultat stable, et
+`test/run.sh` compare cette sortie.
 
 ## 15. Roadmap
 
@@ -1239,10 +1373,10 @@ et un `main` qui renvoie un code de sortie, quand `os.exit` existera.
 | 0 | `bool`, `int`, `char`, `string`, `list`, `option`, `result`, `math`, `float`, `fmt`, `path` | aucune |
 | 1 | `array`, `map`, `bytes`, `sort`, `io`, `json` | threading, primitives IO |
 | 2 | `dynamic`, `json derive`, `lsp/rpc` | génération de code, `io.read_line` |
-| 3 | `os`, `time`, `random`, `log`, `test`, `flags` | syscalls |
+| 3 | `os`, `time`, `random`, `fs`, `file`, `process`, `log`, `test`, `flags` | syscalls ; `os`, `time`, `random`, `fs`, `file` et `process` sont livrés |
 | 3bis | `ansi`, `args`, `cli`, `term`, `tui` | déjà en place ; TUI interactif = `io.read_line`/termios |
 | 4 | `encoding/hex`, `base64`, `csv`, `toml`, `utf8` | pur |
-| 5 | `net`, `http`, `server`, `url` | syscalls réseau (déjà dans `lib/net`) |
+| 5 | `net`, `http`, `server`, `url` | syscalls réseau ; `yack/net` est livré, `lib/net` fournit epoll |
 | 6 | `crypto`, `compress`, `archive`, `image` | bitwise, RNG, IO |
 | 7 | `regexp`, `template`, `db` | closures/interfaces |
 
@@ -1268,3 +1402,7 @@ et un `main` qui renvoie un code de sortie, quand `os.exit` existera.
   génération de décodeurs par le language server.
 - Go `encoding/json` : `Marshal`/`Unmarshal`, tags de struct, `MarshalJSON`
   custom.
+
+`docs/sys-plan.md` décrit le plan des fonctions système (`time`, `random`,
+`fs`, `os`, `process`, `file`, `net`), toutes bâties sur un `extern` réservé à
+la stdlib.

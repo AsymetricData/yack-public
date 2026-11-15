@@ -1,0 +1,13 @@
+
+
+
+import yack/process
+
+fun main () =
+    case process.run_with
+             (borrow "/bin/cat", [],
+              { input = process.Text ("x"),
+                output = process.Capture,
+                errors = process.Capture }) of
+        Error (message) => print_string (message)
+      | Ok (result) => print_int (result.status)

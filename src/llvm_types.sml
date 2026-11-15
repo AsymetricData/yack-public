@@ -35,6 +35,7 @@ struct
     | llvmTy Ir.TToken = "i8"
     | llvmTy Ir.TResource = "i8"
     | llvmTy Ir.TString = "{ ptr, i64, i1 }"
+    | llvmTy Ir.TCPtr = "ptr"
     | llvmTy (Ir.TArray _) = "ptr"
     | llvmTy (Ir.TMap _) = "ptr"
     | llvmTy (Ir.TFun _) = "ptr"

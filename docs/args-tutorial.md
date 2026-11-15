@@ -3,8 +3,8 @@
 `yack/args` transforme une `string list` en options typées. Il ne lit jamais le
 processus lui-même : on lui passe `os.command_args ()`.
 
-Le point important : une **spec list** est une liste Yack ordinaire, donc elle
-s'écrit avec des crochets :
+Une **spec list** est une liste Yack ordinaire, donc elle s'écrit avec des
+crochets :
 
 ```yack
 [

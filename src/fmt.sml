@@ -612,6 +612,9 @@ struct
             (if ampersand then text "&" else text "borrow ") <+>
             (if mutable then text "mut " else empty) <+>
             ppAt state 6 operand
+        | Ast.EExtern _ =>
+            text "extern"
+
         | Ast.EFn (params, result, body, _) =>
             let
               val paramDocs =
@@ -800,18 +803,29 @@ struct
       val core =
         case declaration of
           Ast.DFun { name, params, result, recursive, body, ... } =>
-            let val bodyDoc = ppExpr state body in
-              group (
-                text (if recursive then "rec " else "fun ") <+>
-                text name <+> text " " <+>
-                ppParams params <+>
-                (case result of
-                   NONE => empty
-                 | SOME ty => text " : " <+> ppTy ty) <+>
-                text " =" <+>
-                nest 4 (line <+> bodyDoc)
-              )
-            end
+            (case body of
+               Ast.EExtern {symbol, ...} =>
+                 group (
+                   text "extern fun " <+> text name <+> text " " <+>
+                   ppParams params <+>
+                   (case result of
+                      NONE => empty
+                    | SOME ty => text " : " <+> ppTy ty) <+>
+                   text " = " <+> text ("\"" ^ symbol ^ "\"")
+                 )
+             | _ =>
+                 let val bodyDoc = ppExpr state body in
+                   group (
+                     text (if recursive then "rec " else "fun ") <+>
+                     text name <+> text " " <+>
+                     ppParams params <+>
+                     (case result of
+                        NONE => empty
+                      | SOME ty => text " : " <+> ppTy ty) <+>
+                     text " =" <+>
+                     nest 4 (line <+> bodyDoc)
+                   )
+                 end)
         | Ast.DFunClause { name, params, result, recursive, body, ... } =>
             let
               val paramDocs =
@@ -874,6 +888,22 @@ struct
         | Ast.DAlias { name, params, body, ... } =>
             text "type " <+> ppParamsPrefix params <+> text name <+>
             text " = " <+> ppTy body
+        | Ast.DExternRecord { name, size, fields, ... } =>
+            let
+              val fieldDocs =
+                List.map
+                  (fn (field, ty, offset) =>
+                    text field <+> text " : " <+> ppTy ty <+>
+                    text " @" <+> text (Int.toString offset))
+                  fields
+            in
+              group (
+                text "extern record " <+> text name <+>
+                text " (size = " <+> text (Int.toString size) <+> text ") {" <+>
+                nest 4 (line <+> join (text "," <+> line) fieldDocs) <+>
+                line <+> text "}"
+              )
+            end
         | Ast.DDatatype { name, params, declared, constructors, ... } =>
             let
               val constructorDocs = List.map ppConstructor constructors

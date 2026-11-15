@@ -1,0 +1,12 @@
+
+
+fun loop (values : string map, n : int) : int =
+    if n <= 0 then 0
+    else
+        let val _ = map_set (values, "key", int_to_string (n))
+        in loop (values, n - 1)
+        end
+
+fun main () =
+    let val values : string map = map_new ()
+    in print_int (loop (values, 1000000)) end

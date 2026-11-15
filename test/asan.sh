@@ -56,6 +56,15 @@ check alpage_tutorial examples/alpage_tutorial/src/test.yack
 
 check webapp_smoke examples/webapp/src/smoke.yack
 
+
+
+check process_run test/process.yack
+check process_fds test/process_fds.yack
+check process_high_fd test/process_high_fd.yack
+check net_resolve_test test/net/resolve.yack
+check net_timeout test/net/timeout.yack
+check file_seek test/file_seek.yack
+
 if [ "$failed" -ne 0 ]; then
   echo "asan checks failed"
   exit 1

@@ -1,0 +1,15 @@
+import yack/time
+
+fun main () =
+    let val epoch = time.format_utc (int_to_int64 (0))
+        val knownInput : int64 = 1700000000000
+        val known = time.format_utc (knownInput)
+        val before = time.monotonic_ms ()
+        val _ = time.sleep_ms (1)
+        val after = time.monotonic_ms ()
+        val wall = time.now_ms ()
+        val _ = print_string (epoch)
+        val _ = print_string (known)
+        val _ = print_int (if after > before then 1 else 0)
+    in print_int (if wall > knownInput then 1 else 0)
+    end

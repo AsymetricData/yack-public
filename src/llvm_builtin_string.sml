@@ -86,21 +86,27 @@ struct
       fun lowerIntToString (width, value) =
         let
           val length = fresh "int.str.len"
+          val size = fresh "int.str.size"
           val v0 = fresh "int.str.v0"
           val v1 = fresh "int.str.v1"
           val v2 = fresh "int.str.v2"
-          val memory = allocString "32"
+
+          val buffer = "@yack_fmt_buffer"
           val _ =
             if width = 64 then
-              emit ("call i32 @snprintf(ptr " ^ memory ^
+              emit ("call i32 @snprintf(ptr " ^ buffer ^
                     ", i64 32, ptr @.fmt_int64_plain, i64 " ^
                     #text (coerce (value, Ir.Int 64)) ^ ")")
             else
-              emit ("call i32 @snprintf(ptr " ^ memory ^
+              emit ("call i32 @snprintf(ptr " ^ buffer ^
                     ", i64 32, ptr @.fmt_int_plain, i32 " ^
                     #text (coerce (value, Ir.Int 32)) ^ ")")
           val _ =
-            emit (length ^ " = call i64 @strlen(ptr " ^ memory ^ ")")
+            emit (length ^ " = call i64 @strlen(ptr " ^ buffer ^ ")")
+          val _ = emit (size ^ " = add i64 " ^ length ^ ", 1")
+          val memory = allocString size
+          val _ = emit ("call ptr @memcpy(ptr " ^ memory ^ ", ptr " ^
+                        buffer ^ ", i64 " ^ size ^ ")")
           val _ =
             emit (v0 ^ " = insertvalue { ptr, i64, i1 } undef, ptr " ^
                   memory ^ ", 0")
@@ -247,7 +253,7 @@ struct
             val result = fresh "io.read.result"
             val _ =
               emit (fp ^ " = call ptr @fopen(ptr " ^ path ^
-                    ", ptr @.mode_rb)")
+                    ", ptr @.mode_rbe)")
             val _ =
               emit (isNull ^ " = icmp eq ptr " ^ fp ^ ", null")
             val _ =
@@ -451,7 +457,7 @@ struct
                     #text content ^ ", 1")
             val _ =
               emit (fp ^ " = call ptr @fopen(ptr " ^ path ^
-                    ", ptr @.mode_wb)")
+                    ", ptr @.mode_wbe)")
             val _ =
               emit (isNull ^ " = icmp eq ptr " ^ fp ^ ", null")
             val _ =
@@ -510,14 +516,19 @@ struct
           let
             val length = fresh "str.int.len"
             val length64 = fresh "str.int.len64"
+            val size = fresh "str.int.size"
             val v0 = fresh "str.int.v0"
             val v1 = fresh "str.int.v1"
             val v2 = fresh "str.int.v2"
-            val memory = allocString "32"
-            val _ = emit (length ^ " = call i32 @snprintf(ptr " ^ memory ^
+            val buffer = "@yack_fmt_buffer"
+            val _ = emit (length ^ " = call i32 @snprintf(ptr " ^ buffer ^
                           ", i64 32, ptr @.fmt_int_plain, i32 " ^
                           #text value ^ ")")
             val _ = emit (length64 ^ " = sext i32 " ^ length ^ " to i64")
+            val _ = emit (size ^ " = add i64 " ^ length64 ^ ", 1")
+            val memory = allocString size
+            val _ = emit ("call ptr @memcpy(ptr " ^ memory ^ ", ptr " ^
+                          buffer ^ ", i64 " ^ size ^ ")")
             val _ = emit (v0 ^ " = insertvalue { ptr, i64, i1 } undef, ptr " ^
                           memory ^ ", 0")
             val _ = emit (v1 ^ " = insertvalue { ptr, i64, i1 } " ^ v0 ^
@@ -531,14 +542,19 @@ struct
           let
             val length = fresh "str.float.len"
             val length64 = fresh "str.float.len64"
+            val size = fresh "str.float.size"
             val v0 = fresh "str.float.v0"
             val v1 = fresh "str.float.v1"
             val v2 = fresh "str.float.v2"
-            val memory = allocString "64"
-            val _ = emit (length ^ " = call i32 @snprintf(ptr " ^ memory ^
+            val buffer = "@yack_fmt_buffer"
+            val _ = emit (length ^ " = call i32 @snprintf(ptr " ^ buffer ^
                           ", i64 64, ptr @.fmt_float_plain, double " ^
                           #text value ^ ")")
             val _ = emit (length64 ^ " = sext i32 " ^ length ^ " to i64")
+            val _ = emit (size ^ " = add i64 " ^ length64 ^ ", 1")
+            val memory = allocString size
+            val _ = emit ("call ptr @memcpy(ptr " ^ memory ^ ", ptr " ^
+                          buffer ^ ", i64 " ^ size ^ ")")
             val _ = emit (v0 ^ " = insertvalue { ptr, i64, i1 } undef, ptr " ^
                           memory ^ ", 0")
             val _ = emit (v1 ^ " = insertvalue { ptr, i64, i1 } " ^ v0 ^

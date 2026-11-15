@@ -7,10 +7,15 @@ struct
 
   open LlvmTypes
 
+  fun intText value =
+    if value < Int64.fromInt 0 then "-" ^ Int64.toString (Int64.~ value)
+    else Int64.toString value
+
   fun generate (mode : Memory.mode, reserve : Int64.int, program : Ir.program) =
     let
       val functions = #functions program
       val datatypes = #datatypes program
+      val externs = #externs program
       val lines = ref []
       val counter = ref 0
       val stringLiterals = ref []
@@ -45,6 +50,7 @@ struct
       val currentFunctionName = ref ""
       val currentIsRecursive = ref false
       val currentNeedsRegion = ref true
+      val inPromotion = ref false
 
       val inEntryBlock = ref false
       val hasDynamicAlloca = ref false
@@ -203,6 +209,108 @@ struct
           slot
         end
 
+      val arenaMarks = ref ([] : (string * string) list)
+      fun arenaMark () =
+        let
+          val slot = allocStack (Ir.Int 64)
+          val savedSlot = allocStack (Ir.TCPtr)
+          val mark = fresh "arena.mark"
+        in
+          emit (mark ^ " = call i64 @yack_arena_mark(ptr %region, ptr " ^
+                savedSlot ^ ")");
+          emit ("store i64 " ^ mark ^ ", ptr " ^ slot);
+          arenaMarks := (slot, savedSlot) :: !arenaMarks
+        end
+      fun arenaRelease () =
+        case !arenaMarks of
+          [] => ()
+        | (slot, savedSlot) :: rest =>
+            ( arenaMarks := rest
+            ; let val mark = fresh "arena.mark"
+              in
+                emit (mark ^ " = load i64, ptr " ^ slot);
+                emit ("call void @yack_arena_release(ptr %region, i64 " ^
+                      mark ^ ", ptr " ^ savedSlot ^ ")")
+              end
+            )
+
+      fun irType expression =
+        case expression of
+          Ir.IntLit (_, ty) => ty
+        | Ir.FloatLit (_, ty) => ty
+        | Ir.StringLit (_, ty) => ty
+        | Ir.BoolLit _ => Ir.Bool
+        | Ir.UnitLit => Ir.Unit
+        | Ir.Var (_, ty, _) => ty
+        | Ir.Bin (_, _, _, ty, _) => ty
+        | Ir.Neg (_, ty) => ty
+        | Ir.Call (_, _, ty, _) => ty
+        | Ir.If (_, _, _, ty) => ty
+        | Ir.Let (_, body, _) => irType body
+        | Ir.Tuple (_, ty) => ty
+        | Ir.Record (_, ty) => ty
+        | Ir.Field (_, _, ty) => ty
+        | Ir.TupleIndex (_, _, ty) => ty
+        | Ir.RawField (_, _, ty) => ty
+        | Ir.Ctor (_, _, _, ty, _) => ty
+        | Ir.Match (_, _, ty) => ty
+        | Ir.PrintString _ => Ir.Unit
+        | Ir.StringBuiltin (_, _, ty, _) => ty
+        | Ir.BytesBuiltin (_, _, ty, _) => ty
+        | Ir.SysBuiltin (_, _, ty) => ty
+        | Ir.ArrayBuiltin (_, _, ty, _) => ty
+        | Ir.MapBuiltin (_, _, ty, _) => ty
+        | Ir.Copy (_, ty) => ty
+        | Ir.Borrow (_, _, ty) => ty
+        | Ir.Closure (_, ty) => ty
+        | Ir.ClosureRef (_, ty) => ty
+        | Ir.Apply (_, _, ty) => ty
+
+      fun safeLocalScope expression =
+        case expression of
+          Ir.IntLit _ => true
+        | Ir.FloatLit _ => true
+        | Ir.StringLit _ => true
+        | Ir.BoolLit _ => true
+        | Ir.UnitLit => true
+        | Ir.Var _ => true
+        | Ir.Closure _ => true
+        | Ir.ClosureRef _ => true
+        | Ir.Bin (_, left, right, _, _) =>
+            safeLocalScope left andalso safeLocalScope right
+        | Ir.Neg (value, _) => safeLocalScope value
+        | Ir.If (condition, thenBranch, elseBranch, _) =>
+            safeLocalScope condition andalso
+            safeLocalScope thenBranch andalso safeLocalScope elseBranch
+        | Ir.Let (bindings, body, _) =>
+            List.all (fn (_, _, value) => safeLocalScope value) bindings
+            andalso safeLocalScope body
+        | Ir.Tuple (values, _) => List.all safeLocalScope values
+        | Ir.Record (fields, _) =>
+            List.all (fn (_, value) => safeLocalScope value) fields
+        | Ir.Field (base, _, _) => safeLocalScope base
+        | Ir.TupleIndex (base, _, _) => safeLocalScope base
+        | Ir.RawField (base, _, _) => safeLocalScope base
+        | Ir.Ctor (_, _, argument, _, _) =>
+            (case argument of
+               SOME value => safeLocalScope value
+             | NONE => true)
+        | Ir.Match (scrutinee, branches, _) =>
+            safeLocalScope scrutinee andalso
+            List.all
+              (fn (_, guard, body, _) =>
+                 (case guard of
+                    SOME condition => safeLocalScope condition
+                  | NONE => true) andalso safeLocalScope body)
+              branches
+        | Ir.StringBuiltin (_, arguments, _, _) =>
+            List.all (fn (value, _) => safeLocalScope value) arguments
+        | Ir.BytesBuiltin (_, arguments, _, _) =>
+            List.all (fn (value, _) => safeLocalScope value) arguments
+        | Ir.Copy (value, _) => safeLocalScope value
+        | Ir.Borrow (_, value, _) => safeLocalScope value
+        | _ => false
+
       fun resultEscapes ty =
         case ty of
           Ir.Int _ => false
@@ -355,8 +463,14 @@ struct
         | _ => false
 
       fun rootString value =
-        let val reg = fresh "str.root" in
-          emit (reg ^ " = call { ptr, i64, i1 } @yack_string_root(" ^
+        let
+          val reg = fresh "str.root"
+
+          val function =
+            if stackMode andalso !inPromotion then "yack_string_promote"
+            else "yack_string_root"
+        in
+          emit (reg ^ " = call { ptr, i64, i1 } @" ^ function ^ "(" ^
                 typed value ^ ")");
           { text = reg, ty = Ir.TString, const = false }
         end
@@ -1084,7 +1198,15 @@ struct
             { text = "", ty = Ir.Unit, const = true }
           else if String.isPrefix "yack_arena_keep" name then
             (case lowered of
-               [value] => rootValue (value, resultTy)
+               [value] =>
+                 let
+                   val previous = !inPromotion
+                   val _ = inPromotion := true
+                   val promoted = rootValue (value, resultTy)
+                   val _ = inPromotion := previous
+                 in
+                   promoted
+                 end
              | _ => { text = "", ty = resultTy, const = true })
           else
             let
@@ -1097,7 +1219,11 @@ struct
                     val regionSlot = fresh "callregion"
                     val _ = emit (regionSlot ^ " = alloca %yack.region")
                     val dest =
-                      if !escaping then !currentDestArg else !currentRegionArg
+
+                      if stackMode andalso not (List.null (!arenaMarks))
+                      then !currentRegionArg
+                      else if !escaping then !currentDestArg
+                      else !currentRegionArg
                     val separator =
                       if argumentsText = "" then "" else ", "
                   in
@@ -1165,7 +1291,7 @@ struct
         | Ir.PInt (expected, _) =>
             let val reg = fresh "pat" in
               emit (reg ^ " = icmp eq " ^ llvmTy (#ty value) ^ " " ^
-                    #text value ^ ", " ^ Int64.toString expected);
+                    #text value ^ ", " ^ intText expected);
               emit ("br i1 " ^ reg ^ ", label %" ^ success ^
                     ", label %" ^ failure);
               (locals, [], [])
@@ -1734,7 +1860,7 @@ struct
       and lowerExprRaw locals expression =
         case expression of
           Ir.IntLit (value, ty) =>
-            { text = Int64.toString value, ty = ty, const = true }
+            { text = intText value, ty = ty, const = true }
         | Ir.FloatLit (value, ty) =>
             { text = floatText value, ty = ty, const = true }
         | Ir.StringLit (text, ty) =>
@@ -1885,6 +2011,24 @@ struct
             end
         | Ir.Let (bindings, body, drops) =>
             let
+              val useMark =
+                stackMode andalso
+                not (LowerEscape.hasPointers (irType body)) andalso
+                List.exists
+                  (fn (_, ty, value) =>
+                     LowerEscape.hasPointers ty andalso safeLocalScope value)
+                  bindings andalso
+                safeLocalScope body
+              val markSlot = if useMark then SOME (allocStack (Ir.Int 64)) else NONE
+              val _ =
+                case markSlot of
+                  SOME slot =>
+                    let val mark = fresh "let.mark"
+                    in
+                      emit (mark ^ " = call i64 @yack_region_mark(ptr %region)");
+                      emit ("store i64 " ^ mark ^ ", ptr " ^ slot)
+                    end
+                | NONE => ()
               fun bindOne ((name, _, valueExpr), locals) =
                 bindLocal locals name (lowerExpr locals valueExpr)
               val extended = List.foldl bindOne locals bindings
@@ -1896,6 +2040,16 @@ struct
                       SOME bound => dropValueSkipping (bound, ty, skip)
                     | NONE => ())
                   drops
+              val _ =
+                case markSlot of
+                  SOME slot =>
+                    let val mark = fresh "let.mark"
+                    in
+                      emit (mark ^ " = load i64, ptr " ^ slot);
+                      emit ("call void @yack_region_release(ptr %region, i64 " ^
+                            mark ^ ")")
+                    end
+                | NONE => ()
             in
               value
             end
@@ -1935,6 +2089,20 @@ struct
                     { text = reg, ty = fieldTy, const = false }
                   end
               | _ => value
+            end
+        | Ir.RawField (base, offset, ty) =>
+            let
+              val value = lowerExpr locals base
+              val pointer = fresh "raw.fieldp"
+              val reg = fresh "raw.field"
+              val _ =
+                emit (pointer ^ " = getelementptr i8, ptr " ^
+                      #text value ^ ", i64 " ^ Int.toString offset)
+              val _ =
+                emit (reg ^ " = load " ^ llvmTy ty ^ ", ptr " ^ pointer ^
+                      ", align 1")
+            in
+              { text = reg, ty = ty, const = false }
             end
         | Ir.TupleIndex (base, index, ty) =>
             let val value = lowerExpr locals base in
@@ -2036,7 +2204,9 @@ struct
                     val regionSlot = fresh "applyregion"
                     val _ = emit (regionSlot ^ " = alloca %yack.region")
                     val dest =
-                      if resultEscapes resultTy then !currentDestArg
+                      if stackMode andalso not (List.null (!arenaMarks))
+                      then !currentRegionArg
+                      else if resultEscapes resultTy then !currentDestArg
                       else !currentRegionArg
                     val separator =
                       if argumentText = "" then "" else ", "
@@ -2076,9 +2246,12 @@ struct
           , fresh = fresh
           , freshLabel = freshLabel
           , lowerExpr = lowerExpr
+          , allocString = allocStringForSite Ir.Current
           , stackMode = stackMode
           , enterArena = enterArena
           , leaveArena = leaveArena
+          , arenaMark = arenaMark
+          , arenaRelease = arenaRelease
           }
           (locals, name, arguments, resultTy)
       and lowerBytesBuiltin (locals, name, arguments, resultTy, site) =
@@ -2113,6 +2286,7 @@ struct
           , enterStoreRoot = enterStoreRoot
           , leaveStoreRoot = leaveStoreRoot
           , stackMode = stackMode
+          , inArena = fn () => not (List.null (!arenaMarks))
           , coerce = coerce
           , needsDrop = needsDrop
           , dropValue = dropValue
@@ -2139,6 +2313,7 @@ struct
           , leaveStoreRoot = leaveStoreRoot
           , currentFunctionName = !currentFunctionName
           , stackMode = stackMode
+          , inArena = fn () => not (List.null (!arenaMarks))
           }
           (locals, name, arguments, resultTy, siteRef)
       and lowerConcat (locals, operands, resultTy, site) =
@@ -2302,11 +2477,14 @@ struct
           , dropValueSkipping = dropValueSkipping
           , testPattern = testPattern
           , canTailCall = fn () => not (!hasDynamicAlloca)
+          , irType = irType
+          , safeLocalScope = safeLocalScope
           }
           functionDrops safeNames locals expression
       fun borrowRootName (Ir.Var (name, _, _)) = SOME name
         | borrowRootName (Ir.Field (base, _, _)) = borrowRootName base
         | borrowRootName (Ir.TupleIndex (base, _, _)) = borrowRootName base
+        | borrowRootName (Ir.RawField (base, _, _)) = borrowRootName base
         | borrowRootName _ = NONE
 
       fun collectBorrowRoots expression =
@@ -2339,6 +2517,7 @@ struct
                 List.app (fn (_, value) => walk value) fields
             | Ir.Field (base, _, _) => walk base
             | Ir.TupleIndex (base, _, _) => walk base
+            | Ir.RawField (base, _, _) => walk base
             | Ir.Ctor (_, _, argument, _, _) => walkOption argument
             | Ir.Match (scrutinee, branches, _) =>
                 ( walk scrutinee
@@ -2389,8 +2568,8 @@ struct
         end
       fun isPreludeOption name = StringSet.member (preludeOptionNames, name)
 
-      val (lowerFunction, generateDropFunction, generateCopyFunction,
-           generateRootFunction) =
+      val (lowerFunction, generateDropFunction, generateOwnerDropFunction,
+           generateCopyFunction, generateRootFunction) =
         LlvmFunction.lowerFunctionWith
           { emit = emit
           , fresh = fresh
@@ -2418,9 +2597,12 @@ struct
           , stackMode = stackMode
           , inEntryBlock = inEntryBlock
           , hasDynamicAlloca = hasDynamicAlloca
+          , resetArenaMarks = fn () => arenaMarks := []
           }
       val _ = List.app lowerFunction functions
       val _ = List.app generateDropFunction datatypes
+      val _ = if stackMode then List.app generateOwnerDropFunction datatypes
+              else ()
       val _ = List.app generateCopyFunction datatypes
       val _ = List.app generateRootFunction datatypes
 
@@ -2585,8 +2767,7 @@ struct
         AllocRuntime.runtime (mode, reserve, !debugAlloc, usesScratch,
                               usesThreads, Memory.traceEnabled ())
 
-      val preamble =
-        dataDeclarations @ nullaryDeclarations @ stringDeclarations @
+      val fixedDeclarations =
         [ ""
         , "@.fmt_int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\""
         , "@.fmt_int_plain = private unnamed_addr constant [3 x i8] c\"%d\\00\""
@@ -2596,9 +2777,10 @@ struct
         , "@.fmt_span = private unnamed_addr constant [5 x i8] c\"%.*s\\00\""
         , "@.fmt_int64 = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\""
         , "@.fmt_int64_plain = private unnamed_addr constant [5 x i8] c\"%lld\\00\""
-        , "@.mode_rb = private unnamed_addr constant [3 x i8] c\"rb\\00\""
-        , "@.mode_wb = private unnamed_addr constant [3 x i8] c\"wb\\00\""
+        , "@.mode_rbe = private unnamed_addr constant [4 x i8] c\"rbe\\00\""
+        , "@.mode_wbe = private unnamed_addr constant [4 x i8] c\"wbe\\00\""
         , "@stdin = external global ptr"
+        , "@yack_fmt_buffer = thread_local global [64 x i8] zeroinitializer"
         , "declare i32 @printf(ptr, ...) #1"
         , "declare void @abort() noreturn"
         , "declare ptr @memcpy(ptr, ptr, i64) #1"
@@ -2650,6 +2832,61 @@ struct
         , "declare i32 @sqlite3_changes(ptr) #1"
         , "declare ptr @sqlite3_errmsg(ptr) #1"
         , ""
+        ]
+
+      fun symbolOfDeclaration line =
+        if String.isPrefix "declare " line then
+          let
+            val body = String.substring (line, 8, String.size line - 8)
+            fun beforeAt index =
+              if index >= String.size body then NONE
+              else if String.sub (body, index) = #"@" then
+                let
+                  fun take position acc =
+                    if position >= String.size body then String.implode (List.rev acc)
+                    else if String.sub (body, position) = #"(" then
+                      String.implode (List.rev acc)
+                    else take (position + 1) (String.sub (body, position) :: acc)
+                in
+                  SOME (take (index + 1) [])
+                end
+              else beforeAt (index + 1)
+          in
+            beforeAt 0
+          end
+        else NONE
+      val declaredSymbols =
+        List.mapPartial symbolOfDeclaration
+          (dataDeclarations @ nullaryDeclarations @ stringDeclarations @
+           fixedDeclarations)
+      fun isDeclared symbol =
+        List.exists (fn candidate => candidate = symbol) declaredSymbols
+      val externDeclarations =
+        List.filter
+          (fn (declaration : Ir.externDecl) =>
+            not (isDeclared (#symbol declaration)))
+          externs
+      val externLines =
+        List.map
+          (fn {symbol, parameters, result} =>
+            let
+              fun cParameter ty =
+                case ty of
+                  Ir.TString => "ptr"
+                | Ir.TBorrow (Ir.TString, _) => "ptr"
+                | _ => llvmTy ty
+              val resultText =
+                if isUnit result then "void" else llvmTy result
+            in
+              "declare " ^ resultText ^ " @" ^ symbol ^ "(" ^
+              String.concatWith ", " (List.map cParameter parameters) ^ ")"
+            end)
+          externDeclarations
+
+      val preamble =
+        dataDeclarations @ nullaryDeclarations @ stringDeclarations @
+        fixedDeclarations @ externLines @
+        [ ""
         , "attributes #0 = { nounwind readonly willreturn }"
         , "attributes #1 = { nounwind willreturn }"
         , "attributes #2 = { nounwind allocsize(0) willreturn }"
@@ -2663,9 +2900,10 @@ struct
             if stackMode then
               [ "define i32 @main() {"
               , "entry:"
-              , "  call void @yack_region_init(ptr @yack_root_region)"
+              , "  call void @yack_root_init()"
+              , "  call void @yack_region_init(ptr @yack_main_region, ptr @yack_root_region)"
               , "  call void @" ^ name ^
-                "(ptr @yack_root_region, ptr @yack_root_region)"
+                "(ptr @yack_main_region, ptr @yack_root_region)"
               , "  ret i32 0"
               , "}"
               ]

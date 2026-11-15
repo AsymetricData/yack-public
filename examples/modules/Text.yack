@@ -1,5 +1,6 @@
+import yack/string
 fun length (text : string) : int =
-    string_length (borrow text)
+    string.length (borrow text)
 
 fun join (left : string, right : string) : string =
     left ^ right

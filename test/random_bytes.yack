@@ -1,0 +1,9 @@
+
+
+import yack/array
+import yack/random
+
+fun main () =
+    case random.bytes (1000) of
+        Error (message) => print_string (message)
+      | Ok (data) => print_int (array.length (borrow data))

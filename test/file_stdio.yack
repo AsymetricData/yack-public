@@ -1,0 +1,29 @@
+
+
+
+import yack/array
+import yack/bytes
+import yack/file
+
+fun main () =
+    let val input = file.stdin ()
+        val output = file.stdout ()
+        val buffer : int8 array = array_make_uninit (32)
+    in
+        case file.read_chunk (borrow input, borrow buffer) of
+            Error (message) =>
+                let val _ = file.close (input)
+                    val _ = file.close (output)
+                in print_string (message)
+                end
+          | Ok (count) =>
+                let val data = bytes.slice (buffer, 0, count)
+                    val wrote = file.write_all (borrow output, data)
+                    val _ = file.close (input)
+                    val _ = file.close (output)
+                in
+                    case wrote of
+                        Error (message) => print_string (message)
+                      | Ok (_) => ()
+                end
+    end

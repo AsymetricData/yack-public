@@ -1,0 +1,14 @@
+fun render (n : int) : string =
+    "response-" ^ int_to_string (n) ^ "-0123456789abcdef0123456789abcdef"
+
+fun serve (i : int, total : int, n : int) : int =
+    if i >= n then total
+    else
+        let val size = arena
+                           val text = render (i)
+                       in string_length (borrow text)
+                       end
+        in serve (i + 1, total + size, n)
+        end
+
+fun main () = print_int (serve (0, 0, 200000))

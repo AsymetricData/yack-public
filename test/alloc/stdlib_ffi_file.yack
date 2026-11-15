@@ -1,0 +1,54 @@
+import yack/array
+import yack/bytes
+import yack/file
+import yack/fs
+
+fun write_once () : unit =
+    case file.open (borrow "/tmp/yack-leak-file", file.Write) of
+        Error (_) => ()
+      | Ok (handle) =>
+            let val payload = bytes.from_string (borrow "hello")
+                val _ = file.write (borrow handle, borrow payload)
+                val _ = file.close (handle)
+            in ()
+            end
+
+fun read_once () : unit =
+    case file.open (borrow "/tmp/yack-leak-file", file.Read) of
+        Error (_) => ()
+      | Ok (handle) =>
+            let val buffer : int8 array = array_make_uninit (5)
+                val _ = file.read_chunk (borrow handle, borrow buffer)
+                val _ = file.close (handle)
+            in ()
+            end
+
+fun loop_write (remaining : int) : unit =
+    if remaining <= 0 then ()
+    else
+        let val _ = write_once ()
+        in loop_write (remaining - 1)
+        end
+
+fun loop_read (remaining : int) : unit =
+    if remaining <= 0 then ()
+    else
+        let val _ = read_once ()
+        in loop_read (remaining - 1)
+        end
+
+fun count_fds () : int =
+    case fs.list_dir (borrow "/proc/self/fd") of
+        Ok (entries) => list_length (entries)
+      | Error (_) => -1
+
+fun main () =
+    let val before = count_fds ()
+        val _ = loop_write (200)
+        val _ = loop_read (200)
+        val after = count_fds ()
+    in
+        case fs.remove (borrow "/tmp/yack-leak-file") of
+            Ok (_) => print_int (after - before)
+          | Error (_) => print_int (after - before)
+    end

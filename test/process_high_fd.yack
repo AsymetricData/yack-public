@@ -1,0 +1,69 @@
+
+
+
+
+import yack/file
+import yack/fs
+import yack/io
+import yack/process
+import yack/string
+
+fun open_dummies (remaining : int, acc : file.handle list) : file.handle list =
+    if remaining <= 0 then acc
+    else
+        case file.open (borrow "/dev/null", file.Read) of
+            Error (_) => acc
+          | Ok (handle) => open_dummies (remaining - 1, Cons ((handle, acc)))
+
+fun close_dummies (handles : file.handle list) : unit =
+    case handles of
+        Nil => ()
+      | Cons (handle, rest) =>
+            let val _ = file.close (handle)
+            in close_dummies (rest)
+            end
+
+fun main () =
+    let val dummies = open_dummies (8, Nil)
+        val path = "/tmp/yack-process-high-fd"
+        val _ = fs.remove (borrow path)
+    in
+        case file.open (borrow path, file.Write) of
+            Error (_) =>
+                let val _ = close_dummies (dummies)
+                in print_int (-1)
+                end
+          | Ok (handle) =>
+                let val descriptor = handle.descriptor
+                    val outcome =
+                        process.run_with
+                            (borrow "/bin/sh", ["-c", "printf high-fd"],
+                             { input = process.Inherit,
+                               output = process.To_fd (descriptor),
+                               errors = process.Capture })
+                    val _ = file.close (handle)
+                    val _ = close_dummies (dummies)
+                    val text =
+                        case io.read_file (string_copy (borrow path)) of
+                            Ok (value) => value
+                          | Error (_) => ""
+                    val _ = fs.remove (borrow path)
+                in
+                    case outcome of
+                        Error (message) => print_string (message)
+                      | Ok (result) =>
+                            let val _ =
+                                    if result.status = 0 then ()
+                                    else print_int (result.status)
+                            in
+                                let val _ =
+                                        if descriptor >= 10 then print_int (1)
+                                        else print_int (0)
+                                in
+                                    if string.equals (borrow text, borrow "high-fd")
+                                    then print_int (1)
+                                    else print_int (0)
+                                end
+                            end
+                end
+    end

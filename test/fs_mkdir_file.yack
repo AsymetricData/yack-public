@@ -1,0 +1,24 @@
+
+
+import yack/fs
+import yack/string
+
+fun main () =
+    let val path = "/tmp/yack-fs-mkdir-file"
+        val _ = fs.remove (borrow path)
+    in
+        case fs.append_file (borrow path, borrow "x") of
+            Error (message) => print_string (message)
+          | Ok (_) =>
+                let val outcome = fs.mkdir_all (borrow path)
+                    val _ = fs.remove (borrow path)
+                in
+                    case outcome of
+                        Error (message) =>
+                            if string.contains
+                                   (borrow message, borrow "not a directory")
+                            then print_string ("ok")
+                            else print_string (message)
+                      | Ok (_) => print_string ("FAIL")
+                end
+    end

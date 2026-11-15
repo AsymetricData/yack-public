@@ -1,0 +1,17 @@
+
+fun main () =
+    let val values : string array = array_new ()
+        val _ = array_push (values, "a")
+        val _ = array_push (values, "bb")
+        val _ = array_set (values, 0, "ccc")
+        val old = array_take (values, 1)
+        val _ = array_put (values, 1, old)
+        val first = string_copy (array_get_borrow (values, 0))
+        val second = string_copy (array_get_borrow (values, 1))
+    in
+        let val _ = print_int (string_length (borrow first))
+            val _ = print_int (string_length (borrow second))
+            val _ = print_int (array_length (values))
+        in print_int (string_length (borrow first) + string_length (borrow second))
+        end
+    end

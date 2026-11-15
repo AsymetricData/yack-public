@@ -575,37 +575,56 @@ struct
 
                   type exports =
                     { functions : string list
+                    , externs : string list
                     , types : string list
                     , constructors : string list
                     }
 
                   val emptyExports =
-                    { functions = [], types = [], constructors = [] }
+                    { functions = [], externs = [], types = [], constructors = [] }
 
                   fun member name names =
                     List.exists (fn candidate => candidate = name) names
+
+                  fun isExternBody body =
+                    case body of
+                      Ast.EExtern _ => true
+                    | _ => false
 
                   fun exportsOf program =
                     List.foldl
                       (fn (declaration, exports) =>
                         case declaration of
-                          Ast.DFun {name, ...} =>
+                          Ast.DFun {name, body, ...} =>
                             { functions = name :: #functions exports
+                            , externs =
+                                if isExternBody body then
+                                  name :: #externs exports
+                                else #externs exports
                             , types = #types exports
                             , constructors = #constructors exports
                             }
                         | Ast.DType {name, ...} =>
                             { functions = #functions exports
+                            , externs = #externs exports
                             , types = name :: #types exports
                             , constructors = #constructors exports
                             }
                         | Ast.DAlias {name, ...} =>
                             { functions = #functions exports
+                            , externs = #externs exports
+                            , types = name :: #types exports
+                            , constructors = #constructors exports
+                            }
+                        | Ast.DExternRecord {name, ...} =>
+                            { functions = #functions exports
+                            , externs = #externs exports
                             , types = name :: #types exports
                             , constructors = #constructors exports
                             }
                         | Ast.DDatatype {name, constructors, ...} =>
                             { functions = #functions exports
+                            , externs = #externs exports
                             , types = name :: #types exports
                             , constructors =
                                 List.map
@@ -705,7 +724,17 @@ struct
                                        , types = #types imports
                                        })
                               fun addValue (name, alias, imports) =
-                                if not (member name (#functions exports) orelse
+                                if member name (#externs exports) then
+                                  ( reportQualify
+                                      ( "E3043"
+                                      , "`" ^ name ^ "` is an extern private to module `" ^
+                                        pathText path ^ "`"
+                                      , span
+                                      , ["an extern is not exported, even inside the standard library"]
+                                      , ["write a public wrapper in `" ^
+                                         pathText path ^ "` and import that"] )
+                                  ; imports )
+                                else if not (member name (#functions exports) orelse
                                         member name (#constructors exports)) then
                                   ( reportQualify
                                       ( "E3031"
@@ -1211,6 +1240,7 @@ struct
                               , span
                               )
                           end
+                      | Ast.EExtern _ => expression
                     end
 
                   and rewritePattern
@@ -1397,6 +1427,18 @@ struct
                                   constructors
                             , span = span
                             }
+                      | Ast.DExternRecord {name, nameSpan, size, fields, span} =>
+                          Ast.DExternRecord
+                            { name = qualify name
+                            , nameSpan = nameSpan
+                            , size = size
+                            , fields =
+                                List.map
+                                  (fn (field, ty, offset) =>
+                                    (field, rewriteTypeHere ty, offset))
+                                  fields
+                            , span = span
+                            }
                       | _ => declaration
                     end
 
@@ -1520,6 +1562,8 @@ struct
                         case #kind binding of
                           Resolve.Builtin =>
                             if LowerBuiltins.isReservedArrayKernel (#name binding)
+                               orelse LowerBuiltins.isReservedExternView (#name binding)
+                               orelse LowerBuiltins.isReservedBytes (#name binding)
                             then (#id binding, #name binding) :: found
                             else found
                         | _ => found)
@@ -1537,18 +1581,121 @@ struct
                         | SOME name =>
                             if not (kernelAllowed (Pos.file (#start (#span use))))
                             then
+                              let
+                                val isView = LowerBuiltins.isReservedExternView name
+                                val isBytes = LowerBuiltins.isReservedBytes name
+                                val isScratch = LowerBuiltins.isReservedScratch name
+                              in
+                                SOME
+                                  (Diag.error
+                                     ( "E3042"
+                                     , "`" ^ name ^ "` is " ^
+                                       (if isView then "an extern record primitive"
+                                        else if isBytes then "an internal byte primitive"
+                                        else if isScratch then "an internal arena primitive"
+                                        else "an internal array primitive")
+                                     , #span use
+                                     , [ if isView then
+                                           "it can reinterpret any byte buffer as a typed C struct"
+                                         else if isBytes then
+                                           "it writes raw bytes with an absolute limit and no bounds check"
+                                         else if isScratch then
+                                           "it manipulates the arena scope markers directly"
+                                         else
+                                           "it reads or writes a slot without testing the index" ]
+                                     , [ if isView then
+                                           "write the view in the standard library, next to the extern record declaration"
+                                         else if isBytes then
+                                           "use `yack/bytes` (`to_string_range`, `write_string`, `write_int`)"
+                                         else if isScratch then
+                                           "use an `arena` block"
+                                         else
+                                           "use the checked functions of `yack/array` (`array.get`, `array.set`, `array.push`)" ]
+                                     ))
+                              end
+                            else NONE)
+                      (#uses resolved)
+
+                  val externDeclarations =
+                    List.mapPartial
+                      (fn declaration =>
+                        case declaration of
+                          Ast.DFun {name, nameSpan, body = Ast.EExtern _, ...} =>
+                            SOME (name, nameSpan)
+                        | _ => NONE)
+                      program
+                  val externRecordDeclarations =
+                    List.mapPartial
+                      (fn declaration =>
+                        case declaration of
+                          Ast.DExternRecord {name, nameSpan, ...} =>
+                            SOME (name, nameSpan)
+                        | _ => NONE)
+                      program
+                  val externRecordDiagnostics =
+                    List.mapPartial
+                      (fn (name, nameSpan) =>
+                        if kernelAllowed (Pos.file (#start nameSpan)) then NONE
+                        else
+                          SOME
+                            (Diag.error
+                               ( "E3042"
+                               , "`" ^ Diag.displayName name ^
+                                 "` is an extern record declared outside the standard library"
+                               , nameSpan
+                               , ["extern records describe raw C memory"]
+                               , [ "move the declaration to the resolved standard library" ])))
+                      externRecordDeclarations
+                  val externFiles =
+                    List.map
+                      (fn (name, nameSpan) =>
+                        (name, Pos.file (#start nameSpan)))
+                      externDeclarations
+                  fun externFileOf bindingId =
+                    case List.find
+                           (fn (binding : Resolve.binding) =>
+                             #id binding = bindingId)
+                           (#bindings resolved) of
+                      NONE => NONE
+                    | SOME binding =>
+                        (case List.find
+                                (fn (name, file) => name = #name binding)
+                                externFiles of
+                           SOME (_, file) => SOME (#name binding, file)
+                         | NONE => NONE)
+                  val externDeclarationDiagnostics =
+                    List.mapPartial
+                      (fn (name, nameSpan) =>
+                        if kernelAllowed (Pos.file (#start nameSpan)) then NONE
+                        else
+                          SOME
+                            (Diag.error
+                               ( "E3042"
+                               , "`" ^ Diag.displayName name ^
+                                 "` is an extern declared outside the standard library"
+                               , nameSpan
+                               , ["extern exposes libc without a checked wrapper"]
+                               , [ "move the declaration to the resolved standard library"
+                                 , "user code calls the typed functions of `yack/time`, `yack/fs`, ..."
+                                 ]
+                               )))
+                      externDeclarations
+                  val externUseDiagnostics =
+                    List.mapPartial
+                      (fn (use : Resolve.use) =>
+                        case externFileOf (#binding use) of
+                          NONE => NONE
+                        | SOME (name, file) =>
+                            if Pos.file (#start (#span use)) = file then NONE
+                            else
                               SOME
                                 (Diag.error
-                                   ( "E3042"
-                                   , "`" ^ name ^
-                                     "` is an internal array primitive"
+                                   ( "E3043"
+                                   , "`" ^ Diag.displayName name ^
+                                     "` is an extern private to its module"
                                    , #span use
-                                   , [ "it reads or writes a slot without testing the index" ]
-                                   , [ "use the checked functions of `yack/array` (`array.get`, `array.set`, `array.push`)"
-                                     , "the kernel is reserved to the standard library"
-                                     ]
-                                   ))
-                            else NONE)
+                                   , ["an extern is never exported by its module"]
+                                   , [ "import the public wrapper of that module instead" ])))
                       (#uses resolved)
                   val unusedWarnings =
                     List.map
@@ -1570,7 +1717,9 @@ struct
                            andalso userOwnsBinding binding)
                          (Resolve.unusedFunctions resolved))
                   val resolutionDiagnostics =
-                    resolutionDiagnostics @ unusedWarnings @ kernelDiagnostics
+                    resolutionDiagnostics @ unusedWarnings @ kernelDiagnostics @
+                    externDeclarationDiagnostics @ externUseDiagnostics @
+                    externRecordDiagnostics
                   val qualifyDiagnostics' = List.rev (!qualifyDiagnostics)
                 in
                   #report options (!sources, qualifyDiagnostics');

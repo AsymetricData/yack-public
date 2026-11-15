@@ -6,6 +6,7 @@ import web/Response
 import web/Router
 import web/Server
 import yack/io
+import yack/string
 
 fun home (request : consume Request.t, params : consume (string, string) list) : Response.t =
     let val title = "Yack web"
@@ -73,7 +74,7 @@ fun login (request : consume Request.t, params : consume (string, string) list) 
               val display =
                   let val text = borrow user
                   in
-                      string_copy (text)
+                      string.copy (text)
                   end
           in
               Response.text ("logged in as " ^ display)

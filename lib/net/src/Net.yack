@@ -1,23 +1,48 @@
+import yack/net as raw_net
+
 type listener : Linear = { fd : int }
 type stream : Linear = { fd : int }
 
-fun listen (port : int) : listener result =
+(* Résout un nom en adresses numériques.
+   - `host` : nom ou adresse emprunté. *)
+fun resolve (host : borrow string) : string list result = raw_net.resolve (host)
+
+(* Ouvre une connexion TCP vers un hôte nommé ou une adresse.
+   - `host` : nom ou adresse emprunté.
+   - `port` : port TCP. *)
+fun connect (host : borrow string, port : int) : stream result =
+    case raw_net.connect (host, port) of
+        Error (message) => Error (message)
+      | Ok (connection) => Ok ({ fd = raw_net.into_fd (connection) })
+
+fun connect_timeout
+    (host : borrow string, port : int, timeout_ms : int) : stream result =
+    case raw_net.connect_timeout (host, port, timeout_ms) of
+        Error (message) => Error (message)
+      | Ok (connection) => Ok ({ fd = raw_net.into_fd (connection) })
+
+fun bind_listener
+    (name : borrow string, port : int, shared : bool) : listener result =
     let val fd = sys.socket_tcp ()
     in if fd < 0 then
-           Error ("socket failed")
+           let val error = sys.errno ()
+           in Error (string_copy (name) ^ ": socket failed (errno " ^ string_of_int (error) ^ ")")
+           end
        else
            let val _ = sys.reuseaddr (fd)
-               val _ = sys.reuseport (fd)
+               val _ = if shared then sys.reuseport (fd) else 0
                val bound = sys.bind_any (fd, port)
            in if bound < 0 then
-                  let val _ = sys.close (fd)
-                  in Error ("bind failed")
+                  let val error = sys.errno ()
+                      val _ = sys.close (fd)
+                  in Error (string_copy (name) ^ ": bind failed (errno " ^ string_of_int (error) ^ ")")
                   end
               else
                   let val listening = sys.listen (fd, 128)
                   in if listening < 0 then
-                         let val _ = sys.close (fd)
-                         in Error ("listen failed")
+                         let val error = sys.errno ()
+                             val _ = sys.close (fd)
+                         in Error (string_copy (name) ^ ": listen failed (errno " ^ string_of_int (error) ^ ")")
                          end
                      else
                          let val value : listener = { fd = fd }
@@ -25,6 +50,23 @@ fun listen (port : int) : listener result =
                          end
                   end
            end
+    end
+
+(* Ouvre un port d'écoute exclusif.
+   - `port` : port TCP, `0` pour en choisir un libre.
+
+   Un second processus sur le même port échoue avec EADDRINUSE (98). *)
+fun listen (port : int) : listener result =
+    let val name = "Net.listen"
+    in bind_listener (borrow name, port, false)
+    end
+
+(* Ouvre un port d'écoute partageable avec SO_REUSEPORT : plusieurs
+   processus peuvent s'y lier et le noyau répartit les connexions.
+   - `port` : port TCP, `0` pour en choisir un libre. *)
+fun listen_shared (port : int) : listener result =
+    let val name = "Net.listen_shared"
+    in bind_listener (borrow name, port, true)
     end
 
 fun listener_fd (value : borrow listener) : int =

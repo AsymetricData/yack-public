@@ -1,6 +1,7 @@
 import yack/list
+import yack/string
 
-fun string_size (s : string) : int = string_length (borrow s)
+fun string_size (s : string) : int = string.length (borrow s)
 fun add_pair (pair : int * int) : int =
     case pair of
         (acc, x) => acc + x

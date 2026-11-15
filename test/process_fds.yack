@@ -1,0 +1,30 @@
+
+
+
+
+import yack/process
+
+fun run_case
+    (command : borrow string, output : process.destination,
+     errors : process.destination) : unit =
+    case process.run_with
+             (borrow "/bin/sh", ["-c", string_copy (command)],
+              { input = process.Inherit, output = output, errors = errors }) of
+        Error (message) => print_string (message)
+      | Ok (_) => ()
+
+fun main () =
+    let val _ =
+            run_case
+                (borrow "echo child-stdout", process.To_fd (1), process.Capture)
+        val _ =
+            run_case
+                (borrow "echo merged-stderr >&2", process.Capture,
+                 process.To_fd (1))
+        val _ =
+            run_case
+                (borrow "echo child-out2", process.To_fd (2), process.Capture)
+    in
+        run_case
+            (borrow "echo child-stderr >&2", process.Capture, process.To_fd (2))
+    end

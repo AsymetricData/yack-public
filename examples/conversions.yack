@@ -1,3 +1,4 @@
+import yack/string
 fun parse_or_zero (text : borrow string) : int =
     case string_to_int (text) of
         None => 0
@@ -18,8 +19,8 @@ fun main () =
         val tooBigValue = parse_or_zero (borrow tooBig)
         val some = option_is_some (string_to_int (borrow positive))
     in
-        print_int (string_length (borrow rendered) * 10000000
-                   + string_length (borrow renderedNeg) * 1000000
+        print_int (string.length (borrow rendered) * 10000000
+                   + string.length (borrow renderedNeg) * 1000000
                    + (0 - negativeValue) * 10000
                    + positiveValue * 10
                    + invalidValue + emptyValue + tooBigValue

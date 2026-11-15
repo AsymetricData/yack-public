@@ -1,7 +1,12 @@
 structure Ir =
 struct
 
-  datatype discipline = DCopy | DAffine | DLinear
+  datatype discipline =
+      DCopy
+    | DAffine
+    | DLinear
+
+    | DExtern of (string * int) list * int
 
   datatype ty =
       Int of int
@@ -15,6 +20,7 @@ struct
     | TToken
     | TResource
     | TString
+    | TCPtr
     | TArray of ty
     | TMap of ty
     | TFun of ty list * ty
@@ -60,6 +66,8 @@ struct
     | Record of (string * expr) list * ty
     | Field of expr * int * ty
     | TupleIndex of expr * int * ty
+
+    | RawField of expr * int * ty
     | Ctor of string * string * expr option * ty * allocSite ref
     | Match of expr * (pattern * expr option * expr * drop list) list * ty
     | PrintString of expr * bool
@@ -97,9 +105,17 @@ struct
     , borrowed : string list
     }
 
+  type externDecl =
+    { symbol : string
+    , parameters : ty list
+    , result : ty
+    }
+
   type program =
     { datatypes : dataDef list
     , functions : funDef list
+
+    , externs : externDecl list
     }
 
   fun linearPaths isLinearData (ty, skip) =
@@ -155,9 +171,11 @@ struct
         | Bool => true
         | Unit => true
         | TBorrow (_, false) => true
+        | TCPtr => true
         | TFun _ => true
         | TData (_, _, isCopy) => isCopy
         | TTuple types => List.all copy types
+        | TRecord (_, DExtern _) => true
         | TRecord (_, discipline) => discipline = DCopy
         | _ => false
     in
@@ -167,6 +185,7 @@ struct
   fun disciplinePrefix DCopy = "copy "
     | disciplinePrefix DAffine = ""
     | disciplinePrefix DLinear = "linear "
+    | disciplinePrefix (DExtern _) = "extern "
 
   fun tyToString (Int width) =
         if width = 32 then "int" else "int" ^ Int.toString width
@@ -193,6 +212,7 @@ struct
     | tyToString TToken = "token"
     | tyToString TResource = "resource"
     | tyToString TString = "string"
+    | tyToString TCPtr = "c_ptr"
     | tyToString (TArray ty) = tyToString ty ^ " array"
     | tyToString (TMap ty) = tyToString ty ^ " map"
     | tyToString (TFun (params, result)) =
@@ -278,6 +298,8 @@ struct
         exprToString base ^ "." ^ Int.toString index
     | TupleIndex (base, index, _) =>
         exprToString base ^ "." ^ Int.toString index
+    | RawField (base, offset, _) =>
+        exprToString base ^ "@" ^ Int.toString offset
     | Ctor (_, constructor, NONE, _, _) => constructor
     | Ctor (_, constructor, SOME argument, _, _) =>
         constructor ^ " (" ^ exprToString argument ^ ")"
@@ -368,6 +390,7 @@ struct
             List.exists (fn (_, value) => loop value) fields
         | Field (base, _, _) => loop base
         | TupleIndex (base, _, _) => loop base
+        | RawField (base, _, _) => loop base
         | Ctor (_, _, NONE, _, _) => false
         | Ctor (_, _, SOME value, _, _) => loop value
         | Match (scrutinee, branches, _) =>

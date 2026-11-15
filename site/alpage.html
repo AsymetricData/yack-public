@@ -31,11 +31,12 @@
     <main id="content">
         <div class="tut-hero">
             <p class="eyebrow">Tutorial · about 30 minutes</p>
-            <h1>A web API with Alpage, <span class="accent">step by step.</span></h1>
+            <h1>A small web API with Alpage</h1>
             <p class="lead">
                 Build a small JSON service: routes, query and path parameters, a JSON body,
-                an auth middleware and in-memory tests. Each step shows what you would write
-                in your current language, then the Yack version and why it differs.
+                an auth middleware and in-memory tests. Each step shows the code you would
+                write in Go, TypeScript or Gleam first, then the Yack version and the reason it
+                differs.
             </p>
             <ul class="from-langs" aria-label="Written for developers coming from">
                 <li>coming from <strong>Go</strong></li>
@@ -48,12 +49,12 @@
             <nav class="toc" aria-label="Tutorial steps">
                 <p>Steps</p>
                 <ol>
-                    <li><a href="#mindset">Change of habits</a></li>
+                    <li><a href="#mindset">What changes</a></li>
                     <li><a href="#setup">A project</a></li>
                     <li><a href="#handler">First handler</a></li>
                     <li><a href="#ownership">Query string and ownership</a></li>
-                    <li><a href="#params">Path parameters, without closures</a></li>
-                    <li><a href="#json">JSON body, errors as values</a></li>
+                    <li><a href="#params">Path parameters and callbacks</a></li>
+                    <li><a href="#json">JSON bodies and errors</a></li>
                     <li><a href="#app">The application is a value</a></li>
                     <li><a href="#middleware">Middleware</a></li>
                     <li><a href="#testing">Testing without a socket</a></li>
@@ -65,11 +66,12 @@
             <div class="tut-body">
                 <section class="step" id="mindset" aria-labelledby="mindset-title">
                     <span class="step-num">Step 01</span>
-                    <h2 id="mindset-title">Change of habits</h2>
+                    <h2 id="mindset-title">What changes</h2>
                     <p>
                         Alpage is a small web framework written in Yack. If you have written a
-                        handler in Go, Express or Wisp, nothing here is exotic: routes, handlers,
-                        middlewares, JSON. Four things differ, and the compiler holds you to them.
+                        handler in Go, Express or Wisp, the shape will be familiar: routes,
+                        handlers, middlewares, JSON. Four things differ, and the compiler holds
+                        you to them.
                     </p>
                     <div class="table-scroll">
                     <table class="compare">
@@ -86,9 +88,9 @@
                     </div>
                     <p>
                         The last row is the one to keep in mind. In Yack a request, a string or a
-                        list has <em>one owner</em>. Passing it to a function hands it over; the
-                        compiler frees it where the last owner is done. No GC pause, and nothing
-                        to write by hand.
+                        list has <em>one owner</em>. Passing it to a function hands it over, and
+                        the compiler frees it where the last owner is done. There is no collector
+                        pause and no manual <code>free</code>.
                     </p>
                     <div class="callout">
                         <strong>Coming from Gleam?</strong>
@@ -172,9 +174,9 @@ yack = { path = "../lib/yack" }</code></pre>
                         </div>
                     </div>
                     <ul>
-                        <li><code>Ctx.t</code> is <code>Copy</code>: a small value (the request id) you can use freely.</li>
-                        <li><code>consume Request.t</code> says the handler <strong>owns</strong> the request. When it returns, the request is freed. You did not use it here, that is fine: an unused owned value is dropped, not leaked.</li>
-                        <li><code>Reply.t</code> is a success (<code>Reply.ok response</code>) or an application error (<code>Reply.fail error</code>). No exceptions.</li>
+                        <li><code>Ctx.t</code> is <code>Copy</code>: it holds the request id and can be used freely.</li>
+                        <li><code>consume Request.t</code> means the handler <strong>owns</strong> the request. The request is freed when the handler returns. This handler does not use it, which is fine: an unused owned value is dropped.</li>
+                        <li><code>Reply.t</code> is either a success (<code>Reply.ok response</code>) or an application error (<code>Reply.fail error</code>). There are no exceptions.</li>
                     </ul>
                     <div class="callout">
                         <strong>No <code>ResponseWriter</code>.</strong>
@@ -202,7 +204,7 @@ yack = { path = "../lib/yack" }</code></pre>
                         <code>^</code> concatenates strings. It consumes both sides, so when the left
                         one is not needed anymore the compiler grows it in place instead of copying.
                     </p>
-                    <h3>The mistake every newcomer makes</h3>
+                    <h3>Reading the request twice</h3>
                     <p>
                         Read two parameters the way you would in Go, without borrowing:
                     </p>
@@ -238,7 +240,7 @@ yack = { path = "../lib/yack" }</code></pre>
                         still available afterwards and freed exactly once at the end.
                     </p>
                     <p>
-                        The fix is to take one borrow and reuse it: <code>&amp;request</code> is the short form of <code>borrow request</code>.
+                        The fix is to take one borrow and reuse it. <code>&amp;request</code> is the short form of <code>borrow request</code>.
                     </p>
                     <div class="code-card">
                         <div class="code-head">
@@ -256,13 +258,13 @@ yack = { path = "../lib/yack" }</code></pre>
                     <div class="callout">
                         <strong>Why <code>val req = &amp;request</code>?</strong>
                         A shared borrow is <code>Copy</code>, so it can be passed twice. NLL ends
-                        the loan at its last use, then the handler still owns the request.
-                        No tuple, no <code>*_keep</code> variant: the borrow is the whole trick.
+                        the loan at its last use, and the handler still owns the request. A single
+                        borrow is enough.
                     </div>
                 </section>
                 <section class="step" id="params" aria-labelledby="params-title">
                     <span class="step-num">Step 05</span>
-                    <h2 id="params-title">Path parameters, without closures</h2>
+                    <h2 id="params-title">Path parameters and callbacks</h2>
                     <p>
                         Routes take <code>:name</code> segments. An extractor parses the segment and
                         calls <em>your</em> function with a typed value, or answers
@@ -311,8 +313,9 @@ fun square (ctx : Ctx.t, request : consume Request.t) : Reply.t =
                     <p>
                         <code>square_of</code> is a plain top-level function passed by name. Yack has
                         no capturing closures, so a callback cannot close over local variables:
-                        everything it needs arrives as an argument. That is what keeps ownership
-                        checkable without a GC: a closure would be a hidden second owner.
+                        everything it needs arrives as an argument. That is also what keeps
+                        ownership checkable without a collector, since a closure would be a hidden
+                        second owner.
                     </p>
                     <div class="callout warn">
                         <strong>Coming from TypeScript?</strong>
@@ -323,7 +326,7 @@ fun square (ctx : Ctx.t, request : consume Request.t) : Reply.t =
                 </section>
                 <section class="step" id="json" aria-labelledby="json-title">
                     <span class="step-num">Step 06</span>
-                    <h2 id="json-title">JSON body, errors as values</h2>
+                    <h2 id="json-title">JSON bodies and errors</h2>
                     <p>
                         <code>Extract.json</code> reads the body, runs your decoder, and on success
                         calls the next function with the decoded value. A decoder is a function from
@@ -428,7 +431,11 @@ curl -H 'X-Token: secret' localhost:18093/admin</code></pre>
                         <code>Alpage.run</code> returns a <code>unit result</code>: a failure to bind the
                         port is a value too, printed by <code>main</code>. A <code>GET</code> on
                         <code>/sum</code> answers <code>405 method not allowed</code>, an unknown
-                        path <code>404</code>.
+                        path <code>404</code>. By default the port is exclusive
+                        (<code>SO_REUSEPORT</code> off): a second instance fails with
+                        <code>EADDRINUSE</code> (errno 98). Opt in with
+                        <code>Alpage.reuse_port (Alpage.config (18093), true)</code> when several
+                        processes must share one port.
                     </p>
                 </section>
                 <section class="step" id="middleware" aria-labelledby="middleware-title">
@@ -479,7 +486,7 @@ curl -H 'X-Token: secret' localhost:18093/admin</code></pre>
 
 fun token_ok (token : string option) : bool =
     case token of
-        Some value =&gt; string_eq (&amp;value, &amp;"secret")
+        Some value =&gt; string.equals (&amp;value, &amp;"secret")
       | None =&gt; false
 
 fun require_token (ctx : Ctx.t, request : Request.t) : Request.t * Reply.t option =
@@ -522,7 +529,7 @@ fun require_token (ctx : Ctx.t, request : Request.t) : Request.t * Reply.t optio
             case result.0 of
                 { status = got, headers = _headers, body = text } =&gt;
                     if got = want_status then
-                        if string_eq (borrow text, borrow want_body) then say ("ok " ^ label)
+                        if string.equals (borrow text, borrow want_body) then say ("ok " ^ label)
                         else say ("FAIL " ^ label ^ ": body " ^ text)
                     else say ("FAIL " ^ label ^ ": status " ^ int_to_string (got))
     in

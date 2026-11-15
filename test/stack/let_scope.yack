@@ -1,0 +1,13 @@
+
+
+
+fun measure (n : int) : int =
+    let val text = int_to_string (n) ^ "-scope"
+        val length = string_length (borrow text)
+    in length end
+
+fun loop (n : int, acc : int) : int =
+    if n <= 0 then acc
+    else loop (n - 1, acc + measure (n))
+
+fun main () = print_int (loop (100000, 0))

@@ -1,0 +1,356 @@
+import yack/array
+import yack/bytes as byte_array
+import yack/list as list
+import yack/path
+
+(* Type d'une entrée de fichier. *)
+datatype kind = File | Directory | Symlink | Other
+
+(* Métadonnées d'un chemin.
+   `size` est la taille en octets, `mtime_ms` la date de modification en
+   millisecondes depuis l'époque Unix, `kind` le type de l'entrée. *)
+type info = { size : int64, mtime_ms : int64, kind : kind }
+
+extern record timespec (size = 16) {
+  tv_sec : int64 @ 0,
+  tv_nsec : int64 @ 8
+}
+
+extern record raw_stat (size = 144) {
+  st_mode : int32 @ 24,
+  st_size : int64 @ 48,
+  st_mtim : timespec @ 88
+}
+
+(* Vue typée sur le buffer rempli par `stat_raw`.
+   - `buffer` : buffer emprunté, au moins `144` octets. *)
+fun internal_view (buffer : borrow int8 array) : borrow raw_stat =
+    extern_view (buffer)
+
+extern fun lstat_raw (path : borrow string, buffer : borrow int8 array) : int =
+    "lstat"
+extern fun stat_raw (path : borrow string, buffer : borrow int8 array) : int = "stat"
+extern fun mkdir_raw (path : borrow string, mode : int) : int = "mkdir"
+extern fun unlink_raw (path : borrow string) : int = "unlink"
+extern fun rmdir_raw (path : borrow string) : int = "rmdir"
+extern fun rename_raw (old_path : borrow string, new_path : borrow string) : int =
+    "rename"
+extern fun open_raw (path : borrow string, flags : int, mode : int) : int = "open"
+extern fun write_raw
+    (descriptor : int, buffer : borrow int8 array, length : int64) : int64 =
+    "write"
+extern fun close_raw (descriptor : int) : int = "close"
+extern fun getdents64_raw
+    (number : int64, descriptor : int64, buffer : borrow int8 array,
+     length : int64) : int64 =
+    "syscall"
+
+(* Lit un octet non signé d'un buffer de métadonnées.
+   - `raw` : buffer emprunté.
+   - `index` : indice de l'octet. *)
+fun internal_u8 (raw : borrow string, index : int) : int =
+    string_char_at_unchecked (raw, index)
+
+(* Lit un entier 16 bits little-endian.
+   - `raw` : buffer emprunté.
+   - `index` : indice du premier octet. *)
+fun internal_u16 (raw : borrow string, index : int) : int =
+    internal_u8 (raw, index) + internal_u8 (raw, index + 1) * 256
+
+(* Traduit `st_mode` en type d'entrée.
+   - `mode` : champ `st_mode` lu dans `struct stat`. *)
+fun internal_kind (mode : int) : kind =
+    let
+        val typeBits = mode - (mode % 4096)
+    in
+        if typeBits = 32768 then File
+        else if typeBits = 16384 then Directory
+        else if typeBits = 40960 then Symlink
+        else Other
+    end
+
+(* Cherche la fin NUL d'un nom dans un buffer de répertoire.
+   - `raw` : buffer emprunté.
+   - `index` : premier octet du nom.
+   - `stop` : borne exclusive de l'entrée. *)
+fun internal_name_end (raw : borrow string, index : int, stop : int) : int =
+    if index >= stop then stop
+    else if string_char_at_unchecked (raw, index) = 0 then index
+    else internal_name_end (raw, index + 1, stop)
+
+(* Supprime les séparateurs `/` finaux, sauf pour la racine.
+   - `value` : chemin emprunté.
+   - `stop` : longueur utile à examiner. *)
+fun internal_trim_from (value : borrow string, stop : int) : string =
+    if stop > 1 then
+        if string_char_at_unchecked (value, stop - 1) = 47 then
+            internal_trim_from (value, stop - 1)
+        else string_slice (value, 0, stop)
+    else string_slice (value, 0, stop)
+
+(* Normalise un chemin pour `mkdir_all`.
+   - `value` : chemin emprunté. *)
+fun internal_trim (value : borrow string) : string =
+    internal_trim_from (value, string_length (value))
+
+(* Teste l'existence d'un chemin, sans suivre les liens symboliques : un
+   lien cassé existe.
+   - `path` : chemin emprunté. *)
+fun exists (path : borrow string) : bool =
+    let val buffer : int8 array = array_make_uninit (256)
+    in lstat_raw (path, borrow buffer) = 0
+    end
+
+(* Crée un répertoire, sans créer ses parents.
+   - `path` : chemin du répertoire à créer. *)
+fun mkdir (path : borrow string) : unit result =
+    if mkdir_raw (path, 511) = 0 then Ok (())
+    else
+        let val code = sys.errno () in
+            Error ("fs.mkdir: mkdir failed (errno " ^
+                   int_to_string (code) ^ ")")
+        end
+
+(* Vérifie qu'un chemin existant est un répertoire.
+   - `value` : chemin emprunté.
+   - `kind` : type rendu par `stat`. *)
+fun internal_require_directory (value : borrow string, kind : kind) : unit result =
+    case kind of
+        Directory => Ok (())
+      | _ => Error ("fs.mkdir_all: path exists and is not a directory")
+
+(* Crée un répertoire, en acceptant `EEXIST` lorsque c'est déjà un répertoire
+   (course avec un autre processus ou parent déjà présent).
+   - `value` : chemin emprunté. *)
+fun internal_mkdir_one (value : borrow string) : unit result =
+    if mkdir_raw (value, 511) = 0 then Ok (())
+    else
+        let val code = sys.errno ()
+        in
+            if code = 17 then
+                case stat (value) of
+                    Ok (info) =>
+                        internal_require_directory (value, info.kind)
+                  | Error (_) =>
+                        Error ("fs.mkdir_all: mkdir failed (errno " ^
+                               int_to_string (code) ^ ")")
+            else
+                Error ("fs.mkdir_all: mkdir failed (errno " ^
+                       int_to_string (code) ^ ")")
+        end
+
+(* Crée un répertoire et tous ses parents manquants.
+   - `value` : chemin emprunté. *)
+fun internal_mkdir_all (value : borrow string) : unit result =
+    if string_length (value) = 0 then
+        Error ("fs.mkdir_all: empty path")
+    else
+        let
+            val parent = path.dir (value)
+        in
+            if string_eq (borrow parent, value) then internal_mkdir_one (value)
+            else
+                case internal_mkdir_all (borrow parent) of
+                    Error (message) => Error (message)
+                  | Ok (_) => internal_mkdir_one (value)
+        end
+
+(* Crée un répertoire et tous ses parents manquants.
+   - `value` : chemin emprunté, séparateurs finaux tolérés. *)
+fun mkdir_all (value : borrow string) : unit result =
+    let val clean = internal_trim (value)
+    in internal_mkdir_all (borrow clean)
+    end
+
+(* Lit les métadonnées d'un chemin, en suivant les liens symboliques.
+   - `path` : chemin emprunté. *)
+fun stat (path : borrow string) : info result =
+    let
+        val buffer : int8 array = array_make_uninit (256)
+        val status = stat_raw (path, borrow buffer)
+    in
+        if status <> 0 then
+            let val code = sys.errno () in
+                Error ("fs.stat: stat failed (errno " ^
+                       int_to_string (code) ^ ")")
+            end
+        else
+            let
+                val view = internal_view (borrow buffer)
+                val mode = view.st_mode
+                val size = view.st_size
+                val seconds = view.st_mtim.tv_sec
+                val nanos = view.st_mtim.tv_nsec
+                val mtime = seconds * int_to_int64 (1000) +
+                            nanos / int_to_int64 (1000000)
+            in
+                Ok ({ size = size
+                    , mtime_ms = mtime
+                    , kind = internal_kind (mode)
+                    })
+            end
+    end
+
+(* Supprime un fichier, un lien ou un répertoire vide.
+   Essaie `unlink` puis `rmdir`, sans suivre les liens symboliques.
+   - `path` : chemin emprunté. *)
+fun remove (path : borrow string) : unit result =
+    if unlink_raw (path) = 0 then Ok (())
+    else
+        let val unlinkCode = sys.errno ()
+        in
+            if rmdir_raw (path) = 0 then Ok (())
+            else
+                let val rmdirCode = sys.errno ()
+                    val code =
+                        if unlinkCode = 21 then rmdirCode else unlinkCode
+                in
+                    Error ("fs.remove: remove failed (errno " ^
+                           int_to_string (code) ^ ")")
+                end
+        end
+
+(* Renomme ou déplace un chemin.
+   - `old_path` : chemin source emprunté.
+   - `new_path` : chemin cible emprunté. *)
+fun rename (old_path : borrow string, new_path : borrow string) : unit result =
+    if rename_raw (old_path, new_path) = 0 then Ok (())
+    else
+        let val code = sys.errno () in
+            Error ("fs.rename: rename failed (errno " ^
+                   int_to_string (code) ^ ")")
+        end
+
+(* Écrit tout un tableau d'octets, en reprenant sur EINTR et écriture
+   partielle.
+   - `descriptor` : descripteur ouvert en écriture.
+   - `data` : octets restant à écrire, consommés. *)
+fun internal_write_all (descriptor : int, data : int8 array) : unit result =
+    let
+        val total = array.length (borrow data)
+        val written = write_raw (descriptor, borrow data, int_to_int64 (total))
+    in
+        if written < int_to_int64 (0) then
+            let val code = sys.errno ()
+            in
+                if code = 4 then internal_write_all (descriptor, data)
+                else
+                    Error ("fs.append_file: write failed (errno " ^
+                           int_to_string (code) ^ ")")
+            end
+        else if written = int_to_int64 (total) then Ok (())
+        else if written = int_to_int64 (0) then
+            Error ("fs.append_file: short write")
+        else
+            let
+                val count = int64_to_int (written)
+                val rest = byte_array.slice (data, count, total)
+            in internal_write_all (descriptor, rest)
+            end
+    end
+
+(* Ajoute `contents` à la fin d'un fichier, en le créant si besoin.
+   - `path` : chemin emprunté.
+   - `contents` : texte emprunté à écrire. *)
+fun append_file (path : borrow string, contents : borrow string) : unit result =
+    let
+        val descriptor = open_raw (path, 525377, 438)
+    in
+        if descriptor < 0 then
+            let val code = sys.errno () in
+                Error ("fs.append_file: open failed (errno " ^
+                       int_to_string (code) ^ ")")
+            end
+        else
+            let
+                val payload = byte_array.from_string (contents)
+                val outcome = internal_write_all (descriptor, payload)
+                val closed = close_raw (descriptor)
+            in
+                case outcome of
+                    Error (message) => Error (message)
+                  | Ok (_) =>
+                        if closed < 0 then
+                            Error ("fs.append_file: close failed (errno " ^
+                                   int_to_string (sys.errno ()) ^ ")")
+                        else Ok (())
+            end
+    end
+
+(* Extrait les entrées d'un buffer `getdents64`.
+   - `raw` : buffer emprunté.
+   - `offset` : début de l'entrée courante.
+   - `stop` : nombre d'octets reçus.
+   - `acc` : entrées déjà vues, en ordre inverse. *)
+fun internal_entries
+    (raw : borrow string, offset : int, stop : int, acc : string list) :
+    string list =
+    if offset + 19 > stop then acc
+    else
+        let
+            val recordLength = internal_u16 (raw, offset + 16)
+        in
+            if recordLength <= 0 then acc
+            else
+                let
+                    val start = offset + 19
+                    val finish = internal_name_end (raw, start, offset + recordLength)
+                    val name = string_slice (raw, start, finish)
+                    val kept =
+                        if string_eq (borrow name, borrow ".") then acc
+                        else if string_eq (borrow name, borrow "..") then acc
+                        else Cons ((name, acc))
+                in
+                    internal_entries (raw, offset + recordLength, stop, kept)
+                end
+        end
+
+(* Lit les entrées d'un répertoire jusqu'à EOF.
+   - `descriptor` : descripteur ouvert en lecture.
+   - `acc` : entrées déjà lues, en ordre inverse. *)
+fun internal_list_dir_from (descriptor : int, acc : string list) :
+    string list result =
+    let
+        val buffer : int8 array = array_make_uninit (8192)
+        val received =
+            getdents64_raw
+                (int_to_int64 (217), int_to_int64 (descriptor),
+                 borrow buffer, int_to_int64 (8192))
+    in
+        if received < int_to_int64 (0) then
+            let val code = sys.errno ()
+            in
+                if code = 4 then internal_list_dir_from (descriptor, acc)
+                else
+                    Error ("fs.list_dir: getdents64 failed (errno " ^
+                           int_to_string (code) ^ ")")
+            end
+        else if received = int_to_int64 (0) then Ok (list.reverse (acc))
+        else
+            let
+                val raw = byte_array.to_string (buffer)
+                val count = int64_to_int (received)
+                val entries = internal_entries (borrow raw, 0, count, acc)
+            in
+                internal_list_dir_from (descriptor, entries)
+            end
+    end
+
+(* Liste les entrées d'un répertoire, `.` et `..` exclus.
+   - `path` : chemin du répertoire emprunté. *)
+fun list_dir (path : borrow string) : string list result =
+    let val descriptor = open_raw (path, 589824, 0)
+    in
+        if descriptor < 0 then
+            let val code = sys.errno () in
+                Error ("fs.list_dir: open failed (errno " ^
+                       int_to_string (code) ^ ")")
+            end
+        else
+            let
+                val entries = internal_list_dir_from (descriptor, Nil)
+                val _ = close_raw (descriptor)
+            in
+                entries
+            end
+    end

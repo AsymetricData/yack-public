@@ -70,6 +70,7 @@ struct
     | Ir.Bool => true
     | Ir.Unit => true
     | Ir.TBorrow (_, false) => true
+    | Ir.TCPtr => true
     | Ir.TFun _ => true
     | Ir.TData (_, _, copy) => copy
     | Ir.TTuple types => List.all isCopy types
@@ -151,6 +152,7 @@ struct
     | Ir.Record (_, ty) => ty
     | Ir.Field (_, _, ty) => ty
     | Ir.TupleIndex (_, _, ty) => ty
+    | Ir.RawField (_, _, ty) => ty
     | Ir.Ctor (_, _, _, ty, _) => ty
     | Ir.Match (_, _, ty) => ty
     | Ir.PrintString _ => Ir.Unit
@@ -194,6 +196,7 @@ fun siteOf expression =
       Ir.Var (_, _, site) => site
     | Ir.Field (base, _, _) => siteOf base
     | Ir.TupleIndex (base, _, _) => siteOf base
+    | Ir.RawField (base, _, _) => siteOf base
     | Ir.Borrow (_, operand, _) => siteOf operand
     | Ir.Copy (value, _) => siteOf value
     | Ir.Bin (_, left, right, _, _) =>
@@ -351,6 +354,9 @@ fun siteOf expression =
             def (ty, "record", List.map (fn (_, e) => owned env e) fields)
         | Ir.Field (base, index, ty) =>
             view (ty, "field " ^ Int.toString index, [use env (base, Read)])
+        | Ir.RawField (base, offset, ty) =>
+            view (ty, "raw-field " ^ Int.toString offset,
+                  [use env (base, Read)])
         | Ir.TupleIndex (base, index, ty) =>
             view (ty, "index " ^ Int.toString index, [use env (base, Read)])
         | Ir.Ctor (_, constructor, argument, ty, _) =>
@@ -744,6 +750,7 @@ fun siteOf expression =
         | Ir.TToken => "token"
         | Ir.TResource => "resource"
         | Ir.TString => "string"
+        | Ir.TCPtr => "c_ptr"
         | Ir.TRecord (fields, discipline) =>
             Ir.disciplinePrefix discipline ^ "{ " ^
             String.concatWith ", "

@@ -959,6 +959,7 @@ struct
                 in
                   walk innerBound innerBody
                 end
+            | Ast.EExtern _ => ()
         in
           walk initialBound body
           ; List.rev (!captures)
@@ -1021,6 +1022,8 @@ struct
         | Ast.EString _ => state
         | Ast.EBool _ => state
         | Ast.EUnit _ => state
+
+        | Ast.EExtern _ => state
 
         | Ast.EArena _ =>
             raise Fail "ownership: desugared arena expression"
@@ -1586,7 +1589,6 @@ struct
                  arguments)
         else if name = "bytes_to_string" orelse
                 name = "bytes_to_string_range" orelse
-                name = "send_string" orelse
                 name = "bytes_header_end" orelse
                 name = "bytes_write_string" orelse
                 name = "bytes_write_int" orelse
@@ -2039,6 +2041,7 @@ struct
         | Ast.DAlias _ => ()
         | Ast.DDatatype _ => ()
         | Ast.DImport _ => ()
+        | Ast.DExternRecord _ => ()
 
       val _ = List.app checkFunction program
     in

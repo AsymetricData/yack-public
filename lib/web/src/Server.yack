@@ -18,4 +18,7 @@ fun dispatcher () = { run = dispatch_text }
 
 fun config (port : int) = Base.config (port)
 
+fun reuse_port (settings : Base.config, enabled : bool) : Base.config =
+    Base.reuse_port (settings, enabled)
+
 fun run (app, settings) = Base.run (dispatcher (), app, settings)

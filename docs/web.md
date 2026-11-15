@@ -1,7 +1,8 @@
 # yack/web : framework HTTP minimal
 
-> Statut : V1 fonctionnelle. Package optionnel `lib/web`, construit sur le
-> serveur epoll de `lib/net`. HTTP/1.1 keep-alive, plusieurs connexions.
+> Statut : V1 fonctionnelle. C'est un package optionnel, `lib/web`, construit
+> sur le serveur epoll de `lib/net`. Il parle HTTP/1.1 avec keep-alive et sert
+> plusieurs connexions à la fois.
 
 ## Principes
 
@@ -10,20 +11,25 @@
   `consume`, pour que l'appel par pointeur de fonction transfère réellement la
   requête. Les accesseurs prennent `borrow Request.t` : lire ne consomme plus,
   donc un handler peut enchaîner plusieurs lectures sur le même emprunt et la
-  requête est libérée une seule fois à la fin. Pas de variantes `*_keep`.
-- Pas de closures capturantes, ni maintenant ni plus tard.
-- Middleware = datatype `Copy`, compilé au démarrage en `entry` (record plat
-  `Copy`) et stocké dans un tableau partagé par le routeur ; `Middleware.run`
-  le parcourt par emprunt, sans copie par requête.
-- Routeur = tableaux alloués au démarrage, jamais recopiés par requête.
-- Serveur = boucle epoll de `net/Server`, buffers réutilisés, keep-alive.
-  Les slots recevront/sortie sont réservés non initialisés
+  requête est libérée une seule fois à la fin. Il n'y a pas de variantes
+  `*_keep`.
+- Le package n'utilise pas de closure capturante, et n'en attend pas du langage.
+- Un middleware est un datatype `Copy`, compilé au démarrage en `entry` (record
+  plat `Copy`) et stocké dans un tableau partagé par le routeur ;
+  `Middleware.run` le parcourt par emprunt, sans copie par requête.
+- Le routeur est une série de tableaux alloués au démarrage, jamais recopiés
+  par requête.
+- Le serveur est la boucle epoll de `net/Server`, avec des buffers réutilisés
+  et du keep-alive. Les slots entrée/sortie sont réservés non initialisés
   (`array_make_uninit`) et hors huge pages : le RSS suit le nombre de
-  connexions actives, pas la capacité maximale de 1024 slots.
+  connexions actives, pas la capacité maximale de 1024 slots. Une connexion
+  lente, inactive ou qui ne lit pas sa réponse est fermée, et le serveur
+  s'arrête proprement sur SIGINT/SIGTERM et recule quand `accept` rend
+  `EMFILE`.
 - `Request.t` garde le texte brut et des offsets ; method, path, query,
   en-têtes, cookies et body sont découpés à la demande. Un handler qui ne lit
   que `?name=` ne paie ni la liste des en-têtes ni celle des cookies.
-- Erreurs = valeurs (`result`), pas d'exceptions.
+- Les erreurs sont des valeurs (`result`), pas des exceptions.
 
 ## Arborescence
 
@@ -85,6 +91,11 @@ Le package de l'application déclare :
 net = { path = "../../lib/net" }
 web = { path = "../../lib/web" }
 ```
+
+Par défaut, le port est exclusif (`SO_REUSEPORT` désactivé) : une seconde
+instance échoue avec `EADDRINUSE` au lieu de partager le trafic. Pour l'autoriser
+explicitement (benchmark multi-processus), utiliser
+`Server.reuse_port (Server.config (8080), true)`.
 
 ## Router
 
@@ -183,3 +194,9 @@ $ curl -i http://127.0.0.1:18087/hello/alice
 $ curl -i -c cookies.txt 'http://127.0.0.1:18087/login?user=alice'
 $ curl -i -b cookies.txt http://127.0.0.1:18087/me
 ```
+
+Le fuzzer de clients hostiles vit dans `test/http_fuzz.sh`
+(`make test-http-fuzz`). Il envoie des trames tronquées, des en-têtes absurdes
+et des connexions lentes, puis vérifie que le serveur répond encore, ne fuit
+pas de descripteurs et ne tourne pas à vide quand plus aucun client n'est
+connecté.

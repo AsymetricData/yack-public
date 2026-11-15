@@ -1,0 +1,23 @@
+import yack/array
+import yack/random
+import yack/time
+
+fun main () =
+    let val stamp = time.format_utc (time.now_ms ())
+        val token = random.token_hex (8)
+        val raw = random.bytes (4)
+        val small = random.int_below (4)
+        val _ = print_int (string_length (borrow stamp))
+        val _ =
+            case token of
+                Ok (value) => print_int (string_length (borrow value))
+              | Error (_) => print_int (-1)
+        val _ =
+            case raw of
+                Ok (value) => print_int (array.length (borrow value))
+              | Error (_) => print_int (-1)
+    in
+        case small of
+            Ok (value) => print_int (value)
+          | Error (_) => print_int (-1)
+    end

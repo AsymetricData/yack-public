@@ -4,3 +4,4 @@ version = "0.1.0"
 
 [dependencies]
 net = { path = "../../lib/net" }
+yack = { path = "../../lib/yack" }

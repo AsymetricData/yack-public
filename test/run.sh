@@ -973,6 +973,7 @@ expect_error main_params E3010 test/reject/main_params.yack
 expect_error main_returns_int E3010 test/reject/main_returns_int.yack
 expect_error lexical_error E2001 test/reject/lexical_error.yack
 expect_error integer_literal_range E2002 test/reject/integer_literal_range.yack
+expect_error literal_int32_overflow E2002 test/reject/literal_int32_overflow.yack
 expect_error syntax_error E2002 test/reject/syntax_error.yack
 expect_error use_after_move E0402 test/reject/use_after_move.yack
 expect_error unconsumed_token E0403 test/reject/unconsumed_token.yack
@@ -1122,6 +1123,7 @@ expect_error map_get_affine E3044 test/reject/map_get_affine.yack
 expect_error map_key_moved E0402 test/reject/map_key_moved.yack
 expect_error array_get_affine E3041 test/reject/array_get_affine.yack
 expect_error array_kernel_user E3042 test/reject/array_kernel_user.yack
+expect_error bytes_write_user E3042 test/reject/bytes_write_user.yack
 
 
 
@@ -1178,6 +1180,161 @@ expect_error borrow_field_use_after_close E0402 test/reject/borrow_field_use_aft
 expect_error borrow_field_forgotten E0403 test/reject/borrow_field_forgotten.yack
 expect_error unreachable_clause E3022 test/reject/unreachable_clause.yack
 
+
+
+
+expect_error extern_user E3042 test/reject/extern_user.yack '`getpid_raw` is an extern declared outside the standard library'
+mkdir -p "$TMP/extern/std/src" "$TMP/extern/app/src" "$TMP/extern/cross/src"
+cat > "$TMP/extern/std/yack.toml" <<'EOF'
+[package]
+name = "std"
+EOF
+cat > "$TMP/extern/std/src/time.yack" <<'EOF'
+extern fun atoi_raw (text : borrow string) : int = "atoi"
+extern fun strlen_raw (text : borrow string) : int64 = "strlen"
+extern fun memcmp_raw (left : borrow int8 array, right : borrow int8 array, count : int64) : int = "memcmp"
+
+fun parse (text : borrow string) : int = atoi_raw (text)
+
+fun length (text : borrow string) : int64 = strlen_raw (text)
+
+fun compare_empty (left : borrow int8 array, right : borrow int8 array) : int =
+    memcmp_raw (left, right, 0)
+EOF
+cat > "$TMP/extern/std/src/other.yack" <<'EOF'
+import yack/time
+fun leak () : int = time.atoi_raw (borrow "1")
+EOF
+cat > "$TMP/extern/std/src/rawrec.yack" <<'EOF'
+extern record pair (size = 16) {
+  first : int64 @ 0,
+  second : int64 @ 8
+}
+
+extern record boxed (size = 24) {
+  tag : int32 @ 0,
+  inner : pair @ 8
+}
+
+fun first_of (buffer : borrow int8 array) : int64 =
+    let val view : borrow pair = extern_view (buffer)
+    in view.first
+    end
+
+fun second_of (buffer : borrow int8 array) : int64 =
+    let val view : borrow pair = extern_view (buffer)
+    in view.second
+    end
+
+fun inner_second (buffer : borrow int8 array) : int64 =
+    let val view : borrow boxed = extern_view (buffer)
+    in view.inner.second
+    end
+EOF
+cat > "$TMP/extern/cross/yack.toml" <<'EOF'
+[package]
+name = "cross"
+[dependencies]
+yack = { path = "../std" }
+EOF
+cat > "$TMP/extern/cross/src/main.yack" <<'EOF'
+import yack/other
+fun main () = print_int (other.leak ())
+EOF
+expect_error extern_cross_module E3043 "$TMP/extern/cross/src/main.yack" '`time.atoi_raw` is an extern private to its module'
+cat > "$TMP/extern/cross/src/main.yack" <<'EOF'
+import yack/time.{atoi_raw}
+fun main () = print_int (atoi_raw (borrow "1"))
+EOF
+expect_error extern_import E3043 "$TMP/extern/cross/src/main.yack" 'is an extern private to module `yack/time`'
+mkdir -p "$TMP/extern/app/src"
+cat > "$TMP/extern/app/yack.toml" <<'EOF'
+[package]
+name = "app"
+[dependencies]
+yack = { path = "../std" }
+EOF
+cat > "$TMP/extern/app/src/main.yack" <<'EOF'
+import yack/time
+fun main () =
+    let val left : int8 array = array_make_uninit (1)
+        val right : int8 array = array_make_uninit (1)
+        val number = time.parse (borrow "42")
+        val count = time.length (borrow "abc")
+        val same = time.compare_empty (borrow left, borrow right)
+        val _ = print_int (number)
+        val _ = print_int64 (count)
+    in print_int (same)
+    end
+EOF
+expect_run extern_stdlib "$TMP/extern/app/src/main.yack" $'42\n3\n0'
+cat > "$TMP/extern/app/src/main.yack" <<'EOF'
+import yack/rawrec
+fun main () =
+    let val buffer : int8 array = array_make_uninit (24)
+        val _ = array_set (buffer, 0, 1)
+        val _ = array_set (buffer, 8, 2)
+        val _ = array_set (buffer, 16, 3)
+        val _ = print_int64 (rawrec.first_of (borrow buffer))
+        val _ = print_int64 (rawrec.second_of (borrow buffer))
+    in print_int64 (rawrec.inner_second (borrow buffer))
+    end
+EOF
+expect_run extern_record_view "$TMP/extern/app/src/main.yack" $'1\n2\n3'
+cat > "$TMP/extern/cross/src/main.yack" <<'EOF'
+fun main () =
+    let val buffer : int8 array = array_make_uninit (16)
+        val view : borrow int8 array = extern_view (borrow buffer)
+    in ()
+    end
+EOF
+expect_error extern_view_user E3042 "$TMP/extern/cross/src/main.yack" 'extern record primitive'
+mkdir -p "$TMP/extern/badrec/src"
+cat > "$TMP/extern/std/src/badlayout.yack" <<'EOF'
+extern record broken (size = 8) {
+  value : int64 @ 4
+}
+
+fun use () : unit = ()
+EOF
+cat > "$TMP/extern/cross/src/main.yack" <<'EOF'
+import yack/badlayout
+fun main () = badlayout.use ()
+EOF
+expect_error extern_record_layout E3047 "$TMP/extern/cross/src/main.yack" 'does not fit'
+
+expect_run time_module examples/time.yack $'1970-01-01T00:00:00.000Z\n2023-11-14T22:13:20.000Z\n1\n1'
+expect_run time_precision test/time_precision.yack "ok"
+expect_run time_negative_year test/time_negative_year.yack "-0001-01-01T00:00:00.000Z"
+expect_run random_module examples/random.yack $'1\n1\n1'
+expect_run random_bytes test/random_bytes.yack "1000"
+expect_run fs_module examples/fs.yack $'1\n1\n1\n1\n1\n1\n1\n1'
+expect_run fs_mkdir_file test/fs_mkdir_file.yack "ok"
+expect_run file_module examples/file.yack $'5\nhello'
+expect_run file_write_all test/file_write_all.yack "30"
+expect_run file_seek test/file_seek.yack "worldworldworld"
+if "$YACK" build test/file_write_all_big.yack "$TMP/file_write_all_big" >/dev/null 2>&1; then
+  big_write=$(head -c 200000 /dev/zero | tr '\0' b | "$TMP/file_write_all_big" 2>&1)
+  if [ "$big_write" = $'200000\n1' ]; then
+    pass file_write_all_big
+  else
+    fail file_write_all_big "unexpected output" "got [$big_write]"
+  fi
+else
+  fail file_write_all_big "compile failed"
+fi
+if "$YACK" build test/file_stdio.yack "$TMP/file_stdio" >/dev/null 2>&1; then
+  stdio=$(printf 'stdio-ok' | "$TMP/file_stdio" 2>&1)
+  if [ "$stdio" = "stdio-ok" ]; then
+    pass file_stdio
+  else
+    fail file_stdio "unexpected output" "got [$stdio]"
+  fi
+else
+  fail file_stdio "compile failed"
+fi
+expect_error file_forgot_close E0403 test/reject/file_forgot_close.yack
+
 expect_run json_combinators examples/json_combinators.yack "4"
 expect_run json_decode examples/json_decode.yack "8"
 expect_run codegen_int examples/codegen_int.yack "42"
@@ -1206,7 +1363,7 @@ expect_run codegen_tail_auto_rec test/tail_auto_rec.yack "1000000"
 expect_run codegen_tail_aggregate test/tail_aggregate.yack "10"
 expect_run codegen_borrow_return_tuple_ok test/borrow_return_tuple_ok.yack ""
 expect_run codegen_callback_convention_lambda_ok test/callback_convention_lambda_ok.yack ""
-expect_run codegen_netapp examples/netapp/src/main.yack "hello"
+expect_run codegen_netapp examples/netapp/src/main.yack $'1\nhello'
 expect_run codegen_httpapp examples/httpapp/src/main.yack "GET /hello HTTP/1.1"
 expect_build_error array_copy_datatype E0702 test/reject/array_copy_datatype.yack
 expect_build_error array_uninit_string E3040 test/reject/array_uninit_string.yack
@@ -1314,6 +1471,7 @@ expect_run package_dependency examples/pkgdep/app/src/main.yack "49"
 
 
 expect_run implicit_stdlib test/implicit_stdlib.yack "ok"
+expect_run stdlib_string_index_of test/string_index_of.yack "2 5 -1 -1"
 
 
 
@@ -1355,6 +1513,50 @@ expect_abort trap_array_take_twice_record test/reject_run/array_take_twice_recor
 expect_run yack_array test/yack_array.yack $'3\n4\n19\n9\n3\n2\n0'
 expect_run_stack yack_array_stack test/yack_array.yack $'3\n4\n19\n9\n3\n2\n0'
 expect_no_leak alloc_yack_array_set test/alloc/yack_array_set.yack
+expect_no_leak stdlib_ffi_time_random test/alloc/stdlib_ffi_time_random.yack
+expect_no_leak stdlib_ffi_fs test/alloc/stdlib_ffi_fs.yack
+expect_no_leak stdlib_ffi_file test/alloc/stdlib_ffi_file.yack
+expect_no_leak stdlib_ffi_net test/net/leak.yack
+expect_no_leak stdlib_ffi_process test/alloc/stdlib_ffi_process.yack
+expect_run stdlib_ffi_fs_fd test/alloc/stdlib_ffi_fs.yack $'2\n0'
+expect_run stdlib_ffi_file_fd test/alloc/stdlib_ffi_file.yack "0"
+expect_run stdlib_ffi_net_fd test/net/leak.yack "0"
+expect_run net_resolve test/net/resolve.yack "ok"
+expect_run net_timeout test/net/timeout.yack "ok"
+expect_run stdlib_ffi_process_fd test/alloc/stdlib_ffi_process.yack $'0\n0'
+expect_run process test/process.yack $'ok streams\nok quoting\nok empty\nok missing\nok signal\nok stdin_text\nok stdin_fd\nok big_stdout\nok nul_argument\nok output_fds'
+expect_run process_fds test/process_fds.yack $'child-stdout\nmerged-stderr\nchild-out2\nchild-stderr'
+expect_run process_high_fd test/process_high_fd.yack $'1\n1'
+
+
+
+if "$YACK" build test/process_long_arg.yack "$TMP/process_long_arg" >/dev/null 2>&1; then
+  long_output=$(head -c 400000 /dev/zero | tr '\0' a | "$TMP/process_long_arg" 2>&1)
+  if [ "$long_output" = $'400002\nok\n0\nok' ]; then
+    pass process_long_arg
+  else
+    fail process_long_arg "unexpected output" "got [$long_output]"
+  fi
+else
+  fail process_long_arg "compile failed"
+fi
+
+process_tmpdir="$TMP/process tmp';touch $TMP/process-pwned;'"
+mkdir -p "$process_tmpdir"
+if ! "$YACK" build test/process_tmpdir.yack "$TMP/process_tmpdir" >/dev/null 2>&1; then
+  fail process_tmpdir_quoting "compile failed"
+elif ! tmpdir_output=$(TMPDIR="$process_tmpdir" "$TMP/process_tmpdir" 2>&1); then
+  fail process_tmpdir_quoting "program failed"
+elif [ "$tmpdir_output" != "0" ]; then
+  fail process_tmpdir_quoting "unexpected output" "got [$tmpdir_output]"
+elif [ -e "$TMP/process-pwned" ]; then
+  fail process_tmpdir_quoting "TMPDIR executed shell code"
+elif [ -n "$(ls -A "$process_tmpdir")" ]; then
+  fail process_tmpdir_quoting "temporary files left"
+else
+  pass process_tmpdir_quoting
+fi
+expect_run process_example examples/process.yack $'3\n4\n4'
 expect_no_leak alloc_yack_array_new test/alloc/yack_array_new.yack
 expect_no_leak alloc_yack_array_make_get test/alloc/yack_array_make_get.yack
 expect_run_stack alloc_yack_array_make_get_stack test/alloc/yack_array_make_get.yack "16"

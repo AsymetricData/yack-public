@@ -11,11 +11,16 @@ fun hello
         None => Response.text ("hello world")
       | Some (name) => Response.text ("hello " ^ name)
 
+
+
+
 fun main () =
     let val result =
             Router.new ()
             |> Router.get ("/", hello)
-            |> Server.run (Server.config (18080))
+            |> Server.run
+                   ( Server.reuse_port (Server.config (18080), true)
+                   )
     in
         case result of
             Ok (_) => ()

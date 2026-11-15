@@ -15,8 +15,8 @@ Yack est un petit langage fonctionnel inspiré de SML, compilé nativement avec
 LLVM. Il n'a pas de ramasse-miettes : l'ownership, les déplacements et les
 emprunts sont vérifiés à la compilation, et les libérations sont déterministes.
 
-Ce tutoriel va droit au but. Chaque bloc de code est un programme complet :
-copiez-le dans un fichier `.yack` et lancez-le.
+Chaque bloc de code de ce tutoriel est un programme complet. Copiez-le dans un
+fichier `.yack` et lancez-le.
 
 > **Prérequis :** savoir écrire une fonction et un `if`. Aucune connaissance de
 > SML, de Rust ou de LLVM n'est nécessaire.
@@ -702,9 +702,10 @@ fun add_n (n : int) : int -> int =
     x => x + n    (* E0511 : capture de n *)
 ```
 
-Il n'y a ni `fn`, ni fermeture, ni application partielle, ni `fun` local dans un
-`let`. En revanche, les callbacks qui possèdent leur argument peuvent être
-annotés `consume T -> R`, par exemple pour les décodeurs JSON.
+Il n'y a ni `fn`, ni fermeture, ni application partielle. Un `fun` local existe
+dans un `let`, mais il ne peut pas capturer de variable quand il est utilisé
+comme valeur. En revanche, les callbacks qui possèdent leur argument peuvent
+être annotés `consume T -> R`, par exemple pour les décodeurs JSON.
 
 ---
 
@@ -717,7 +718,7 @@ La stdlib est dans `lib/yack/src` et s'importe par domaine :
 | Bases | `bool`, `int`, `char`, `float`, `string`, `bytes` |
 | Collections | `list`, `array`, `map`, `sort` |
 | Erreurs | `option`, `result` |
-| Système | `io`, `os`, `path` |
+| Système | `io`, `os`, `path`, `fs`, `file`, `process`, `net`, `time`, `random` |
 | Texte et formats | `fmt`, `math`, `json` |
 | Terminal et CLI | `ansi`, `args`, `cli`, `term`, `tui` |
 
@@ -794,10 +795,13 @@ Documentation utile :
 
 Limites actuelles à garder en tête :
 
-- pas de fermetures, de boucles, de threads ni de concurrence ;
+- pas de fermetures ni de boucles. Les threads se limitent à
+  `sys.thread_spawn` et `sys.thread_join`, sans concurrence de plus haut
+  niveau ;
 - pas de varargs, d'interfaces ni de type classes ;
-- la stdlib reste partielle, notamment pour le réseau et les dates ;
-- le backend cible Linux/POSIX ;
+- la stdlib reste partielle : réseau TCP sans TLS, dates en UTC seulement,
+  pas d'encodage base64 ni hexadécimal ;
+- le compilateur et le backend ciblent Linux x86-64 ;
 - `--memory=stack` est encore expérimental.
 
 ---

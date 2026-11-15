@@ -31,6 +31,7 @@ struct
     , stackMode : bool
     , inEntryBlock : bool ref
     , hasDynamicAlloca : bool ref
+    , resetArenaMarks : unit -> unit
     }
 
   fun lowerFunctionWith (env : env) = let
@@ -60,6 +61,7 @@ struct
   val stackMode = #stackMode env
   val inEntryBlock = #inEntryBlock env
   val hasDynamicAlloca = #hasDynamicAlloca env
+  val resetArenaMarks = #resetArenaMarks env
 
 fun lowerFunction
       ({ sourceName, name, params, result, recursive, body, drops,
@@ -88,6 +90,8 @@ fun lowerFunction
         SOME (freshLabel "loop")
       else NONE
     val loopBackedge = if Option.isSome loopLabel then freshLabel "loop.backedge" else ""
+
+    val _ = resetArenaMarks ()
     val _ = inEntryBlock := false
     val _ = hasDynamicAlloca := false
     val _ = emit ("define " ^ llvmTy result ^ " @" ^ name ^
@@ -97,7 +101,7 @@ fun lowerFunction
       case loopLabel of
         NONE =>
           if stackMode andalso functionNeedsRegion then
-            emit "call void @yack_region_init(ptr %region)"
+            emit "call void @yack_region_init(ptr %region, ptr %dest)"
           else ()
       | SOME _ => ()
     val loopInfo =
@@ -128,7 +132,7 @@ fun lowerFunction
 
             emit (stackReg ^ " = call ptr @llvm.stacksave()");
             if stackMode andalso functionNeedsRegion then
-              emit "call void @yack_region_init(ptr %region)"
+              emit "call void @yack_region_init(ptr %region, ptr %dest)"
             else ();
             SOME (label, slots, phis, nexts, stackReg)
           end
@@ -220,10 +224,77 @@ fun lowerFunction
     emit "}"
   end
 
-fun generateDropFunction (definition : Ir.dataDef) =
+fun generateDropFunctionWith (owner : bool) (definition : Ir.dataDef) =
   let
     val dataName = #name definition
     val first = "%first"
+    fun defineHeader () =
+      if owner then
+        emit ("define void @yack_owner_drop_" ^ dataName ^
+              "(ptr %region, ptr " ^ first ^ ") {")
+      else
+        emit ("define void @yack_drop_" ^ dataName ^ "(ptr " ^ first ^ ") {")
+    fun freeNode (nodeReg, typeName) =
+      if owner then
+        emit ("call void @yack_owner_recycle_block(ptr %region, ptr " ^
+              nodeReg ^ ", i64 ptrtoint (ptr getelementptr (%" ^ typeName ^
+              ", ptr null, i32 1) to i64))")
+      else
+        emit ("call void @yack_free(ptr " ^ nodeReg ^ ")")
+
+    fun ownerDropValue (value, ty) = ownerDropSkipping (value, ty, [])
+    and ownerDropSkipping (value, ty, skip) =
+      let
+        fun skippedWhole index =
+          List.exists (fn path => path = [index]) skip
+        fun subPaths index =
+          List.mapPartial
+            (fn path =>
+              case path of
+                head :: rest =>
+                  if head = index andalso not (List.null rest) then
+                    SOME rest
+                  else NONE
+              | [] => NONE)
+            skip
+        fun fields types =
+          let
+            fun loop (index, remaining) =
+              case remaining of
+                [] => ()
+              | fieldTy :: rest =>
+                  ( if skippedWhole index then ()
+                    else
+                      let val reg = fresh "odrop.field" in
+                        emit (reg ^ " = extractvalue " ^ llvmTy ty ^ " " ^
+                              #text value ^ ", " ^ Int.toString index);
+                        ownerDropSkipping
+                          ({ text = reg, ty = fieldTy, const = false },
+                           fieldTy, subPaths index)
+                      end
+                  ; loop (index + 1, rest) )
+          in
+            loop (0, types)
+          end
+      in
+        case ty of
+          Ir.TString =>
+            emit ("call void @yack_owner_recycle_string(ptr %region, " ^
+                  "{ ptr, i64, i1 } " ^ #text value ^ ")")
+        | Ir.TData (name, _, _) =>
+            if List.null skip then
+              emit ("call void @yack_owner_drop_" ^ name ^
+                    "(ptr %region, ptr " ^ #text value ^ ")")
+            else ()
+        | Ir.TTuple types => fields types
+        | Ir.TRecord (recordFields, _) => fields (List.map #2 recordFields)
+        | _ => ()
+      end
+    fun dropField (value, ty) =
+      if owner then ownerDropValue (value, ty) else dropValue (value, ty)
+    fun dropFieldSkipping (value, ty, skip) =
+      if owner then ownerDropSkipping (value, ty, skip)
+      else dropValueSkipping (value, ty, skip)
     val node = "%node"
     val loopLabel = freshLabel "drop.loop"
     val bodyLabel = freshLabel "drop.body"
@@ -313,8 +384,7 @@ fun generateDropFunction (definition : Ir.dataDef) =
     val loops =
       List.exists (fn (_, _, _, kept) => Option.isSome kept)
         payloadConstructors
-    val _ =
-      emit ("define void @yack_drop_" ^ dataName ^ "(ptr " ^ first ^ ") {")
+    val _ = defineHeader ()
     val _ = emit "entry:"
     val _ =
       if loops then emit (nextSlot ^ " = alloca ptr") else ()
@@ -374,7 +444,7 @@ fun generateDropFunction (definition : Ir.dataDef) =
                           ", ptr " ^ payloadPtr)
                   val _ =
                     case kept of
-                      NONE => dropValue (payload, payloadTy)
+                      NONE => dropField (payload, payloadTy)
                     | SOME (DirectPath []) =>
 
                         emit ("store ptr " ^ payloadValue ^ ", ptr " ^
@@ -382,7 +452,7 @@ fun generateDropFunction (definition : Ir.dataDef) =
                     | SOME (DirectPath path) =>
                         let val kept = fresh "drop.kept" in
 
-                          dropValueSkipping (payload, payloadTy, [path]);
+                          dropFieldSkipping (payload, payloadTy, [path]);
                           emit (kept ^ " = extractvalue " ^
                                 llvmTy payloadTy ^ " " ^ payloadValue ^ ", " ^
                                 String.concatWith ", "
@@ -455,8 +525,7 @@ fun generateDropFunction (definition : Ir.dataDef) =
                                   emit ("br i1 " ^ stack ^ ", label %" ^
                                         keepLabel ^ ", label %" ^ freeLabel);
                                   emit (freeLabel ^ ":");
-                                  emit ("call void @yack_free(ptr " ^ value ^
-                                        ")");
+                                  freeNode (value, optionName);
                                   emit ("br label %" ^ keepLabel);
                                   emit (keepLabel ^ ":");
                                   emitLayers rest nextPayload;
@@ -484,7 +553,7 @@ fun generateDropFunction (definition : Ir.dataDef) =
       emit ("br i1 " ^ stackFlag ^ ", label %" ^ afterFree ^
             ", label %" ^ freeBlock)
     val _ = emit (freeBlock ^ ":")
-    val _ = emit ("call void @yack_free(ptr " ^ node ^ ")")
+    val _ = freeNode (node, dataName)
     val _ = emit ("br label %" ^ afterFree)
     val _ =
       if loops then
@@ -923,6 +992,10 @@ fun generateRootFunction (definition : Ir.dataDef) =
     ()
   end
 
-  in (lowerFunction, generateDropFunction, generateCopyFunction,
-      generateRootFunction) end
+    fun generateDropFunction definition =
+      generateDropFunctionWith false definition
+    fun generateOwnerDropFunction definition =
+      generateDropFunctionWith true definition
+  in (lowerFunction, generateDropFunction, generateOwnerDropFunction,
+      generateCopyFunction, generateRootFunction) end
 end

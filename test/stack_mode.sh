@@ -21,6 +21,35 @@ pass() {
   printf 'ok   %s\n' "$1"
 }
 
+
+
+
+if ! cc -O2 -o "$TMP/peakrss" test/peak_rss.c >"$TMP/peakrss.log" 2>&1; then
+  fail "peakrss_build" "$(tail -n 3 "$TMP/peakrss.log")"
+  printf '\nstack mode checks failed\n'
+  exit 1
+fi
+
+
+flat_rss() {
+  name=$1
+  source=$2
+  ceiling=$3
+  if ! timeout 20 "$YACK" build --memory=stack "$source" "$TMP/$name" \
+       >"$TMP/$name.build.log" 2>&1; then
+    fail "stack_$name" "$(tail -n 3 "$TMP/$name.build.log")"
+    return
+  fi
+  peak=$(timeout 60 "$TMP/peakrss" "$TMP/$name" 2>"$TMP/$name.err")
+  status=$?
+  if [ "$status" -eq 0 ] && [ -n "$peak" ] && [ "$peak" -lt "$ceiling" ]; then
+    pass "stack_$name"
+  else
+    fail "stack_$name" "exit $status, peak ${peak}KB (ceiling ${ceiling}KB)" \
+      "$(tail -n 3 "$TMP/$name.err")"
+  fi
+}
+
 for example in examples/*.yack; do
   name=$(basename "$example" .yack)
 
@@ -114,7 +143,8 @@ for spec in "m3_array_regions 110" "m3_map_regions 108" \
             "inter_region_deferred_write hello" \
             "inter_region_array_push_outer pushed" \
             "inter_region_map_outer mapped" \
-            "inter_region_borrow_outer_ok 5"; do
+            "inter_region_borrow_outer_ok 5" \
+            "freelist_mark 1000000ZZZZZZ"; do
   set -- $spec
   name=$1
   expected=$2
@@ -400,6 +430,64 @@ if timeout 20 "$YACK" build --memory=stack \
 else
   fail "stack_tail_map" "$(tail -n 3 "$TMP/tail-map.log")"
 fi
+
+
+
+
+
+flat_rss box_loop test/stack/box_loop.yack 8192
+flat_rss string_loop test/stack/string_loop.yack 8192
+flat_rss deep_recursion test/stack/deep_recursion.yack 32768
+flat_rss tail_concat_arena test/stack/tail_concat_arena.yack 8192
+
+
+if timeout 20 "$YACK" build --memory=stack \
+     test/stack/let_scope.yack "$TMP/let-scope" >"$TMP/let-scope.log" 2>&1; then
+  output=$(timeout 10 "$TMP/let-scope" 2>&1)
+  "$YACK" llvm --memory=stack test/stack/let_scope.yack 2>/dev/null     >"$TMP/let-scope.ll"
+  if [ "$output" = "1088895" ] &&
+     grep -q 'call i64 @yack_region_mark' "$TMP/let-scope.ll" &&
+     grep -q 'call void @yack_region_release' "$TMP/let-scope.ll"; then
+    pass "stack_let_scope"
+  else
+    fail "stack_let_scope" "output [$output] or no mark/release pair"
+  fi
+else
+  fail "stack_let_scope" "$(tail -n 3 "$TMP/let-scope.log")"
+fi
+
+
+flat_rss slot_loop test/stack/slot_loop.yack 8192
+flat_rss req_loop test/stack/req_loop.yack 8192
+flat_rss map_slot_loop test/stack/map_slot_loop.yack 8192
+
+
+flat_rss yack_array_string test/stack/yack_array_string.yack 8192
+for api in test/stack/array_api_string.yack test/stack/array_builtins_string.yack \
+           test/yack_array.yack; do
+  api_name=$(basename "$api" .yack)
+  if timeout 20 "$YACK" build "$api" "$TMP/api-heap-$api_name" \
+       >"$TMP/api-heap.log" 2>&1 &&
+     timeout 20 "$YACK" build --memory=stack "$api" "$TMP/api-stack-$api_name" \
+       >"$TMP/api-stack.log" 2>&1; then
+    api_heap=$(timeout 10 "$TMP/api-heap-$api_name" 2>&1)
+    api_stack=$(timeout 10 "$TMP/api-stack-$api_name" 2>&1)
+    if [ "$api_heap" = "$api_stack" ]; then
+      pass "stack_api_$api_name"
+    else
+      fail "stack_api_$api_name" "heap [$api_heap], stack [$api_stack]"
+    fi
+  else
+    fail "stack_api_$api_name" "$(tail -n 3 "$TMP/api-stack.log")"
+  fi
+done
+
+
+flat_rss freelist_growth test/stack/freelist_growth.yack 16384
+flat_rss arena_loop test/stack/arena_loop.yack 8192
+flat_rss datatype_slot_loop test/stack/datatype_slot_loop.yack 8192
+flat_rss nonreturned_arg_loop test/stack/nonreturned_arg_loop.yack 8192
+flat_rss closure_arg_loop test/stack/closure_arg_loop.yack 8192
 
 if [ "$failed" -ne 0 ]; then
   printf '\nstack mode checks failed\n'

@@ -1,0 +1,454 @@
+import yack/array
+import yack/bytes as byte_array
+
+extern record addrinfo (size = 48) {
+  ai_flags : int32 @ 0,
+  ai_family : int32 @ 4,
+  ai_socktype : int32 @ 8,
+  ai_protocol : int32 @ 12,
+  ai_addrlen : int32 @ 16,
+  ai_addr : c_ptr @ 24,
+  ai_canonname : c_ptr @ 32,
+  ai_next : c_ptr @ 40
+}
+
+extern record addr_result (size = 8) {
+  value : c_ptr @ 0
+}
+
+extern fun getaddrinfo_raw
+    (node : borrow string, service : borrow string,
+     hints : borrow int8 array, result : borrow int8 array) : int =
+    "getaddrinfo"
+
+extern fun freeaddrinfo_raw (address : c_ptr) : unit = "freeaddrinfo"
+
+extern fun getnameinfo_raw
+    (address : c_ptr, length : int, host : borrow int8 array,
+     hostLength : int, service : c_ptr, serviceLength : int, flags : int) :
+    int =
+    "getnameinfo"
+
+extern fun socket_raw (family : int, kind : int, protocol : int) : int = "socket"
+
+extern fun connect_raw
+    (descriptor : int, address : c_ptr, length : int) : int =
+    "connect"
+
+extern record pollfd (size = 8) {
+  fd : int32 @ 0,
+  events : int32 @ 4
+}
+
+extern record poll_result (size = 8) {
+  revents : int32 @ 4
+}
+
+extern record so_error (size = 4) {
+  value : int32 @ 0
+}
+
+extern fun poll_raw
+    (fds : borrow int8 array, count : int64, timeout : int) : int =
+    "poll"
+
+extern fun getsockopt_raw
+    (descriptor : int, level : int, option : int, value : borrow int8 array,
+     length : borrow int8 array) : int =
+    "getsockopt"
+
+extern fun fcntl_raw
+    (descriptor : int, command : int, argument : int) : int =
+    "fcntl"
+
+(* Connexion TCP ouverte. Linear : `close` est obligatoire sur chaque
+   chemin. *)
+type connection : Linear = { descriptor : int }
+
+(* Pointeur nul sans construire de valeur depuis un entier métier.
+   Aucun paramètre. *)
+fun internal_null () : c_ptr = c_ptr.of_int (int_to_int64 (0))
+
+(* Construit un `addrinfo` de hints avec `ai_socktype = SOCK_STREAM`.
+   Aucun paramètre. *)
+fun internal_hints () : int8 array =
+    let
+        val buffer : int8 array = array_make (0, 48)
+        val typed = array.set (buffer, 8, 1)
+    in typed
+    end
+
+(* Message d'échec de `getaddrinfo`, qui rend un code `EAI_*` et non `errno`.
+   - `operation` : nom public de la fonction appelée.
+   - `code` : code rendu par `getaddrinfo`. *)
+fun internal_gai_error (operation : borrow string, code : int) : string =
+    string_copy (operation) ^ ": getaddrinfo failed (code " ^
+    int_to_string (code) ^ ")"
+
+(* Convertit une adresse `sockaddr` en texte numérique.
+   - `address` : pointeur vers `sockaddr`.
+   - `length` : taille de `sockaddr`. *)
+fun internal_numeric_host (address : c_ptr, length : int) : string =
+    let
+        val buffer : int8 array = array_make_uninit (64)
+        val code =
+            getnameinfo_raw
+                (address, length, borrow buffer, 64, internal_null (), 0, 1)
+    in
+        if code <> 0 then ""
+        else
+            let
+                val text = byte_array.to_string (buffer)
+                val stop = string_find_char (borrow text, 0)
+            in
+                if stop < 0 then text
+                else string_slice (borrow text, 0, stop)
+            end
+    end
+
+(* Parcourt les `addrinfo` et garde les adresses textuelles.
+   - `current` : entrée courante.
+   - `acc` : adresses déjà vues, en ordre inverse. *)
+fun internal_collect (current : c_ptr, acc : string list) : string list =
+    if c_ptr.is_null (current) then list_reverse (acc)
+    else
+        let
+            val info : borrow addrinfo = extern_view_ptr (current, 48)
+            val text = internal_numeric_host (info.ai_addr, info.ai_addrlen)
+            val kept = if string_length (borrow text) = 0 then acc
+                       else Cons ((text, acc))
+        in
+            internal_collect (info.ai_next, kept)
+        end
+
+(* Inverse une liste avec le constructeur de la prelude.
+   - `values` : liste possédée consommée. *)
+fun list_reverse (values : 'a list) : 'a list =
+    let
+        fun loop (remaining : 'a list, acc : 'a list) : 'a list =
+            case remaining of
+                Nil => acc
+              | Cons (head, rest) => loop (rest, Cons ((head, acc)))
+    in
+        loop (values, Nil)
+    end
+
+(* Résout un nom en adresses numériques.
+   - `host` : nom ou adresse emprunté.
+
+   Rend une liste possédée, vide si `getaddrinfo` n'a rien trouvé. *)
+fun resolve (host : borrow string) : string list result =
+    let
+        val hints = internal_hints ()
+        val holder : int8 array = array_make (0, 8)
+        val code =
+            getaddrinfo_raw
+                (host, borrow "0", borrow hints, borrow holder)
+    in
+        if code <> 0 then Error (internal_gai_error (borrow "net.resolve", code))
+        else
+            let
+                val result : borrow addr_result = extern_view (borrow holder)
+                val head = result.value
+                val addresses = internal_collect (head, Nil)
+                val _ = freeaddrinfo_raw (head)
+            in
+                Ok (addresses)
+            end
+    end
+
+(* Encode un entier en quatre octets little-endian.
+   - `value` : entier à encoder. *)
+fun internal_int32_bytes (value : int) : string =
+    string_of_char (value % 256) ^
+    string_of_char ((value / 256) % 256) ^
+    string_of_char ((value / 65536) % 256) ^
+    string_of_char ((value / 16777216) % 256)
+
+(* Lit `SO_ERROR` après un `poll` prêt en écriture.
+   - `descriptor` : socket connecté ou en erreur. *)
+fun internal_socket_error (descriptor : int) : int =
+    let
+        val value : int8 array = array_make (0, 4)
+        val lengthText = internal_int32_bytes (4)
+        val length = byte_array.from_string (borrow lengthText)
+        val status =
+            getsockopt_raw (descriptor, 1, 4, borrow value, borrow length)
+    in
+        if status <> 0 then sys.errno ()
+        else
+            let val view : borrow so_error = extern_view (borrow value)
+            in view.value
+            end
+    end
+
+(* Remet un socket en mode bloquant.
+   - `descriptor` : socket passé en non bloquant pour un timeout. *)
+fun internal_set_blocking (descriptor : int) : int =
+    let val flags = fcntl_raw (descriptor, 3, 0)
+    in
+        if flags < 0 then sys.errno ()
+        else
+            let
+                val nonblocking = (flags / 2048) % 2
+                val cleared =
+                    if nonblocking = 1 then flags - 2048 else flags
+                val status = fcntl_raw (descriptor, 4, cleared)
+            in
+                if status < 0 then sys.errno () else 0
+            end
+    end
+
+(* Attend la fin d'une connexion.
+   - `descriptor` : socket dont `connect` est en cours.
+   - `deadline` : échéance monotone, négative pour attendre sans limite. *)
+fun internal_wait_connected (descriptor : int, deadline : int64) : int =
+    let
+        val timeout = internal_remaining (deadline)
+        val expired = if deadline < int_to_int64 (0) then false
+                      else timeout <= 0
+    in
+        if expired then 110
+        else
+            let
+                val fdsText =
+                    internal_int32_bytes (descriptor) ^
+                    internal_int32_bytes (4)
+                val fds = byte_array.from_string (borrow fdsText)
+                val ready = poll_raw (borrow fds, int_to_int64 (1), timeout)
+            in
+                if ready < 0 then
+                    let val code = sys.errno ()
+                    in
+                        if code = 4 then
+                            internal_wait_connected (descriptor, deadline)
+                        else code
+                    end
+                else if ready = 0 then 110
+                else
+                    let val view : borrow poll_result =
+                            extern_view (borrow fds)
+                    in
+                        if view.revents = 0 then 110
+                        else internal_socket_error (descriptor)
+                    end
+            end
+    end
+
+(* Millisecondes restantes avant `deadline`, ou -1 sans limite. La valeur
+   est bornée à `int` pour rester un timeout `poll` valide même après une
+   longue durée de vie du processus.
+   - `deadline` : échéance monotone, négative pour aucune limite. *)
+fun internal_remaining (deadline : int64) : int =
+    if deadline < int_to_int64 (0) then -1
+    else
+        let val left = deadline - sys.monotonic_ms ()
+        in
+            if left <= int_to_int64 (0) then 0
+            else if left > int_to_int64 (2147483647) then 2147483647
+            else int64_to_int (left)
+        end
+
+(* Vrai si un timeout est actif et déjà écoulé.
+   - `timed` : vrai si un timeout est demandé.
+   - `remaining` : millisecondes restantes. *)
+fun internal_expired (timed : bool, remaining : int) : bool =
+    if timed then remaining <= 0 else false
+
+(* Termine une attente : rétablit le mode bloquant après un succès.
+   - `descriptor` : socket.
+   - `outcome` : 0 ou errno.
+   - `timed` : vrai si le socket était non bloquant. *)
+fun internal_finish (descriptor : int, outcome : int, timed : bool) : int =
+    if outcome = 0 then
+        if timed then internal_set_blocking (descriptor) else 0
+    else outcome
+
+(* Attend la fin d'une connexion après EINTR, EALREADY ou EINPROGRESS.
+   - `descriptor` : socket.
+   - `deadline` : échéance monotone.
+   - `timed` : vrai si un timeout est demandé. *)
+fun internal_retry (descriptor : int, deadline : int64, timed : bool) : int =
+    let val remaining = internal_remaining (deadline)
+    in
+        if internal_expired (timed, remaining) then 110
+        else
+            internal_finish
+                (descriptor,
+                 internal_wait_connected (descriptor, deadline), timed)
+    end
+
+(* Tente `connect` sur une adresse.
+   - `descriptor` : socket ouvert.
+   - `address` : adresse `sockaddr`.
+   - `length` : taille de l'adresse.
+   - `deadline` : échéance monotone, négative pour un connect bloquant.
+
+   Pour un timeout, le socket passe en non bloquant, `poll` attend
+   l'échéance puis `SO_ERROR` donne le résultat ; le mode bloquant est
+   rétabli avant de rendre le descripteur. Après un EINTR la connexion
+   continue en arrière-plan : EALREADY et EISCONN sont gérés de la même
+   façon. Rend 0 en cas de succès, sinon l'errno de l'échec. *)
+fun internal_connect_fd
+    (descriptor : int, address : c_ptr, length : int,
+     deadline : int64) : int =
+    let
+        val timed = deadline >= int_to_int64 (0)
+        val blocked =
+            if timed then sys.set_nonblocking (descriptor) else 0
+        val invalid = if timed then blocked < 0 else false
+    in
+        if invalid then sys.errno ()
+        else
+            let val status = connect_raw (descriptor, address, length)
+            in
+                if status = 0 then internal_finish (descriptor, 0, timed)
+                else
+                    let val code = sys.errno ()
+                    in
+                        if code = 106 then
+                            internal_finish (descriptor, 0, timed)
+                        else if code = 4 then
+                            internal_retry (descriptor, deadline, timed)
+                        else if code = 114 then
+                            internal_retry (descriptor, deadline, timed)
+                        else if code = 115 then
+                            internal_retry (descriptor, deadline, timed)
+                        else code
+                    end
+            end
+    end
+
+(* Essaie chaque `addrinfo` de type stream jusqu'à une connexion réussie.
+   - `current` : entrée courante.
+   - `lastCode` : errno du dernier échec, ou -1.
+   - `deadline` : échéance monotone, négative pour un connect bloquant.
+   - `operation` : nom public pour les messages d'erreur. *)
+fun internal_connect
+    (current : c_ptr, lastCode : int, deadline : int64,
+     operation : borrow string) : int result =
+    if c_ptr.is_null (current) then
+        if lastCode >= 0 then
+            Error (string_copy (operation) ^ ": connect failed (errno " ^
+                   int_to_string (lastCode) ^ ")")
+        else Error (string_copy (operation) ^ ": no stream address")
+    else
+        let
+            val info : borrow addrinfo = extern_view_ptr (current, 48)
+        in
+            if info.ai_socktype <> 1 then
+                internal_connect (info.ai_next, lastCode, deadline, operation)
+            else
+                let val descriptor = socket_raw (info.ai_family, 524289, 0)
+                in
+                    if descriptor < 0 then
+                        let val code = sys.errno ()
+                        in
+                            internal_connect
+                                (info.ai_next, code, deadline, operation)
+                        end
+                    else
+                        let
+                            val code =
+                                internal_connect_fd
+                                    (descriptor, info.ai_addr,
+                                     info.ai_addrlen, deadline)
+                        in
+                            if code = 0 then Ok (descriptor)
+                            else
+                                let val _ = sys.close (descriptor)
+                                in
+                                    internal_connect
+                                        (info.ai_next, code, deadline,
+                                         operation)
+                                end
+                        end
+                end
+        end
+
+(* Ouvre une connexion TCP vers `host:port` avec une échéance monotone.
+   - `host` : nom ou adresse emprunté.
+   - `port` : port TCP.
+   - `deadline` : échéance monotone en millisecondes, négative pour un
+     connect bloquant sans limite.
+   - `operation` : nom public pour les messages d'erreur. *)
+fun internal_connect_host
+    (host : borrow string, port : int, deadline : int64,
+     operation : borrow string) : connection result =
+    if port < 0 then
+        Error (string_copy (operation) ^
+               ": port must be between 0 and 65535")
+    else if port > 65535 then
+        Error (string_copy (operation) ^
+               ": port must be between 0 and 65535")
+    else
+        let
+            val service = int_to_string (port)
+            val hints = internal_hints ()
+            val holder : int8 array = array_make (0, 8)
+            val code =
+                getaddrinfo_raw
+                    (host, borrow service, borrow hints, borrow holder)
+        in
+            if code <> 0 then
+                Error (internal_gai_error (operation, code))
+            else
+                let
+                    val result : borrow addr_result = extern_view (borrow holder)
+                    val head = result.value
+                    val outcome =
+                        internal_connect (head, -1, deadline, operation)
+                    val _ = freeaddrinfo_raw (head)
+                in
+                    case outcome of
+                        Error (message) => Error (message)
+                      | Ok (descriptor) => Ok ({ descriptor = descriptor })
+                end
+        end
+
+(* Ouvre une connexion TCP vers `host:port`.
+   - `host` : nom ou adresse emprunté.
+   - `port` : port TCP.
+
+   Rend une connexion Linear ; `close` est obligatoire. *)
+fun connect (host : borrow string, port : int) : connection result =
+    internal_connect_host
+        (host, port, int_to_int64 (-1), borrow "net.connect")
+
+(* Ouvre une connexion TCP avec un timeout.
+   - `host` : nom ou adresse emprunté.
+   - `port` : port TCP.
+   - `timeout_ms` : délai maximal en millisecondes, zéro inclus.
+
+   Rend une connexion Linear ou une erreur (`errno 110` si le délai
+   expire). *)
+fun connect_timeout
+    (host : borrow string, port : int, timeout_ms : int) : connection result =
+    if timeout_ms < 0 then
+        Error ("net.connect_timeout: timeout must not be negative")
+    else
+        internal_connect_host
+            (host, port,
+             sys.monotonic_ms () + int_to_int64 (timeout_ms),
+             borrow "net.connect_timeout")
+
+(* Lit le descripteur d'une connexion sans la fermer.
+   - `value` : connexion empruntée. *)
+fun connection_fd (value : borrow connection) : int = value.descriptor
+
+(* Transfère la propriété du descripteur à l'appelant, qui doit le fermer
+   avec `sys.close`. Échappatoire réservée à `net/Net`, qui enveloppe le
+   descripteur dans son propre type Linear.
+   - `value` : connexion consommée. *)
+fun into_fd (value : connection) : int =
+    case value of
+        { descriptor = descriptor } => descriptor
+
+(* Ferme une connexion. Obligatoire : `connection` est Linear.
+   - `value` : connexion consommée. *)
+fun close (value : connection) : unit =
+    case value of
+        { descriptor = descriptor } =>
+            let val _ = sys.close (descriptor)
+            in ()
+            end

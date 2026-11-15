@@ -1,0 +1,10 @@
+
+
+fun loop (n : int, acc : int) : int =
+    if n <= 0 then acc
+    else
+        let val s = int_to_string (n) ^ "x"
+        in loop (n - 1, acc + string_length (borrow s))
+        end
+
+fun main () = print_int (loop (1000000, 0))

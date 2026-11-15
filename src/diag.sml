@@ -52,6 +52,10 @@ struct
     | "E3040" => "use a Copy element type, or build the array with `array_new` and `array_push`"
     | "E3041" => "use `array_get_borrow` to read the element without copying it"
     | "E3042" => "use the checked functions of `yack/array`; the kernel is for the standard library"
+    | "E3043" => "import the public wrapper of that module instead of its private extern"
+    | "E3045" => "extern accepts `int`, `int64`, `borrow string` and `borrow int8 array` parameters"
+    | "E3046" => "extern returns `int`, `int64` or `unit`; fill a buffer for anything else"
+    | "E3047" => "check the field offset and the record `size`; only fixed-width fields and extern records are allowed"
     | "E3044" => "use `map_get_borrow` to read the value without taking ownership"
     | "E0402" => "move the use before the transfer, or copy the value if its type is Copy"
     | "E0403" => "consume the value on every path before its scope ends"
@@ -77,7 +81,11 @@ struct
     | "E0607" => "check the constructor name, or declare it in a `datatype`"
     | "E0608" => "write `Name (value)`; this constructor needs an argument"
     | "E0609" => "use a field name declared by the record type"
+    | "E0701" =>
+        "build the value in the destination region, or root it before it escapes"
     | "E0702" => "store a freshly constructed or root-allocated value, not a reference to the current region"
+    | "E0704" =>
+        "construct the value in the destination region; a stack alloca cannot escape"
     | "E0610" => "use a literal format string and pass one value per directive"
     | "E0518" => "call the local function directly; a capturing local function cannot become a closure value"
     | "E0519" => "rename the shadowing binding, or move the local function below it"

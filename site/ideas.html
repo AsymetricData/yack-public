@@ -34,12 +34,12 @@
     <main id="content">
         <div class="tut-hero">
             <p class="eyebrow">Design notes · Memory model · about 20 minutes</p>
-            <h1>Ownership, <span class="accent">without a garbage collector.</span></h1>
+            <h1>Ownership instead of <span class="accent">a garbage collector.</span></h1>
             <p class="lead">
-                Yack is an experiment: a small ML-family language with a syntax its author
-                finds pleasant and simple, compiled through LLVM to native code. Affine and
-                linear types, borrowed from Rust's ownership model, replace the garbage
-                collector; the only ceremony left is what the types force.
+                Yack is an experiment: a small language in the ML family, with a syntax its
+                author finds pleasant, compiled through LLVM to native code. Affine and linear
+                types, the ownership ideas Rust made familiar, take the place of the garbage
+                collector. The only ceremony left is what the types require.
             </p>
             <ul class="from-langs" aria-label="Built from">
                 <li>the syntax of <strong>SML</strong> and <strong>OCaml</strong></li>
@@ -68,36 +68,35 @@
             <div class="tut-body">
                 <section class="step" id="question" aria-labelledby="question-title">
                     <span class="step-num">01. The starting point</span>
-                    <h2 id="question-title">A comfortable ML, without a garbage collector</h2>
+                    <h2 id="question-title">Why the language exists</h2>
                     <p>
-                        Yack exists because its author wanted a language with a syntax they
-                        find pleasant and simple: the ML family, close to SML and OCaml, with
-                        <code>let</code> and <code>val</code>, <code>fun</code>, datatypes,
-                        pattern matching, modules and pipes. The goal is a language that feels
-                        like home and is comfortable to write, with little ceremony.
+                        Yack exists because its author wanted a language with a syntax they find
+                        pleasant: the ML family, close to SML and OCaml, with <code>let</code> and
+                        <code>val</code>, <code>fun</code>, datatypes, pattern matching, modules
+                        and pipes. The goal is a language that feels familiar and is comfortable
+                        to write.
                     </p>
                     <p>
                         Rust shows that ownership can replace a garbage collector: affine and
                         linear types, moves and borrows do the work a tracing collector would
-                        otherwise do. Its syntax is felt as verbose and heavy by comparison, so
-                        Yack keeps the ownership ideas and drops that weight. The memory model
-                        stays checked in the frontend, over a syntax that stays small.
+                        otherwise do. Its syntax feels verbose by comparison, so Yack keeps the
+                        ownership ideas and leaves out that weight. The memory model is checked in
+                        the frontend, over a syntax that stays small.
                     </p>
                     <p>
-                        The only ceremony that should remain is what the types force: a move
-                        when ownership is transferred, a borrow annotation when a value is read
-                        without being taken, a call that consumes a linear value.
-                        <a href="#borrowing">The borrowing section</a> shows the annotations,
-                        and <a href="#costs">What it costs</a> sets out where they are felt.
-                        Yack is an experiment; version 0.2.0 is usable and tested, but it is not
-                        presented as production-ready.
+                        The only ceremony that should remain is what the types force: a move when
+                        ownership is transferred, a borrow annotation when a value is read without
+                        being taken, and a call that consumes a linear value.
+                        <a href="#borrowing">The borrowing section</a> shows the annotations, and
+                        <a href="#costs">What it costs</a> describes where they are felt. Yack is
+                        an experiment; version 0.2.0 is usable and tested, but it is not presented
+                        as production-ready.
                     </p>
                     <div class="callout">
                         <strong>No hidden runtime collection.</strong>
                         Values are moved, borrowed and dropped according to their declared
-                        property. There is no tracing collector and no reference counting; the
-                        compiler emits native code, and the ownership information is checked
-                        before lowering.
+                        property. There is no tracing collector and no reference counting. The
+                        compiler emits native code, and ownership is checked before lowering.
                     </div>
                     <p>
                         The rest of this page describes the model as it exists in the
@@ -278,9 +277,9 @@ fun main () =
   = hint: or move the consumption after the `if`/`case` so every branch reaches it</code></pre>
                     </div>
                     <p>
-                        Linearity is a declared type property, not a special case for two
-                        builtins. A record or datatype can be declared <code>: Linear</code>,
-                        and the checker follows it through branches. The SQLite binding in
+                        Linearity is a declared type property; any record or datatype can be
+                        declared <code>: Linear</code>, and the checker follows it through
+                        branches. The SQLite binding in
                         <code>lib/sql/src/Sqlite.yack</code> does this for <code>db</code> and
                         <code>statement</code>:
                     </p>
@@ -320,7 +319,7 @@ fun main () = ()</code></pre>
                         <code>lib/net/src/Net.yack</code>; the functions are
                         <code>close_listener</code> and <code>close</code>. Linearity here is a
                         discipline over declared handle types: the property is checked by the
-                        same ownership analysis that handles moves, not by a separate runtime
+                        same ownership analysis that handles moves, with no separate runtime
                         mechanism.
                     </p>
                 </section>
@@ -386,8 +385,8 @@ fun main () =
                     <p>
                         Yack has two allocation modes, selected at build time with
                         <code>--memory=heap</code> (the default) or <code>--memory=stack</code>.
-                        The same source can be compiled in either mode; the mode changes the
-                        emitted runtime, not a runtime flag.
+                        The same source can be compiled in either mode; the choice changes the
+                        emitted runtime, and there is no switch at run time.
                     </p>
                     <div class="table-scroll">
                     <table class="compare">
@@ -435,20 +434,20 @@ fun main () =
                         Stack mode is the more ambitious half of the experiment. It emits no
                         <code>malloc</code>, <code>calloc</code>, <code>realloc</code> or
                         <code>free</code> from libc for Yack values; allocations come from a
-                        region reserved with <code>mmap</code>. The contract is that the
-                        compiler must prove a value does not outlive its region, and must reject
-                        the program rather than fall back to the heap. The region verifier is
-                        still being completed: <code>E0702</code> covers stores the analysis
-                        cannot prove, <code>E0703</code> covers a borrow whose owner lives in a
-                        closed arena, and <code>E0701</code> (a value escaping its region) is
-                        still unfinished. The README marks the whole mode as experimental for
-                        that reason.
+                        region reserved with <code>mmap</code>. The contract is that the compiler
+                        must prove a value does not outlive its region, and must reject the
+                        program rather than fall back to the heap. A region verifier now runs on
+                        every stack build: <code>E0701</code> covers a value that could outlive
+                        its activation region, <code>E0702</code> a store the analysis cannot
+                        prove, <code>E0703</code> a borrow whose owner lives in a closed arena,
+                        and <code>E0704</code> an allocation site it does not support. The mode is
+                        still experimental, and the README says so.
                     </p>
                     <div class="callout warn">
                         <strong>Experimental means experimental.</strong>
                         Stack mode is tested differentially against heap mode and under
-                        AddressSanitizer, but the region analysis still has conservative
-                        corners. The heap mode remains the default for a reason.
+                        AddressSanitizer, but the region analysis still has conservative corners.
+                        Heap mode remains the default.
                     </div>
                 </section>
 
@@ -488,11 +487,11 @@ fun main () =
                         recorded in <code>docs/threads.md</code>.
                     </p>
                     <p>
-                        The raw SQLite handle path in <code>docs/sql.md</code> is the exception
-                        that proves the rule: a connection handle is passed as an
-                        <code>int64</code>, and that path is explicitly <strong>not
-                        checked</strong>. The owner must keep the connection alive until
-                        <code>thread_join</code>. The language does not prove that for you.
+                        The raw SQLite handle path in <code>docs/sql.md</code> is the one
+                        exception: a connection handle is passed as an <code>int64</code>, and
+                        that path is explicitly <strong>not checked</strong>. The owner must keep
+                        the connection alive until <code>thread_join</code>. The language does not
+                        prove that for you.
                     </p>
                 </section>
 
@@ -541,23 +540,23 @@ fun main () =
                             bytes with <code>--trim</code>, against 2,471,820 bytes for the Go
                             build and 1,042,640 bytes for the Rust build with <code>clap</code>.
                             The Yack binary is dynamically linked against libc, libm and
-                            libsqlite3; the comparison is about the shipped artefact, not speed.
+                            libsqlite3; the comparison measures the shipped artefact, and speed
+                            is a separate question.
                         </li>
                     </ul>
                     <p>
-                        These are properties of the current implementation, not a blanket
-                        “memory safety” claim. Programs that use raw handles, or parts of the
-                        runtime that the SSA validator does not model, sit outside the checked
-                        subset. The repository labels those boundaries rather than hiding them.
+                        These are properties of the current implementation, and the claim stops
+                        there: programs that use raw handles, or parts of the runtime that the SSA
+                        validator does not model, sit outside the checked subset. The repository
+                        lists those boundaries in its documentation.
                     </p>
                 </section>
 
                 <section class="step" id="costs" aria-labelledby="costs-title">
                     <span class="step-num">09. What it costs</span>
-                    <h2 id="costs-title">The difficulties are part of the design</h2>
+                    <h2 id="costs-title">Where the model strains</h2>
                     <p>
-                        The model is not free, and the repository is candid about where it
-                        strains:
+                        The model has real costs, and the repository says where it strains:
                     </p>
                     <ul>
                         <li>
@@ -566,9 +565,8 @@ fun main () =
                             -&gt; R</code> when the callback takes ownership; a returned borrow
                             needs <code>from</code> when several parameters could be the source.
                             The compiler infers a lot, but the ownership surface is visible in
-                            the source. These borrow annotations and explicit copies are exactly
-                            the ceremony the types impose; they are the price of checking
-                            ownership without a collector, not accidental noise.
+                            the source. These borrow annotations and explicit copies are what
+                            checking ownership without a collector costs.
                         </li>
                         <li>
                             <strong>No capturing closures.</strong> Functions can be passed by
@@ -621,8 +619,8 @@ fun main () =
                             <code>contains_string</code> instead of a <code>Comparator</code> or
                             <code>Hashable</code> abstraction. <code>yack/map</code> is
                             string-keyed; a generic map would need <code>hash</code> and
-                            <code>eq</code> for its key. <code>docs/stdlib.md</code> lists this
-                            as a design limit, not an oversight.
+                            <code>eq</code> for its key. <code>docs/stdlib.md</code> records this
+                            as a design limit.
                         </li>
                         <li>
                             <strong>Shared graphs and cycles are awkward or impossible.</strong>
@@ -647,9 +645,10 @@ fun main () =
                             ownership and path-sensitive partial moves take practice.
                         </li>
                         <li>
-                            <strong>Still experimental.</strong> Stack mode's region analysis is
-                            incomplete; raw SQLite handles are unchecked; the standard library
-                            is partial for networking, dates and encodings; there is no
+                            <strong>Still experimental.</strong> Stack mode's region analysis
+                            remains conservative; raw SQLite handles are unchecked; the standard
+                            library is still partial for text encodings, and the newer system
+                            modules for files, processes, TCP and time are young; there is no
                             <code>pub</code>/private visibility and no <code>open</code>. The
                             README's status table is the current map.
                         </li>

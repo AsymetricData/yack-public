@@ -32,6 +32,7 @@ struct
       val aliasEnvironment : (string * aliasInfo) list ref = ref []
       val declaredTypes = ref []
       val declaredAliases = ref []
+      val externRecordSizes = ref []
       val declaredDatatypes = ref []
       val constructorEnvironment = ref []
       val currentTypeVars = ref []
@@ -297,6 +298,7 @@ struct
                      ty
                    end)
         | Ast.TyName "io_result" => ioResultOf (Types.TString)
+        | Ast.TyName "c_ptr" => Types.TCPtr
         | Ast.TyName name =>
             (case List.find
                     (fn (candidate, _) => candidate = name)
@@ -613,6 +615,101 @@ struct
                     declaredTypes := declaredInfo :: !declaredTypes
                   end
 
+            | Ast.DExternRecord {name, nameSpan, size, fields, span} =>
+                if typeNameTaken name then
+                  report
+                    "E3013"
+                    ("duplicate type `" ^ name ^ "`")
+                    nameSpan
+                    []
+                    []
+                else
+                  let
+                    val savedTypeName = !currentTypeName
+                    val _ = currentTypeName := name
+                    val resolvedFields =
+                      List.map
+                        (fn (field, syntax, offset) =>
+                          (field, resolveSyntaxType span syntax, offset))
+                        fields
+                    val _ = currentTypeName := savedTypeName
+                    fun fieldSize ty =
+                      case Types.prune ty of
+                        Types.TInt 8 => SOME 1
+                      | Types.TInt 16 => SOME 2
+                      | Types.TInt 32 => SOME 4
+                      | Types.TInt 64 => SOME 8
+                      | Types.TCPtr => SOME 8
+                      | Types.TFloat 32 => SOME 4
+                      | Types.TFloat 64 => SOME 8
+                      | Types.TCon {name = other, ...} =>
+                          (case List.find
+                                  (fn (candidate, _) => candidate = other)
+                                  (!externRecordSizes) of
+                             SOME (_, otherSize) => SOME otherSize
+                           | NONE => NONE)
+                      | _ => NONE
+                    val _ =
+                      List.app
+                        (fn (field, ty, offset) =>
+                          case fieldSize ty of
+                            NONE =>
+                              report
+                                "E3047"
+                                ("extern record field `" ^ field ^
+                                 "` has an unsupported type")
+                                span
+                                [ "type: " ^ Types.toString ty ]
+                                [ "use int8/int16/int32/int64, float32/float64 or another extern record" ]
+                          | SOME bytes =>
+                              if offset + bytes <= size then ()
+                              else
+                                report
+                                  "E3047"
+                                  ("extern record field `" ^ field ^
+                                   "` does not fit in " ^ Int.toString size ^
+                                   " bytes")
+                                  span
+                                  [ "offset: " ^ Int.toString offset ^
+                                    ", size: " ^ Int.toString bytes ]
+                                  [ "increase `size` or move the field" ])
+                        resolvedFields
+                    val typeFields =
+                      List.map (fn (field, ty, _) => (field, ty)) resolvedFields
+                    val property =
+                      propertyJoin
+                        (List.map (fn (_, ty, _) => Types.propertyOf ty)
+                           resolvedFields)
+                    val effective =
+                      if property = Types.Copy then Types.Copy
+                      else
+                        (report
+                           "E3047"
+                           ("extern record `" ^ name ^
+                            "` may only contain Copy fields")
+                           span
+                           []
+                           [];
+                         Types.Copy)
+                    val typeValue =
+                      Types.TCon
+                        { name = name
+                        , property = effective
+                        , fields = typeFields
+                        }
+                    val declaredInfo =
+                      { name = name
+                      , declared = Types.Copy
+                      , effective = effective
+                      , fields = typeFields
+                      , span = span
+                      }
+                  in
+                    typeEnvironment := (name, typeValue) :: !typeEnvironment;
+                    declaredTypes := declaredInfo :: !declaredTypes;
+                    externRecordSizes := (name, size) :: !externRecordSizes
+                  end
+
             | Ast.DDatatype {name, params, declared, constructors, span} =>
                 if typeNameTaken name then
                   report
@@ -747,15 +844,73 @@ struct
 
       fun buildEnvironment () =
         let
+          fun isExternBody body =
+            case body of
+              Ast.EExtern _ => true
+            | _ => false
+          fun externParameterSupported ty =
+            case Types.prune ty of
+              Types.TInt 32 => true
+            | Types.TInt 64 => true
+            | Types.TCPtr => true
+            | Types.TBorrow (Types.TString, false, _) => true
+            | Types.TBorrow (Types.TArray (Types.TInt 8), _, _) => true
+            | _ => false
+          fun externResultSupported ty =
+            case Types.prune ty of
+              Types.TInt 32 => true
+            | Types.TInt 64 => true
+            | Types.TUnit => true
+            | Types.TCPtr => true
+            | _ => false
+          fun checkExternSignature
+                (name, params, paramTypes, result, resultType, resultSpan) =
+            let
+              val pairs =
+                ListPair.zip (params, paramTypes)
+                handle UnequalLengths => []
+              val _ =
+                List.app
+                  (fn (param, ty) =>
+                    if externParameterSupported ty then ()
+                    else
+                      report
+                        "E3045"
+                        ("extern parameter `" ^ #name param ^
+                         "` has an unsupported type")
+                        (#span param)
+                        [ "type: " ^ Types.toString ty ]
+                        [ "extern accepts `int`, `int64`, `borrow string` and " ^
+                          "`borrow int8 array` parameters" ])
+                  pairs
+            in
+              if not (Option.isSome result) then
+                report
+                  "E3046"
+                  "extern needs an explicit result type"
+                  resultSpan
+                  []
+                  ["write `: int`, `: int64` or `: unit`"]
+              else if not (externResultSupported resultType) then
+                report
+                  "E3046"
+                  ("extern `" ^ name ^
+                   "` has an unsupported result type")
+                  resultSpan
+                  [ "type: " ^ Types.toString resultType ]
+                  ["extern returns `int`, `int64` or `unit`; fill a buffer for anything else"]
+              else ()
+            end
           fun step (declaration, functions) =
             case declaration of
               Ast.DType _ => functions
             | Ast.DAlias _ => functions
             | Ast.DDatatype _ => functions
             | Ast.DImport _ => functions
+            | Ast.DExternRecord _ => functions
             | Ast.DFunClause _ =>
                 raise Fail "check: desugared function clause"
-            | Ast.DFun {name, params, result, span, ...} =>
+            | Ast.DFun {name, params, result, span, body, ...} =>
                 if List.exists (fn builtin => builtin = name) builtins then
                   ( report
                       "E3011"
@@ -842,6 +997,17 @@ struct
                                Types.TBorrow (inner, mutable, SOME index)
                            | _ => resultType)
                       | _ => resultType
+                    val _ =
+                      if isExternBody body then
+                        checkExternSignature
+                          ( name
+                          , params
+                          , paramTypes
+                          , result
+                          , resultType
+                          , span
+                          )
+                      else ()
                     val _ = currentParameters := savedParameters
                     val _ = recordBindingTypes (paramSpans, paramTypes)
                     val typeVars = !currentTypeVars
@@ -1851,6 +2017,9 @@ struct
               Types.TFun (paramTypes, resultType)
             end
 
+        | Ast.EExtern {result, span, ...} =>
+            resolveSyntaxType span result
+
         | Ast.ECall (name, arguments, span) =>
             (case List.find (fn (candidate, _) => candidate = name) locals of
                SOME (_, localType) =>
@@ -2823,6 +2992,7 @@ struct
                      branches)
             | Ast.EBorrow (_, _, operand, _) => walk operand
             | Ast.EFn (_, _, body, _) => walk body
+            | Ast.EExtern _ => []
         in
           walk expression
         end

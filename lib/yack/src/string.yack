@@ -49,6 +49,32 @@ fun char_at (text : borrow string, index : int) : int option =
 fun char_at_unchecked (text : borrow string, index : int) : int =
     string_char_at_unchecked (text, index)
 
+(* Construit une chaîne d’un seul octet.
+   - `value` : code d’octet, de 0 à 255.
+
+   Retourne une chaîne neuve possédée de longueur 1. *)
+fun of_char (value : int) : string = string_of_char (value)
+
+(* Cherche un octet à partir d’un index.
+   - `text` : chaîne source empruntée, indexée par octet.
+   - `start` : index de départ de la recherche, à partir de zéro.
+   - `character` : code d’octet cherché.
+
+   Retourne l’index de la première occurrence à partir de `start`, ou `-1`
+   si l’octet est absent ; la source reste empruntée. *)
+fun index_of_char_from
+        (text : borrow string, start : int, character : int) : int =
+    string_find_char_from (text, start, character)
+
+(* Cherche la première occurrence d’un octet.
+   - `text` : chaîne source empruntée, indexée par octet.
+   - `character` : code d’octet cherché.
+
+   Retourne l’index de la première occurrence, ou `-1` si l’octet est
+   absent ; la source reste empruntée. *)
+fun index_of_char (text : borrow string, character : int) : int =
+    index_of_char_from (text, 0, character)
+
 (* Lit le code d’octet à un index et rend `-1` hors limites, comme le builtin
    `string_char_at`.
    - `text` : chaîne source empruntée, indexée par octet.

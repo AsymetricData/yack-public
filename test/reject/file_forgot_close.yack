@@ -1,0 +1,6 @@
+import yack/file
+
+fun main () =
+    case file.open (borrow "/tmp/yack-file-forgotten", file.Read) of
+        Error (_) => ()
+      | Ok (handle) => ()

@@ -1,0 +1,6 @@
+
+
+fun main () =
+    let val buffer = bytes_from_string (borrow "abc")
+        val stop = bytes_write_string (borrow buffer, 0, 3, borrow "xyz")
+    in print_int (stop) end

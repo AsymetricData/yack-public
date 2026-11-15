@@ -1,6 +1,7 @@
 # Yack : language server (`yack lsp`)
 
-> **Statut : intégré au compilateur, fonctionnalités principales.**
+> **Statut : intégré au compilateur. Les fonctionnalités principales sont là,
+> les limites sont listées en bas.**
 
 `yack lsp` est un serveur JSON-RPC 2.0 qui parle le Language Server Protocol
 sur `stdin` / `stdout`. Il est compilé avec le reste de Yack (MLton) et ne
@@ -363,9 +364,8 @@ retombe sur un parse local pour retrouver l'AST utile.
 | `E0512` | Mark the callback parameter as `consume` | insère `consume ` devant le type du paramètre de callback de la fonction appelée, quand sa déclaration est dans le fichier courant |
 | `E0513` | Mark the callback parameter as `consume` | même action : transforme `f : T -> R` en `f : consume T -> R` pour que l'appelant transfère l'argument |
 
-Les actions sont volontairement conservatrices : un edit ne modifie qu'une
-déclaration ou une branche, et n'essaie jamais de réécrire un programme
-complet.
+Les actions restent conservatrices : un edit ne modifie qu'une déclaration
+ou une branche, et n'essaie jamais de réécrire un programme complet.
 
 ### Refactors
 
@@ -468,8 +468,9 @@ vim.lsp.start({
 
 ## Limites actuelles
 
-- synchronisation incrémentale (`TextDocumentContentChangeEvent.range`) ;
-- `references`/`rename` couvrent le fichier et son graphe d'imports chargé ;
+- une trame JSON-RPC malformée peut faire tomber le serveur : le framing ne
+  valide pas encore assez les en-têtes et le corps ;
+- `references` et `rename` couvrent le fichier et son graphe d'imports chargé ;
   les autres paquets ne sont pas parcourus, et le rename de type reste local au
   fichier ;
 - le formatage suit la largeur par défaut du formateur, pas les options du
@@ -478,8 +479,8 @@ vim.lsp.start({
   `.commandcode`, `.yack` et `node_modules` ;
 - les positions non ASCII sont converties en UTF-16 depuis les colonnes en
   octets de Yack ; les fichiers ASCII n'ont aucun coût supplémentaire ;
-- les quick fixes ne sont pas encore fournis directement par le compilateur :
-  le serveur les déduit du code et de l'AST.
+- les quick fixes ne viennent pas du compilateur : le serveur les déduit du
+  code et de l'AST.
 
 ## Tests
 

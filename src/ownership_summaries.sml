@@ -22,7 +22,6 @@ struct
         , "set_nonblocking"
         , "epoll_add_read"
         , "accept"
-        , "send_string"
         , "sys.send_string_raw"
         , "string_length"
         , "string_eq"

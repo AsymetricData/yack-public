@@ -1,4 +1,5 @@
 import web/Cookie
+import yack/string
 
 (* yack/web/Response : réponse HTTP possédée.
 
@@ -168,7 +169,7 @@ fun render_with (response : t, connection : borrow string) : string =
             "HTTP/1.1 " ^ int_to_string (status) ^ " " ^ status_text (status) ^ "\r\n" ^
                 render_headers (headers) ^
                 "Content-Length: " ^
-                int_to_string (string_length (borrow body)) ^
+                int_to_string (string.length (borrow body)) ^
                 "\r\n" ^
                 "Connection: " ^ string_copy (connection) ^ "\r\n\r\n" ^
                 body
