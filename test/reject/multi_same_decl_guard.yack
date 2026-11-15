@@ -1,0 +1,8 @@
+
+
+fun main () =
+    let val a : string = 1
+        val s = "text"
+        val t = s
+    in print_string (s)
+    end

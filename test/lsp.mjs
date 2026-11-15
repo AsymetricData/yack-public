@@ -1957,6 +1957,118 @@ fun main () =
     ),
   );
 
+
+
+
+  client.child.stdin.write("X-No-Length: 1\r\n\r\n");
+  client.child.stdin.write("Content-Length: abc\r\n\r\n");
+  client.child.stdin.write("Content-Length: 99999999999999999999\r\n\r\n");
+  client.child.stdin.write("Content-Length: -5\r\n\r\n");
+  const notJson = "{this is not json";
+  client.child.stdin.write(
+    `Content-Length: ${Buffer.byteLength(notJson)}\r\n\r\n${notJson}`,
+  );
+  const parseError = await client.wait(
+    (message) => message.error?.code === -32700,
+    "parse error response",
+  );
+  check(
+    "non-JSON body answers -32700 with id null",
+    parseError.id === null && parseError.error.message === "Parse error",
+    JSON.stringify(parseError),
+  );
+  const afterFraming = await client.request("initialize", {
+    processId: process.pid,
+    rootUri: `file://${root}`,
+    capabilities: {},
+  });
+  check(
+    "server still answers after malformed framing",
+    afterFraming.result?.capabilities?.textDocumentSync?.openClose === true,
+    JSON.stringify(afterFraming.error),
+  );
+  check(
+    "malformed framing is logged on stderr",
+    client.stderr.includes("missing Content-Length header") &&
+      client.stderr.includes("invalid Content-Length"),
+    client.stderr,
+  );
+
+
+
+  const truncated = spawn(yack, ["lsp"], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let truncatedErr = "";
+  let truncatedOut = "";
+  truncated.stdout.on("data", (chunk) => {
+    truncatedOut += chunk.toString("utf8");
+  });
+  truncated.stderr.on("data", (chunk) => {
+    truncatedErr += chunk.toString("utf8");
+  });
+  const truncatedExit = new Promise((resolve) => {
+    truncated.on("exit", (code, signal) => resolve({ code, signal }));
+  });
+  truncated.stdin.write('Content-Length: 100\r\n\r\n{"jsonrpc"');
+  truncated.stdin.end();
+  const truncatedResult = await truncatedExit;
+  check(
+    "truncated body exits cleanly",
+    truncatedResult.code === 0 &&
+      truncatedOut === "" &&
+      truncatedErr.includes("unexpected end of message body") &&
+      !/uncaught exception|Exception|Fail/i.test(truncatedErr),
+    JSON.stringify({ ...truncatedResult, stderr: truncatedErr }),
+  );
+
+
+
+
+  const multiParseUri = `file://${join(root, "test/reject/multi_parse_type.yack")}`;
+  const multiParse = await client.open(
+    multiParseUri,
+    `fun broken (x : int) : int = x +
+
+fun main () =
+    let val c : bool = 1
+    in if c then print_int (0) else print_int (1)
+    end
+`,
+  );
+  const multiParseCodes = new Set(
+    multiParse.params.diagnostics.map((diagnostic) => diagnostic.code),
+  );
+  check(
+    "parse error and type error in different functions are both published",
+    multiParseCodes.has("E2002") && multiParseCodes.has("E3004"),
+    JSON.stringify([...multiParseCodes]),
+  );
+
+  const multiOwnershipUri = `file://${join(root, "test/reject/multi_type_ownership.yack")}`;
+  const multiOwnership = await client.open(
+    multiOwnershipUri,
+    `fun b () : bool = 3
+
+fun c () : unit =
+    let val s = "text"
+        val t = s
+    in print_string (s)
+    end
+
+fun main () = print_bool (b ())
+`,
+  );
+  const multiOwnershipCodes = new Set(
+    multiOwnership.params.diagnostics.map((diagnostic) => diagnostic.code),
+  );
+  check(
+    "type error and ownership error in different functions are both published",
+    multiOwnershipCodes.has("E3004") && multiOwnershipCodes.has("E0402"),
+    JSON.stringify([...multiOwnershipCodes]),
+  );
+
   await client.request("shutdown", {});
   client.notify("exit", {});
 } catch (error) {

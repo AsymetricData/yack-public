@@ -481,17 +481,25 @@ struct
         let
           val keepGoing =
             case readMessage TextIO.stdIn of
-              NONE => false
-            | SOME text =>
-                case Json.tryParse text of
-                  NONE => true
-                | SOME message =>
-                    handleMessage state message
-                    handle error =>
-                      ( logError (exnMessage error)
-                      ; failRequest message error
-                      ; true
-                      )
+              EndOfInput => false
+            | Malformed reason =>
+
+                (logError reason; true)
+            | Truncated reason =>
+
+                (logError reason; false)
+            | Body text =>
+                (case Json.tryParse text of
+                   NONE =>
+
+                     (respondError jsonNull (~32700) "Parse error"; true)
+                 | SOME message =>
+                     handleMessage state message
+                     handle error =>
+                       ( logError (exnMessage error)
+                       ; failRequest message error
+                       ; true
+                       ))
         in
           if keepGoing then loop () else ()
         end

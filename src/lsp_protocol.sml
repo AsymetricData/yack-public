@@ -63,55 +63,88 @@ struct
   fun lowercase text =
     String.map (fn character => Char.toLower character) text
 
-  fun contentLength line =
+  val maximumBody = 64 * 1024 * 1024
+
+  datatype message =
+      Body of string
+    | EndOfInput
+    | Malformed of string
+    | Truncated of string
+
+  fun trimLeft text =
+    if String.size text > 0 andalso
+       (String.sub (text, 0) = #" " orelse String.sub (text, 0) = #"\t")
+    then trimLeft (String.substring (text, 1, String.size text - 1))
+    else text
+
+  fun trimRight text =
+    if String.size text > 0 andalso
+       (String.sub (text, String.size text - 1) = #" " orelse
+        String.sub (text, String.size text - 1) = #"\t")
+    then trimRight (String.substring (text, 0, String.size text - 1))
+    else text
+
+  fun digitsOnly text =
     let
-      val lower = lowercase line
-      val prefix = "content-length:"
+      fun loop index =
+        index >= String.size text orelse
+        (Char.isDigit (String.sub (text, index)) andalso loop (index + 1))
     in
-      if String.isPrefix prefix lower then
-        let
-          val value =
-            String.extract (line, String.size prefix, NONE)
-          val value = String.map (fn c => if c = #" " then #" " else c) value
-          fun trimLeft text =
-            if String.size text > 0 andalso
-               (String.sub (text, 0) = #" " orelse
-                String.sub (text, 0) = #"\t")
-            then trimLeft (String.substring (text, 1, String.size text - 1))
-            else text
-          val value = trimLeft value
-        in
-          Int.fromString value
+      String.size text > 0 andalso loop 0
+    end
+
+  fun contentLength line =
+    let val prefix = "content-length:" in
+      if String.isPrefix prefix (lowercase line) then
+        let val raw = trimRight (trimLeft
+                      (String.extract (line, String.size prefix, NONE))) in
+          if not (digitsOnly raw) orelse String.size raw > 9 then SOME NONE
+          else
+            (SOME (Int.fromString raw))
+            handle Overflow => SOME NONE
         end
       else NONE
     end
 
   fun readMessage stream =
     let
-      fun headers length =
+
+      fun headers (length, problem) =
         case readLine stream of
-          NONE => NONE
+          NONE => EndOfInput
         | SOME "" =>
-            (case length of
-               SOME bytes => readBody bytes
-             | NONE => raise Fail "missing Content-Length header")
+            (case problem of
+               SOME reason => Malformed reason
+             | NONE =>
+                 (case length of
+                    SOME bytes => readBody bytes
+                  | NONE => Malformed "missing Content-Length header"))
         | SOME line =>
-            (case contentLength line of
-               SOME bytes => headers (SOME bytes)
-             | NONE => headers length)
-      and readBody count =
-        let
-          fun loop (remaining, bytes) =
-            if remaining = 0 then String.implode (List.map Char.chr (List.rev bytes))
+            if isSome problem then headers (length, problem)
             else
-              case readByte stream of
-                NONE => raise Fail "unexpected end of message body"
-              | SOME byte => loop (remaining - 1, byte :: bytes)
-        in
-          SOME (loop (count, []))
+              (case contentLength line of
+                 NONE => headers (length, problem)
+               | SOME NONE =>
+                   headers (NONE, SOME ("invalid Content-Length: `" ^ line ^ "`"))
+               | SOME (SOME bytes) =>
+                   if bytes > maximumBody then
+                     headers
+                       ( NONE
+                       , SOME ("invalid Content-Length: " ^
+                               Int.toString bytes ^ " exceeds 64 MiB")
+                       )
+                   else headers (SOME bytes, NONE))
+      and readBody count =
+        let val text = TextIO.inputN (stream, count) in
+          if String.size text = count then Body text
+          else
+            Truncated
+              ("unexpected end of message body: expected " ^
+               Int.toString count ^ " byte(s), got " ^
+               Int.toString (String.size text))
         end
     in
-      headers NONE
+      headers (NONE, NONE)
     end
 
   fun writeMessage value =

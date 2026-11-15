@@ -32,7 +32,13 @@ type scan : Affine = {
 type config : Copy = {
     port : int,
     workers : int,
-    reuse_port : bool
+    reuse_port : bool,
+    max_connections : int,
+    max_request_bytes : int,
+    max_response_bytes : int,
+    request_timeout_ms : int64,
+    idle_timeout_ms : int64,
+    write_timeout_ms : int64
 }
 
 fun new () : t =
@@ -44,10 +50,28 @@ fun new () : t =
     }
 
 fun config (port : int) : config =
-    { port = port, workers = 1, reuse_port = false }
+    { port = port
+    , workers = 1
+    , reuse_port = false
+    , max_connections = 1024
+    , max_request_bytes = 16384
+    , max_response_bytes = 65536
+    , request_timeout_ms = int_to_int64 (10000)
+    , idle_timeout_ms = int_to_int64 (30000)
+    , write_timeout_ms = int_to_int64 (10000)
+    }
 
 fun workers (settings : config, count : int) : config =
-    { port = settings.port, workers = count, reuse_port = settings.reuse_port }
+    { port = settings.port
+    , workers = count
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
 
 (* Active SO_REUSEPORT : plusieurs processus peuvent partager le port et le
    noyau répartit les connexions entre eux.
@@ -58,6 +82,102 @@ fun reuse_port (settings : config, enabled : bool) : config =
     { port = settings.port
     , workers = settings.workers
     , reuse_port = enabled
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le nombre maximal de connexions simultanées (1..65536).
+   - `settings` : configuration à modifier.
+   - `value` : entier entre 1 et 65536 inclus. *)
+fun max_connections (settings : config, value : int) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = settings.reuse_port
+    , max_connections = value
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle la taille du slot de requête, en-têtes et corps (>= 1024 octets).
+   - `settings` : configuration à modifier.
+   - `value` : taille en octets ; au-delà, le serveur répond 431 ou 413. *)
+fun max_request_bytes (settings : config, value : int) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = value
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle la taille du slot de réponse (>= 1024 octets).
+   - `settings` : configuration à modifier.
+   - `value` : taille en octets ; une réponse plus grande donne un 500. *)
+fun max_response_bytes (settings : config, value : int) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = value
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le délai maximal d'une requête commencée, en millisecondes (> 0).
+   - `settings` : configuration à modifier.
+   - `value` : budget strictement positif, indépendant du débit d'octets. *)
+fun request_timeout_ms (settings : config, value : int64) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = value
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le délai d'inactivité keep-alive, en millisecondes (> 0).
+   - `settings` : configuration à modifier.
+   - `value` : délai strictement positif quand rien n'est en attente. *)
+fun idle_timeout_ms (settings : config, value : int64) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = value
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le délai maximal sans progrès d'écriture, en millisecondes (> 0).
+   - `settings` : configuration à modifier.
+   - `value` : délai strictement positif avant fermeture d'une sortie bloquée. *)
+fun write_timeout_ms (settings : config, value : int64) : config =
+    { port = settings.port
+    , workers = settings.workers
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = value
     }
 
 fun add
@@ -353,8 +473,20 @@ fun dispatch_text (text : consume string, app : consume t) : string * t =
 
 fun run (app : t, settings : config) : unit result =
     let val dispatcher = { run = dispatch_text }
+        val base = Http.config (settings.port)
+        val shared = Http.reuse_port (base, settings.reuse_port)
+        val sized =
+            Http.max_connections (shared, settings.max_connections)
+        val requests =
+            Http.max_request_bytes (sized, settings.max_request_bytes)
+        val responses =
+            Http.max_response_bytes (requests, settings.max_response_bytes)
+        val request_delay =
+            Http.request_timeout_ms (responses, settings.request_timeout_ms)
+        val idle_delay =
+            Http.idle_timeout_ms (request_delay, settings.idle_timeout_ms)
         val server_settings =
-            Http.reuse_port (Http.config (settings.port), settings.reuse_port)
+            Http.write_timeout_ms (idle_delay, settings.write_timeout_ms)
     in
         Http.run (dispatcher, app, server_settings)
     end

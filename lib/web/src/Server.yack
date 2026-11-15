@@ -21,4 +21,28 @@ fun config (port : int) = Base.config (port)
 fun reuse_port (settings : Base.config, enabled : bool) : Base.config =
     Base.reuse_port (settings, enabled)
 
+(* Règle le nombre maximal de connexions simultanées (1..65536). *)
+fun max_connections (settings : Base.config, value : int) : Base.config =
+    Base.max_connections (settings, value)
+
+(* Règle la taille du slot de requête, en-têtes et corps (>= 1024 octets). *)
+fun max_request_bytes (settings : Base.config, value : int) : Base.config =
+    Base.max_request_bytes (settings, value)
+
+(* Règle la taille du slot de réponse (>= 1024 octets). *)
+fun max_response_bytes (settings : Base.config, value : int) : Base.config =
+    Base.max_response_bytes (settings, value)
+
+(* Règle le délai maximal d'une requête commencée, en millisecondes (> 0). *)
+fun request_timeout_ms (settings : Base.config, value : int64) : Base.config =
+    Base.request_timeout_ms (settings, value)
+
+(* Règle le délai d'inactivité keep-alive, en millisecondes (> 0). *)
+fun idle_timeout_ms (settings : Base.config, value : int64) : Base.config =
+    Base.idle_timeout_ms (settings, value)
+
+(* Règle le délai maximal sans progrès d'écriture, en millisecondes (> 0). *)
+fun write_timeout_ms (settings : Base.config, value : int64) : Base.config =
+    Base.write_timeout_ms (settings, value)
+
 fun run (app, settings) = Base.run (dispatcher (), app, settings)

@@ -263,6 +263,46 @@ expect_error() {
   pass "$name"
 }
 
+
+
+
+
+
+
+
+expect_multi() {
+  local file=$1
+  local name=multi_$(basename "$file" .yack)
+  local expect refute output status code
+  expect=$(sed -n 's/^(\*[[:space:]]*expect:[[:space:]]*\(.*\)[[:space:]]*\*)[[:space:]]*$/\1/p' "$file")
+  refute=$(sed -n 's/^(\*[[:space:]]*refute:[[:space:]]*\(.*\)[[:space:]]*\*)[[:space:]]*$/\1/p' "$file")
+  if [ -z "$expect" ]; then
+    fail "$name" "missing expect marker"
+    return
+  fi
+  output=$("$YACK" check "$file" 2>&1)
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    fail "$name" "expected rejection"
+    return
+  fi
+  for code in $expect; do
+    if ! printf '%s' "$output" | grep -q "\[$code\]"; then
+      fail "$name" "missing $code"
+      printf '%s\n' "$output" | sed 's/^/     /'
+      return
+    fi
+  done
+  for code in $refute; do
+    if printf '%s' "$output" | grep -q "\[$code\]"; then
+      fail "$name" "unexpected cascade $code"
+      printf '%s\n' "$output" | sed 's/^/     /'
+      return
+    fi
+  done
+  pass "$name"
+}
+
 expect_resolve() {
   local name=$1
   local file=$2
@@ -975,6 +1015,9 @@ expect_error lexical_error E2001 test/reject/lexical_error.yack
 expect_error integer_literal_range E2002 test/reject/integer_literal_range.yack
 expect_error literal_int32_overflow E2002 test/reject/literal_int32_overflow.yack
 expect_error syntax_error E2002 test/reject/syntax_error.yack
+for multi in test/reject/multi_*.yack; do
+  expect_multi "$multi"
+done
 expect_error use_after_move E0402 test/reject/use_after_move.yack
 expect_error unconsumed_token E0403 test/reject/unconsumed_token.yack
 expect_error token_branch_mismatch E0403 test/reject/token_branch_mismatch.yack

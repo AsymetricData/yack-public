@@ -8,6 +8,18 @@ type 'state dispatcher = {
     run : (consume string, consume 'state) -> string * 'state
 }
 
+(* Limits and delays resolved at startup. Every value is copied out of
+   `config` once in `run`, then read from the server state: the epoll loop
+   never looks at the configuration again. *)
+type limits : Copy = {
+    connections : int,
+    request_bytes : int,
+    response_bytes : int,
+    request_timeout : int64,
+    idle_timeout : int64,
+    write_timeout : int64
+}
+
 type 'state server = {
     epfd : int,
     listener_fd : int,
@@ -15,28 +27,19 @@ type 'state server = {
     events : int32 array,
     data : int8 array,
     lengths : int32 array,
-    outputs : int8 array,
+    outputs : string array,
     output_lengths : int32 array,
     output_offsets : int32 array,
     conn_fds : int32 array,
     started : int64 array,
     active : int64 array,
     last_sweep : int64,
+    limits : limits,
     dispatch : 'state dispatcher,
     state : 'state
 }
 
-fun max_connections () : int = 1024
-fun buffer_size () : int = 4096
 fun event_batch () : int = 64
-
-(* A request whose first byte arrived must be complete within this delay,
-   whatever the drip rate. This is what stops a slowloris client. *)
-fun request_timeout_ms () : int64 = 10000
-(* A keep-alive connection with nothing buffered and nothing to send. *)
-fun idle_timeout_ms () : int64 = 30000
-(* Pending output with no write progress, i.e. a client that does not read. *)
-fun write_timeout_ms () : int64 = 10000
 
 (* Interest masks: EPOLLIN = 1, EPOLLOUT = 4.  A connection is registered
    for exactly one direction at a time, so the slot token in the event is
@@ -46,9 +49,27 @@ fun set_interest (epfd : int, fd : int, slot : int, mask : int) : unit =
     in ()
     end
 
+(* One owned empty string per slot, so a slot can later receive a response
+   with `array.set` (which frees the previous value). *)
+fun empty_strings_from
+        (count : int, index : int, values : string array) : string array =
+    if index >= count then values
+    else
+        empty_strings_from
+            (count, index + 1, array.push (values, string.copy (borrow "")))
+
+fun empty_strings (count : int) : string array =
+    empty_strings_from (count, 0, array.new ())
+
+(* Frees the response string held by a slot by replacing it with an empty
+   string. Called when the slot is closed or its response is fully flushed. *)
+fun clear_output (outputs : string array, slot : int) : string array =
+    array.set (outputs, slot, string.copy (borrow ""))
+
 fun server_listen
     (port : int
     , shared : bool
+    , limits : limits
     , dispatch : 'state dispatcher
     , state : 'state
     ) : 'state server result =
@@ -105,17 +126,19 @@ fun server_listen
                                     end
                                 else
                                     let val _ = sys.set_nonblocking (fd)
-                                        val max = max_connections ()
+                                        val max = limits.connections
                                         val fds : int32 array = array.make (0, event_batch ())
                                         val events : int32 array = array.make (0, event_batch ())
-                                        (* Slot buffers are never read before
-                                           their length is written, so reserve
-                                           them without touching every page.
-                                           This keeps RSS proportional to the
-                                           number of live connections. *)
-                                        val data : int8 array = array.make_uninit (max * buffer_size ())
+                                        (* The request slot buffer is never
+                                           read before its length is written,
+                                           so reserve it without touching every
+                                           page. Responses are stored as owned
+                                           strings, so each costs only its own
+                                           size. RSS stays proportional to the
+                                           live connections. *)
+                                        val data : int8 array = array.make_uninit (max * limits.request_bytes)
                                         val lengths : int32 array = array.make (0, max)
-                                        val outputs : int8 array = array.make_uninit (max * buffer_size ())
+                                        val outputs : string array = empty_strings (max)
                                         val output_lengths : int32 array = array.make (0, max)
                                         val output_offsets : int32 array = array.make (0, max)
                                         val conn_fds : int32 array = array.make (-1, max)
@@ -137,6 +160,7 @@ fun server_listen
                                             , started = started
                                             , active = active
                                             , last_sweep = last_sweep
+                                            , limits = limits
                                             , dispatch = dispatch
                                             , state = state
                                             }
@@ -167,6 +191,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
         , started = started
         , active = active
         , last_sweep = last_sweep
+        , limits = limits
                 , dispatch = dispatch
                 , state = state
         } =>
@@ -177,6 +202,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
                 val lengths = array.set_int (lengths, slot, 0)
                 val output_lengths = array.set_int (output_lengths, slot, 0)
                 val output_offsets = array.set_int (output_offsets, slot, 0)
+                val outputs = clear_output (outputs, slot)
                 val started = array.set (started, slot, -1)
                 val active = array.set (active, slot, 0)
             in
@@ -193,6 +219,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
                 , started = started
                 , active = active
                 , last_sweep = last_sweep
+                , limits = limits
                 , dispatch = dispatch
                 , state = state
                 }
@@ -213,6 +240,7 @@ fun accept_loop (value : 'state server) : 'state server =
         , started = started
         , active = active
         , last_sweep = last_sweep
+        , limits = limits
         , dispatch = dispatch
         , state = state
         } =>
@@ -241,12 +269,13 @@ fun accept_loop (value : 'state server) : 'state server =
                         , started = started
                         , active = active
                         , last_sweep = last_sweep
+                        , limits = limits
                         , dispatch = dispatch
                         , state = state
                         }
                     end
                 else
-                    let val found = find_free_from (conn_fds, 0, max_connections ())
+                    let val found = find_free_from (conn_fds, 0, limits.connections)
                         val slot = found.0
                         val next_conn_fds = found.1
                     in
@@ -266,6 +295,7 @@ fun accept_loop (value : 'state server) : 'state server =
                                 , started = started
                                 , active = active
                                 , last_sweep = last_sweep
+                                , limits = limits
                                 , dispatch = dispatch
                                 , state = state
                                 }
@@ -294,6 +324,7 @@ fun accept_loop (value : 'state server) : 'state server =
                                      , started = started
                                      , active = active
                                      , last_sweep = last_sweep
+                                     , limits = limits
                                      , dispatch = dispatch
                                      , state = state
                                      })
@@ -302,17 +333,19 @@ fun accept_loop (value : 'state server) : 'state server =
             end
 
 (* Render a complete keep-alive response into the connection output slot.
-   The writer is bounded by `base + buffer_size ()`, so a response that does
+   The writer is bounded by `base + capacity`, so a response that does
    not fit is reported as a negative length instead of spilling into the next
    connection's slot. *)
-fun render_response_into (output : int8 array, base : int, name : borrow string) : int8 array * int =
+fun render_response_into
+    (output : int8 array, base : int, capacity : int, name : borrow string)
+    : int8 array * int =
     let val name_length = string.length (name)
         val content_length = if name_length = 0 then 11 else 6 + name_length
         val prefix = "HTTP/1.1 200 OK\r\nContent-Length: "
         val separator = "\r\nConnection: keep-alive\r\n\r\n"
         val hello_world = "hello world"
         val hello_prefix = "hello "
-        val limit = base + buffer_size ()
+        val limit = base + capacity
         val p0 = bytes.write_string (borrow output, base, limit, borrow prefix)
         val p1 = bytes.write_int (borrow output, p0, limit, content_length)
         val p2 = bytes.write_string (borrow output, p1, limit, borrow separator)
@@ -345,17 +378,18 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
         , started = started
         , active = active
         , last_sweep = last_sweep
+        , limits = limits
         , dispatch = dispatch
         , state = state
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val total = array.get_int (borrow output_lengths, slot)
                 val offset = array.get_int (borrow output_offsets, slot)
-                val base = slot * buffer_size ()
             in
                 if offset >= total then
                     let val output_lengths = array.set_int (output_lengths, slot, 0)
                         val output_offsets = array.set_int (output_offsets, slot, 0)
+                        val outputs = clear_output (outputs, slot)
                         val _ =
                             if resuming then set_interest (epfd, fd, slot, 1)
                             else ()
@@ -374,12 +408,14 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                             , started
                             , active
                             , last_sweep
+                            , limits
                             , dispatch
                             , state
                             )
                     end
                 else
-                    let val sent = sys.send_from_raw (fd, outputs, base + offset, total - offset)
+                    let val text = array.get_borrow (borrow outputs, slot)
+                        val sent = sys.send_string_raw (fd, text, offset, total - offset)
                     in
                         if sent < 0 then
                             let val error = sys.errno ()
@@ -401,6 +437,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , started
                                             , active
                                             , last_sweep
+                                            , limits
                                             , dispatch
                                             , state
                                             )
@@ -421,6 +458,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                              , started
                                              , active
                                              , last_sweep
+                                             , limits
                                              , dispatch
                                              , state
                                              ),
@@ -443,6 +481,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                     , started
                                     , active
                                     , last_sweep
+                                    , limits
                                     , dispatch
                                     , state
                                     )
@@ -455,6 +494,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                 if next_offset >= total then
                                     let val output_lengths = array.set_int (output_lengths, slot, 0)
                                         val output_offsets = array.set_int (output_offsets, slot, 0)
+                                        val outputs = clear_output (outputs, slot)
                                         val _ =
                                             if resuming then set_interest (epfd, fd, slot, 1)
                                             else ()
@@ -473,6 +513,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , started
                                             , active
                                             , last_sweep
+                                            , limits
                                             , dispatch
                                             , state
                                             )
@@ -494,6 +535,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , started
                                             , active
                                             , last_sweep
+                                            , limits
                                             , dispatch
                                             , state
                                             )
@@ -533,6 +575,26 @@ fun send_hello (fd : int, body : borrow string) : unit =
     in send_all (fd, body)
     end
 
+(* Short constant rejection replies: each fits in one write and does not
+   depend on application state. *)
+fun reject_headers_too_large () : string =
+    "HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+fun reject_content_too_large () : string =
+    "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+fun reject_response_too_large () : string =
+    "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+(* Best-effort error reply on a non-blocking socket: a single `send`, no
+   retry. A short or failed write is ignored because the caller closes the
+   slot right after; looping on EAGAIN would let a slow client stall the
+   reactor. *)
+fun send_once (fd : int, text : borrow string) : unit =
+    let val _ = sys.send_string_raw (fd, text, 0, string.length (text))
+    in ()
+    end
+
 fun make_server
     ( epfd : int
     , listener_fd : int
@@ -540,13 +602,14 @@ fun make_server
     , events : int32 array
     , data : int8 array
     , lengths : int32 array
-    , outputs : int8 array
+    , outputs : string array
     , output_lengths : int32 array
     , output_offsets : int32 array
     , conn_fds : int32 array
     , started : int64 array
     , active : int64 array
     , last_sweep : int64
+    , limits : limits
     , dispatch : 'state dispatcher
     , state : 'state
     ) : 'state server =
@@ -563,6 +626,7 @@ fun make_server
     , started = started
     , active = active
     , last_sweep = last_sweep
+    , limits = limits
     , dispatch = dispatch
                 , state = state
     }
@@ -624,34 +688,41 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
         , started = started
         , active = active
         , last_sweep = last_sweep
+        , limits = limits
         , dispatch = dispatch
         , state = state
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val length = array.get_int (borrow lengths, slot)
-                val start = slot * buffer_size ()
-                val available = buffer_size () - length
+                val start = slot * limits.request_bytes
+                val available = limits.request_bytes - length
             in
                 if available <= 0 then
-                    close_slot
-                        (make_server
-                             ( epfd
-                             , listener_fd
-                             , fds
-                             , events
-                             , data
-                             , lengths
-                             , outputs
-                             , output_lengths
-                             , output_offsets
-                             , conn_fds
-                             , started
-                             , active
-                             , last_sweep
-                             , dispatch
-                             , state
-                             ),
-                         slot)
+
+                    let val reply = reject_headers_too_large ()
+                        val _ = send_once (fd, borrow reply)
+                    in
+                        close_slot
+                            (make_server
+                                 ( epfd
+                                 , listener_fd
+                                 , fds
+                                 , events
+                                 , data
+                                 , lengths
+                                 , outputs
+                                 , output_lengths
+                                 , output_offsets
+                                 , conn_fds
+                                 , started
+                                 , active
+                                 , last_sweep
+                                 , limits
+                                 , dispatch
+                                 , state
+                                 ),
+                             slot)
+                    end
                 else
                     let val received = sys.recv_into_raw (fd, data, start + length, available)
                     in
@@ -673,6 +744,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                         , started
                                         , active
                                         , last_sweep
+                                        , limits
                                         , dispatch
                                         , state
                                         )
@@ -692,6 +764,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                              , started
                                              , active
                                              , last_sweep
+                                             , limits
                                              , dispatch
                                              , state
                                              ),
@@ -713,6 +786,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                      , started
                                      , active
                                      , last_sweep
+                                     , limits
                                      , dispatch
                                      , state
                                      ),
@@ -742,6 +816,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                         , started
                                         , active
                                         , last_sweep
+                                        , limits
                                         , dispatch
                                         , state
                                         )
@@ -775,11 +850,41 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                             (borrow data, start, header_length)
                                                     val content_length =
                                                         content_length_of_headers (headers)
+                                                    val room =
+                                                        limits.request_bytes - header_length
                                                 in
-                                                    header_length + content_length
+
+                                                    if content_length > room then -1
+                                                    else header_length + content_length
                                                 end
                                     in
-                                        if next_length < expected then
+                                        if expected < 0 then
+
+                                            let val reply = reject_content_too_large ()
+                                                val _ = send_once (fd, borrow reply)
+                                            in
+                                                close_slot
+                                                    (make_server
+                                                         ( epfd
+                                                         , listener_fd
+                                                         , fds
+                                                         , events
+                                                         , data
+                                                         , lengths
+                                                         , outputs
+                                                         , output_lengths
+                                                         , output_offsets
+                                                         , conn_fds
+                                                         , started
+                                                         , active
+                                                         , last_sweep
+                                                         , limits
+                                                         , dispatch
+                                                         , state
+                                                         ),
+                                                     slot)
+                                            end
+                                        else if next_length < expected then
                                             make_server
                                                 ( epfd
                                                 , listener_fd
@@ -794,6 +899,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                 , started
                                                 , active
                                                 , last_sweep
+                                                , limits
                                                 , dispatch
                                                 , state
                                                 )
@@ -809,23 +915,39 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                     in
                                                         case dispatched of
                                                             (response, next_state) =>
-                                                                let val limit = start + buffer_size ()
-                                                                    val rendered_end =
-                                                                        bytes.write_string
-                                                                            (borrow outputs, start, limit, borrow response)
-                                                                    val response_length =
-                                                                        if rendered_end < 0 then -1
-                                                                        else rendered_end - start
+                                                                let val response_length =
+                                                                        string.length (borrow response)
+                                                                    (* Store the
+                                                                       response
+                                                                       before the
+                                                                       arena ends:
+                                                                       the array
+                                                                       owns it, so
+                                                                       the compiler
+                                                                       allocates
+                                                                       the copy in
+                                                                       the root
+                                                                       region. *)
+                                                                    val outputs =
+                                                                        if response_length > limits.response_bytes then outputs
+                                                                        else array.set (outputs, slot, response)
                                                                 in
-                                                                    (next_state, response_length)
+                                                                    ( next_state
+                                                                    , response_length
+                                                                    , outputs
+                                                                    )
                                                                 end
                                                     end
                                             in
                                                 case result of
-                                                    (next_state, response_length) =>
-                                                        if response_length < 0 then
-                                                            close_slot
-                                                                (make_server
+                                                    (next_state, response_length, outputs) =>
+                                                        if response_length > limits.response_bytes then
+
+                                                            let val reply = reject_response_too_large ()
+                                                                val _ = send_once (fd, borrow reply)
+                                                            in
+                                                                close_slot
+                                                                    (make_server
                                                                      ( epfd
                                                                      , listener_fd
                                                                      , fds
@@ -839,10 +961,12 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                                      , started
                                                                      , active
                                                                      , last_sweep
+                                                                     , limits
                                                                      , dispatch
                                                                      , next_state
                                                                      ),
                                                                  slot)
+                                                            end
                                                         else
                                                             let val lengths = array.set_int (lengths, slot, 0)
                                                                 val output_lengths = array.set_int (output_lengths, slot, response_length)
@@ -864,6 +988,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                                          , started
                                                                          , active
                                                                          , last_sweep
+                                                                         , limits
                                                                          , dispatch
                                                                          , next_state
                                                                          ),
@@ -893,6 +1018,7 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
             , started = started
             , active = active
             , last_sweep = last_sweep
+            , limits = limits
                 , dispatch = dispatch
                 , state = state
             } =>
@@ -916,6 +1042,7 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
                         , started = started
                         , active = active
                         , last_sweep = last_sweep
+                        , limits = limits
                 , dispatch = dispatch
                 , state = state
                         }
@@ -926,14 +1053,14 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
                 in handle_events (next_value, count, index + 1)
                 end
 
-fun close_slots_from (conn_fds : int32 array, index : int) : unit =
-    if index >= max_connections () then
+fun close_slots_from (conn_fds : int32 array, limit : int, index : int) : unit =
+    if index >= limit then
         ()
     else
         let val fd = array.get_int (borrow conn_fds, index)
             val _ = if fd >= 0 then (let val _ = sys.close (fd) in () end) else ()
         in
-            close_slots_from (conn_fds, index + 1)
+            close_slots_from (conn_fds, limit, index + 1)
         end
 
 fun close_all (value : 'state server) : unit =
@@ -951,10 +1078,11 @@ fun close_all (value : 'state server) : unit =
         , started = started
         , active = active
         , last_sweep = last_sweep
+        , limits = limits
         , dispatch = dispatch
         , state = state
         } =>
-            let val _ = close_slots_from (conn_fds, 0)
+            let val _ = close_slots_from (conn_fds, limits.connections, 0)
                 val _ = sys.close (listener_fd)
                 val _ = sys.close (epfd)
             in
@@ -965,8 +1093,10 @@ fun close_all (value : 'state server) : unit =
    Scans the whole slot table with plain record rebuilds and no heap
    allocation; a slot is only closed through close_slot, which already
    removes it from epoll and resets its timestamps. *)
-fun sweep_from (value : 'state server, index : int, now : int64) : 'state server =
-    if index >= max_connections () then value
+fun sweep_from
+    (value : 'state server, connections : int, index : int, now : int64)
+    : 'state server =
+    if index >= connections then value
     else
         case value of
             { epfd = epfd
@@ -982,6 +1112,7 @@ fun sweep_from (value : 'state server, index : int, now : int64) : 'state server
             , started = started
             , active = active
             , last_sweep = last_sweep
+            , limits = limits
             , dispatch = dispatch
             , state = state
             } =>
@@ -1005,23 +1136,24 @@ fun sweep_from (value : 'state server, index : int, now : int64) : 'state server
                         , started = started
                         , active = active
                         , last_sweep = last_sweep
+                        , limits = limits
                         , dispatch = dispatch
                         , state = state
                         }
                 in
-                    if fd < 0 then sweep_from (rebuilt, index + 1, now)
+                    if fd < 0 then sweep_from (rebuilt, connections, index + 1, now)
                     else
                         let val expired =
                                 if request_started >= 0 then
-                                    now - request_started > request_timeout_ms ()
+                                    now - request_started > limits.request_timeout
                                 else if pending then
-                                    now - last_active > write_timeout_ms ()
+                                    now - last_active > limits.write_timeout
                                 else
-                                    now - last_active > idle_timeout_ms ()
+                                    now - last_active > limits.idle_timeout
                         in
                             if expired then
-                                sweep_from (close_slot (rebuilt, index), index + 1, now)
-                            else sweep_from (rebuilt, index + 1, now)
+                                sweep_from (close_slot (rebuilt, index), connections, index + 1, now)
+                            else sweep_from (rebuilt, connections, index + 1, now)
                         end
                 end
 
@@ -1045,6 +1177,7 @@ fun serve (value : 'state server) : unit result =
             , started = started
             , active = active
             , last_sweep = last_sweep
+            , limits = limits
             , dispatch = dispatch
             , state = state
             } =>
@@ -1065,11 +1198,12 @@ fun serve (value : 'state server) : unit result =
                         , started = started
                         , active = active
                         , last_sweep = if sweep_due then now else last_sweep
+                        , limits = limits
                         , dispatch = dispatch
                         , state = state
                         }
                     val current =
-                        if sweep_due then sweep_from (rebuilt, 0, now)
+                        if sweep_due then sweep_from (rebuilt, limits.connections, 0, now)
                         else rebuilt
                 in
                     if sys.stop_requested () then
@@ -1096,11 +1230,28 @@ fun serve (value : 'state server) : unit result =
 
 type config : Affine =
     { port : int,
-      reuse_port : bool
+      reuse_port : bool,
+      max_connections : int,
+      max_request_bytes : int,
+      max_response_bytes : int,
+      request_timeout_ms : int64,
+      idle_timeout_ms : int64,
+      write_timeout_ms : int64
     }
 
+(* Default configuration: the given port, no SO_REUSEPORT, 1024 concurrent
+   connections, 16 KiB per request (headers and body), 64 KiB per response,
+   and timeouts of 10 s / 30 s / 10 s. *)
 fun config (port : int) : config =
-    { port = port, reuse_port = false }
+    { port = port
+    , reuse_port = false
+    , max_connections = 1024
+    , max_request_bytes = 16384
+    , max_response_bytes = 65536
+    , request_timeout_ms = int_to_int64 (10000)
+    , idle_timeout_ms = int_to_int64 (30000)
+    , write_timeout_ms = int_to_int64 (10000)
+    }
 
 (* Active ou désactive SO_REUSEPORT.
    - `settings` : configuration à modifier.
@@ -1110,14 +1261,173 @@ fun config (port : int) : config =
    Désactivé par défaut : un second processus sur le même port échoue avec
    EADDRINUSE (errno 98) au lieu de mélanger deux versions du serveur. *)
 fun reuse_port (settings : config, enabled : bool) : config =
-    { port = settings.port, reuse_port = enabled }
+    { port = settings.port
+    , reuse_port = enabled
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le nombre maximal de connexions simultanées.
+   - `settings` : configuration à modifier.
+   - `value` : entier entre 1 et 65536 inclus ; chaque slot de requête
+     réserve `max_request_bytes` octets. *)
+fun max_connections (settings : config, value : int) : config =
+    { port = settings.port
+    , reuse_port = settings.reuse_port
+    , max_connections = value
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle la taille du slot de requête : en-têtes et corps d'une requête.
+   - `settings` : configuration à modifier.
+   - `value` : au moins 1024 octets ; au-delà, le serveur répond 431 (pas de
+     fin d'en-têtes) ou 413 (corps annoncé trop grand). *)
+fun max_request_bytes (settings : config, value : int) : config =
+    { port = settings.port
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = value
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle la taille du slot de réponse.
+   - `settings` : configuration à modifier.
+   - `value` : au moins 1024 octets ; une réponse plus grande donne un 500 au
+     lieu de déborder sur le slot voisin. *)
+fun max_response_bytes (settings : config, value : int) : config =
+    { port = settings.port
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = value
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le délai maximal d'une requête commencée, en millisecondes.
+   - `settings` : configuration à modifier.
+   - `value` : strictement positif ; ce budget arrête les clients lents
+     (slowloris) quel que soit leur débit d'octets. *)
+fun request_timeout_ms (settings : config, value : int64) : config =
+    { port = settings.port
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = value
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le délai d'inactivité d'une connexion keep-alive, en millisecondes.
+   - `settings` : configuration à modifier.
+   - `value` : strictement positif ; s'applique quand rien n'est bufferisé ni
+     en attente d'écriture. *)
+fun idle_timeout_ms (settings : config, value : int64) : config =
+    { port = settings.port
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = value
+    , write_timeout_ms = settings.write_timeout_ms
+    }
+
+(* Règle le délai maximal sans progrès d'écriture, en millisecondes.
+   - `settings` : configuration à modifier.
+   - `value` : strictement positif ; une sortie bloquée par un client qui ne
+     lit pas est fermée après ce délai. *)
+fun write_timeout_ms (settings : config, value : int64) : config =
+    { port = settings.port
+    , reuse_port = settings.reuse_port
+    , max_connections = settings.max_connections
+    , max_request_bytes = settings.max_request_bytes
+    , max_response_bytes = settings.max_response_bytes
+    , request_timeout_ms = settings.request_timeout_ms
+    , idle_timeout_ms = settings.idle_timeout_ms
+    , write_timeout_ms = value
+    }
+
+(* Checks the limits before opening the port.
+   - `settings`: configuration to validate.
+
+   Returns `Error` prefixed with `Http.run:` instead of raising: the caller can
+   print the message and exit non-zero. `max_connections * max_*_bytes`
+   products are checked by division to stay within signed 32-bit integers. *)
+fun validate (settings : &config) : unit result =
+    let val greatest = 2147483647
+    in
+        if settings.max_connections < 1 then
+            Error
+                ("Http.run: max_connections must be in 1..65536 (got " ^
+                 int.to_string (settings.max_connections) ^
+                 ")")
+        else if settings.max_connections > 65536 then
+            Error
+                ("Http.run: max_connections must be in 1..65536 (got " ^
+                 int.to_string (settings.max_connections) ^
+                 ")")
+        else if settings.max_request_bytes < 1024 then
+            Error
+                ("Http.run: max_request_bytes must be at least 1024 (got " ^
+                 int.to_string (settings.max_request_bytes) ^
+                 ")")
+        else if settings.max_response_bytes < 1024 then
+            Error
+                ("Http.run: max_response_bytes must be at least 1024 (got " ^
+                 int.to_string (settings.max_response_bytes) ^
+                 ")")
+        else if settings.max_request_bytes > greatest / settings.max_connections then
+            Error ("Http.run: max_connections * max_request_bytes exceeds 2147483647")
+        else if settings.max_response_bytes > greatest / settings.max_connections then
+            Error ("Http.run: max_connections * max_response_bytes exceeds 2147483647")
+        else if settings.request_timeout_ms <= int_to_int64 (0) then
+            Error ("Http.run: request_timeout_ms must be positive")
+        else if settings.idle_timeout_ms <= int_to_int64 (0) then
+            Error ("Http.run: idle_timeout_ms must be positive")
+        else if settings.write_timeout_ms <= int_to_int64 (0) then
+            Error ("Http.run: write_timeout_ms must be positive")
+        else Ok (())
+    end
 
 fun run
     (dispatch : 'state dispatcher, state : 'state, settings : config)
     : unit result =
-    case server_listen (settings.port, settings.reuse_port, dispatch, state) of
+    case validate (borrow settings) of
         Error (message) => Error (message)
-      | Ok (value) =>
-            let val _ = sys.install_stop_signals ()
-            in serve (value)
+      | Ok (_) =>
+            let val limits : limits =
+                    { connections = settings.max_connections
+                    , request_bytes = settings.max_request_bytes
+                    , response_bytes = settings.max_response_bytes
+                    , request_timeout = settings.request_timeout_ms
+                    , idle_timeout = settings.idle_timeout_ms
+                    , write_timeout = settings.write_timeout_ms
+                    }
+            in
+                case server_listen
+                         ( settings.port
+                         , settings.reuse_port
+                         , limits
+                         , dispatch
+                         , state
+                         ) of
+                    Error (message) => Error (message)
+                  | Ok (value) =>
+                        let val _ = sys.install_stop_signals ()
+                        in serve (value)
+                        end
             end

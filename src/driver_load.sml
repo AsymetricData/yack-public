@@ -264,28 +264,26 @@ struct
             let
               val parsed = Parser.parse (#tokens lexed)
               val syntaxDiagnostics = #diagnostics parsed
+
+              val parseFailedNames = #failed parsed
+              val _ = #report options (!sources, syntaxDiagnostics)
+              val scratchDiagnostics =
+                List.map
+                  (fn (span, _) =>
+                    Diag.error
+                      ( "E0708"
+                      , "mémoire temporaire utilisée sans bloc `arena`"
+                      , span
+                      , [ "les appels de mémoire temporaire sont internes au compilateur" ]
+                      , [ "remplacez cet appel par `arena val ... in ... end`"
+                        , "tout ce qui est alloué dans le bloc est libéré d'un coup à `end`"
+                        ]
+                      ))
+                  (scratchCalls (#program parsed))
             in
-              if not (null syntaxDiagnostics) then
-                (#report options (!sources, syntaxDiagnostics); NONE)
+              if not (null scratchDiagnostics) then
+                (#report options (!sources, scratchDiagnostics); NONE)
               else
-                let
-                  val scratchDiagnostics =
-                    List.map
-                      (fn (span, _) =>
-                        Diag.error
-                          ( "E0708"
-                          , "mémoire temporaire utilisée sans bloc `arena`"
-                          , span
-                          , [ "les appels de mémoire temporaire sont internes au compilateur" ]
-                          , [ "remplacez cet appel par `arena val ... in ... end`"
-                            , "tout ce qui est alloué dans le bloc est libéré d'un coup à `end`"
-                            ]
-                          ))
-                      (scratchCalls (#program parsed))
-                in
-                  if not (null scratchDiagnostics) then
-                    (#report options (!sources, scratchDiagnostics); NONE)
-                  else
                 let
                   val moduleFailed = ref false
                   fun failModule message =
@@ -1721,83 +1719,168 @@ struct
                     externDeclarationDiagnostics @ externUseDiagnostics @
                     externRecordDiagnostics
                   val qualifyDiagnostics' = List.rev (!qualifyDiagnostics)
+
+                  val reportedKeys = ref ([] : (string * Diag.span) list)
+                  fun reportPhase diagnostics =
+                    let
+                      fun fresh diagnostic =
+                        List.exists
+                          (fn (code, span) =>
+                            code = #code diagnostic andalso
+                            span = #span diagnostic)
+                          (!reportedKeys)
+                      val kept = List.filter (fn d => not (fresh d)) diagnostics
+                      val _ =
+                        reportedKeys :=
+                          List.map
+                            (fn d => (#code d, #span d))
+                            kept @ !reportedKeys
+                    in
+                      if List.null kept then ()
+                      else #report options (!sources, kept)
+                    end
+
+                  val unknownNameCodes = ["E3001", "E3002", "E3012", "E3027"]
+                  fun targetsFailedName (diagnostic : Diag.t) =
+                    List.exists
+                      (fn code => code = #code diagnostic)
+                      unknownNameCodes andalso
+                    List.exists
+                      (fn name =>
+                        String.isSubstring ("`" ^ name ^ "`")
+                          (#message diagnostic))
+                      parseFailedNames
+
+                  fun spanContains (outer : Diag.span, inner : Diag.span) =
+                    let
+                      val a = #start outer
+                      val b = #stop outer
+                      val p = #start inner
+                    in
+                      Pos.file a = Pos.file p andalso
+                      Pos.offset a <= Pos.offset p andalso
+                      Pos.offset p <= Pos.offset b
+                    end
+                  fun occursIn span (diagnostic : Diag.t) =
+                    spanContains (span, #span diagnostic)
+                  val declarationSpans = List.map Ast.declSpan program
+                  fun reportLater earlier diagnostics =
+                    let
+                      val tainted =
+                        List.filter
+                          (fn span =>
+                            List.exists
+                              (fn diagnostic =>
+                                #severity diagnostic = Diag.Error andalso
+                                occursIn span diagnostic)
+                              earlier)
+                          declarationSpans
+                      val kept =
+                        List.filter
+                          (fn diagnostic =>
+                            not (List.exists
+                                   (fn span => occursIn span diagnostic)
+                                   tainted))
+                          diagnostics
+                    in
+                      reportPhase kept
+                    end
                 in
-                  #report options (!sources, qualifyDiagnostics');
-                  #report options (!sources, resolutionDiagnostics);
+                  reportPhase qualifyDiagnostics';
                   if Diag.hasErrors qualifyDiagnostics' then NONE
-                  else if Diag.hasErrors resolutionDiagnostics andalso
-                          not (#tolerant options)
-                  then NONE
                   else
                     let
                       val checked =
                         Check.checkWithPrelude
                           (preludeFileId, #requireMain options, program)
                       val typeDiagnostics = #diagnostics checked
-                      val _ = #report options (!sources, typeDiagnostics)
+
+                      val resolutionReported =
+                        List.filter
+                          (fn diagnostic => not (targetsFailedName diagnostic))
+                          resolutionDiagnostics
+                      val typeReported =
+                        List.filter
+                          (fn diagnostic => not (targetsFailedName diagnostic))
+                          typeDiagnostics
+                      val _ = reportPhase resolutionReported
+                      val _ = reportPhase typeReported
+                      val earlier =
+                        syntaxDiagnostics @ qualifyDiagnostics' @
+                        resolutionReported @ typeReported
+                      val hardErrors = Diag.hasErrors earlier
+
+                      val ownershipResult =
+                        SOME
+                          (Ownership.check
+                             { program = ownershipProgram
+                             , resolution = resolved
+                             , functions = #functions checked
+                             , bindingTypes = #bindingTypes checked
+                             , expressionTypes = #expressionTypes checked
+                             })
+                        handle error =>
+                          if #tolerant options orelse hardErrors then NONE
+                          else raise error
+                      val ownershipDiagnostics =
+                        case ownershipResult of
+                          SOME ownership => #diagnostics ownership
+                        | NONE => []
+                      val _ = reportLater earlier ownershipDiagnostics
+                      val containerDiagnostics =
+                        case ownershipResult of
+                          SOME ownership =>
+                            ((ContainerWarnings.check
+                                { program = ownershipProgram
+                                , functions = #functions checked
+                                , readonlyParams = #readonlyParams ownership
+                                , ownsSpan = userOwnsSpan
+                                })
+                             handle error =>
+                               if #tolerant options orelse hardErrors then []
+                               else raise error)
+                        | NONE => []
+                      val _ = reportLater earlier containerDiagnostics
+                      val ownershipErrors =
+                        Diag.hasErrors ownershipDiagnostics orelse
+                        not (isSome ownershipResult)
+                      fun ownershipField pick fallback =
+                        case ownershipResult of
+                          SOME ownership => pick ownership
+                        | NONE => fallback
                     in
-                      if Diag.hasErrors typeDiagnostics andalso
-                         not (#tolerant options)
-                      then NONE
-                      else
-                        let
 
-                          val earlierFailed =
-                            Diag.hasErrors resolutionDiagnostics orelse
-                            Diag.hasErrors typeDiagnostics
-                          fun reportLater diagnostics =
-                            if earlierFailed andalso #tolerant options then ()
-                            else #report options (!sources, diagnostics)
-                          val ownership =
-                            Ownership.check
-                              { program = ownershipProgram
-                              , resolution = resolved
-                              , functions = #functions checked
-                              , bindingTypes = #bindingTypes checked
-                              , expressionTypes = #expressionTypes checked
-                              }
-                          val ownershipDiagnostics = #diagnostics ownership
-                          val _ = reportLater ownershipDiagnostics
-                          val containerDiagnostics =
-                            ContainerWarnings.check
-                              { program = ownershipProgram
-                              , functions = #functions checked
-                              , readonlyParams = #readonlyParams ownership
-                              , ownsSpan = userOwnsSpan
-                              }
-                          val _ = reportLater containerDiagnostics
-                        in
-
-                          if not (Diag.hasErrors ownershipDiagnostics)
-                             orelse #tolerant options
-                             orelse OS.Process.getEnv "YACK_BORROW_BYPASS" = SOME "1"
-                          then
-                            SOME
-                              { source = source
-                              , sources = !sources
-                              , program = program
-                              , resolution = resolved
-                              , functions = #functions checked
-                              , bindingTypes = #bindingTypes checked
-                              , expressionTypes = #expressionTypes checked
-                              , calls = #calls checked
-                              , functionValues = #functionValues checked
-                              , applications = #applications checked
-                              , drops = #drops ownership
-                              , partialDrops = #partialDrops ownership
-                              , earlyDrops = #earlyDrops ownership
-                              , borrowedLambdaParams =
-                                  #borrowedLambdaParams ownership
-                              , types = #types checked
-                              , aliases = #aliases checked
-                              , datatypes = #datatypes checked
-                              }
-                          else NONE
-                        end
+                      if #tolerant options
+                         orelse (not hardErrors andalso not ownershipErrors)
+                         orelse
+                           (not hardErrors andalso
+                            isSome ownershipResult andalso
+                            OS.Process.getEnv "YACK_BORROW_BYPASS" = SOME "1")
+                      then
+                        SOME
+                          { source = source
+                          , sources = !sources
+                          , program = program
+                          , resolution = resolved
+                          , functions = #functions checked
+                          , bindingTypes = #bindingTypes checked
+                          , expressionTypes = #expressionTypes checked
+                          , calls = #calls checked
+                          , functionValues = #functionValues checked
+                          , applications = #applications checked
+                          , drops = ownershipField #drops []
+                          , partialDrops = ownershipField #partialDrops []
+                          , earlyDrops = ownershipField #earlyDrops []
+                          , borrowedLambdaParams =
+                              ownershipField #borrowedLambdaParams []
+                          , types = #types checked
+                          , aliases = #aliases checked
+                          , datatypes = #datatypes checked
+                          }
+                      else NONE
                     end
                 end
             end
-                end
         end)
     handle ModuleAbort => NONE
          | OS.Path.Path => (#note options "invalid dependency path"; NONE)

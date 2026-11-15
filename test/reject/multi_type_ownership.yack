@@ -1,0 +1,10 @@
+
+fun b () : bool = 3
+
+fun c () : unit =
+    let val s = "text"
+        val t = s
+    in print_string (s)
+    end
+
+fun main () = print_bool (b ())

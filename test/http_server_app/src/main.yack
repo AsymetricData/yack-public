@@ -5,6 +5,7 @@ import alpage/Request
 import alpage/Response
 import yack/io
 import yack/os
+import yack/string
 
 fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
     Reply.ok (Response.text ("hello"))
@@ -12,9 +13,15 @@ fun home (ctx : Ctx.t, request : consume Request.t) : Reply.t =
 fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =
     Reply.ok (Response.text ("{\"sum\":6}"))
 
+
+
+fun big (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text (string.repeat (borrow "0123456789", 2000)))
+
 fun application () : Alpage.t =
     Alpage.new ()
     |> Alpage.get ("/", home)
+    |> Alpage.get ("/big", big)
     |> Alpage.post ("/sum", sum)
 
 
@@ -37,11 +44,37 @@ fun reuse_port_enabled () : bool =
           | None => false
     end
 
+
+
+fun env_int (name : string, fallback : int) : int =
+    case os.getenv (name) of
+        None => fallback
+      | Some text =>
+            (case string_to_int (borrow text) of
+                 Some value => value
+               | None => fallback)
+
+
+
+fun apply_limits (settings : Alpage.config) : Alpage.config =
+    let val requests =
+            Alpage.max_request_bytes
+                (settings, env_int ("YACK_HTTP_MAX_REQUEST_BYTES", 16384))
+        val responses =
+            Alpage.max_response_bytes
+                (requests, env_int ("YACK_HTTP_MAX_RESPONSE_BYTES", 65536))
+        val timeout =
+            Alpage.request_timeout_ms
+                ( responses
+                , int_to_int64 (env_int ("YACK_HTTP_REQUEST_TIMEOUT_MS", 10000)))
+    in timeout end
+
 fun main () =
-    let val settings =
-            if reuse_port_enabled () then
-                Alpage.reuse_port (Alpage.config (configured_port ()), true)
-            else Alpage.config (configured_port ())
+    let val base = Alpage.config (configured_port ())
+        val shared =
+            if reuse_port_enabled () then Alpage.reuse_port (base, true)
+            else base
+        val settings = apply_limits (shared)
     in
         case Alpage.run (application (), settings) of
             Ok _ => ()

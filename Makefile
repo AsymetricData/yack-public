@@ -6,7 +6,7 @@ SOURCES := $(wildcard src/*.sml)
 BUILD_INFO := src/build_info.sml
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-.PHONY: all test test-nll test-alpage test-http-server test-http-fuzz test-borrow test-sqlite-pool test-threads test-lsp test-stdlib-docs test-asan test-stack test-cli test-fuzz test-fuzz-asan test-fuzz-ownership test-regions watch watch-once clean
+.PHONY: all test test-nll test-alpage test-http-server test-http-limits test-http-fuzz test-borrow test-sqlite-pool test-threads test-lsp test-stdlib-docs test-asan test-stack test-cli test-fuzz test-fuzz-asan test-fuzz-ownership test-regions watch watch-once clean
 
 all: yack
 
@@ -30,6 +30,7 @@ test: yack
 	bash -c 'ulimit -v 2000000; timeout 60 ./test/threads.sh'
 	bash -c 'ulimit -v 2000000; timeout 60 ./test/alpage.sh'
 	bash -c 'ulimit -v 2000000; timeout 120 ./test/http_server.sh'
+	bash -c 'ulimit -v 2000000; timeout 120 ./test/http_server_limits.sh'
 	timeout 180 ./test/borrow.sh
 	timeout 300 ./test/nll.sh
 
@@ -41,6 +42,9 @@ test-alpage: yack
 
 test-http-server: yack
 	bash -c 'ulimit -v 2000000; timeout 120 ./test/http_server.sh'
+
+test-http-limits: yack
+	bash -c 'ulimit -v 2000000; timeout 120 ./test/http_server_limits.sh'
 
 test-http-fuzz: yack
 	bash -c 'timeout 600 ./test/http_fuzz.sh'
