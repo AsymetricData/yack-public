@@ -1,0 +1,12 @@
+
+
+
+
+import yack/io
+
+fun main () =
+    let val _ = io.eprint_line (borrow "first")
+        val _ = io.eprint (borrow "second")
+        val _ = io.eprint_line (borrow " line")
+    in io.eprint_line (borrow "third")
+    end

@@ -46,19 +46,19 @@ fun yack__yack_io_print_line {
   # loan %4 = &%3.line
   # loan %6 = &%3.line
   b0(%0.value : &string):
-    %1 : string = call yack__yack_string_copy %0.value!  # at 41:33
+    %1 : string = call yack__yack_string_copy %0.value!  # at 43:33
     %2 : string = view const "\n"
     %3.line : string = concat move %1!, move %2!
-    %4 : &string = borrow &%3.line  # at 42:27
+    %4 : &string = borrow &%3.line  # at 44:27
     # live: %4
     %5 : int = const 0
-    %6 : &string = borrow &%3.line  # at 42:58
+    %6 : &string = borrow &%3.line  # at 44:58
     # live: %4, %6
-    %7 : int = string.string_length %6!  # at 42:58
+    %7 : int = string.string_length %6!  # at 44:58
     # live: %4
-    %8 : unit = string.print_span %4!, move %5!, move %7!  # at 42:58
+    %8 : unit = string.print_span %4!, move %5!, move %7!  # at 44:58
     # live: none
-    drop %3.line! : string  # at 41:9
+    drop %3.line! : string  # at 43:9
     return %8!
 }
 fun yack__yack_string_copy {

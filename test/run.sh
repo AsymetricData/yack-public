@@ -1439,6 +1439,28 @@ if "$YACK" build test/file_write_all_big.yack "$TMP/file_write_all_big" >/dev/nu
 else
   fail file_write_all_big "compile failed"
 fi
+
+if "$YACK" build test/io_eprint_append.yack "$TMP/io_eprint_append" >/dev/null 2>&1; then
+  echo "before" > "$TMP/io_eprint_append.err"
+  "$TMP/io_eprint_append" 2>> "$TMP/io_eprint_append.err" >/dev/null
+  eprint_got=$(cat "$TMP/io_eprint_append.err")
+  eprint_want=$(printf 'before\nfirst\nsecond line\nthird')
+  if [ "$eprint_got" = "$eprint_want" ]; then
+    pass io_eprint_append
+  else
+    fail io_eprint_append "stderr lines lost" "got [$eprint_got]"
+  fi
+  "$TMP/io_eprint_append" 2> "$TMP/io_eprint_trunc.err" >/dev/null
+  eprint_got=$(cat "$TMP/io_eprint_trunc.err")
+  if [ "$eprint_got" = "$(printf 'first\nsecond line\nthird')" ]; then
+    pass io_eprint_redirect
+  else
+    fail io_eprint_redirect "stderr lines lost" "got [$eprint_got]"
+  fi
+else
+  fail io_eprint_append "compile failed"
+fi
+
 if "$YACK" build test/file_stdio.yack "$TMP/file_stdio" >/dev/null 2>&1; then
   stdio=$(printf 'stdio-ok' | "$TMP/file_stdio" 2>&1)
   if [ "$stdio" = "stdio-ok" ]; then

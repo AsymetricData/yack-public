@@ -1,10 +1,12 @@
+import yack/bytes
+import yack/file
 import yack/string
 
 (* yack/io : entrées/sorties de fichiers et flux standard.
 
 Le noyau expose `io.read_file`, `io.read_stdin` et `io.write_file`, avec
-`string result` comme type d'erreur. Les handles, `stderr`, `read_line` et
-les opérations de répertoire manquent encore côté backend. *)
+`string result` comme type d'erreur. `eprint` et `eprint_line` écrivent sur
+le descripteur 2 par `yack/file`. *)
 (* Lit intégralement un fichier.
    - `path` : chemin transmis au système d'E/S.
 
@@ -49,26 +51,35 @@ fun print_line (value : borrow string) : unit =
 fun print (value : borrow string) : unit =
     print_raw (value)
 
-(* `stderr` n'est pas un builtin : sur Unix, ouvrir `/dev/stderr` écrit sur le
-   descripteur 2 sans toucher au stdout. Le fd ouvert est refermé après usage. *)
-(* Écrit une chaîne sans saut de ligne sur stderr.
-   - `value` : chaîne empruntée puis copiée avant l'écriture.
-
-   Écrit via `/dev/stderr` ; ne modifie pas la chaîne d'entrée. *)
-fun eprint (value : borrow string) : unit =
-    let val copy = string.copy (value)
-        val _ = io.write_file "/dev/stderr" copy
+(* Écrit directement sur le descripteur 2. Ouvrir `/dev/stderr` avec
+   `io.write_file` tronquait le fichier quand stderr est redirigé
+   (`2> log`) : chaque appel effaçait les lignes précédentes. Une erreur
+   d'écriture sur stderr n'a nulle part où être signalée, elle est ignorée.
+   - `value` : chaîne empruntée pendant l'écriture. *)
+fun internal_write_stderr (value : borrow string) : unit =
+    let val handle = file.stderr ()
+        val data = bytes.from_string (value)
+        val _ = file.write_all (borrow handle, data)
+        val _ = file.close (handle)
     in ()
     end
+
+(* Écrit une chaîne sans saut de ligne sur stderr.
+   - `value` : chaîne empruntée pendant l'écriture.
+
+   Ajoute à la suite de ce que stderr contient déjà, même redirigé vers un
+   fichier ; ne modifie pas la chaîne d'entrée. *)
+fun eprint (value : borrow string) : unit =
+    internal_write_stderr (value)
 
 (* Écrit une chaîne suivie d'un saut de ligne sur stderr.
    - `value` : chaîne empruntée puis copiée pour ajouter `\n`.
 
-   Écrit via `/dev/stderr` ; ne modifie pas la chaîne d'entrée. *)
+   Ajoute à la suite de ce que stderr contient déjà, même redirigé vers un
+   fichier ; ne modifie pas la chaîne d'entrée. *)
 fun eprint_line (value : borrow string) : unit =
     let val line = string.copy (value) ^ "\n"
-        val _ = io.write_file "/dev/stderr" line
-    in ()
+    in internal_write_stderr (borrow line)
     end
 
 (* Lit l'intégralité de l'entrée standard. Retourne le texte possédé ou l'erreur
