@@ -25,7 +25,19 @@ Usage: python3 test/fuzz_ownership.py [count] [seed] [--family NAME]
        (default 400, 1, baseline).  `--family all` runs every family.
 `baseline` covers strings, an Affine record, tokens and shared borrows;
 `case-datatype` covers `case` on a datatype with an owned payload and on a
-recursive list of boxes.
+recursive list of boxes; `borrow-mut` covers mutable and shared borrows;
+`containers` covers element borrows of a map and an array with mutations;
+`partial-move` covers nested record fields; `generics` covers generic
+instantiations; `guard` covers `guard Ok`; `callbacks` covers callback
+ownership; `tail` covers self tail calls; `borrow-get` borrows one element
+of an array or map with `array_get_borrow`, `array_get_borrow_view`,
+`array_kernel_borrow` (through `yack/array`'s `get_borrow`, since the
+kernel is reserved to the stdlib), `map_get_borrow` or
+`map_get_borrow_view`, reads it through the borrow, and checks the printed
+sum against the generator's own value.
+
+`borrow-get` is the only family with an output oracle: when its generator
+exposes `expected()`, the ASan binary's stdout is compared with it.
 Writes disagreements to $FUZZ_OUT (default /tmp/fuzz_ownership) and exits 1
 on any unsound verdict or ASan report on a right case.
 """
@@ -1356,6 +1368,260 @@ def generate_callback(seed):
     return gen
 
 
+BORROW_GET_NUM = 3
+
+
+
+
+BORROW_GET_PRELUDE = """type item : Affine = {{ name : string, k : int }}
+
+datatype shape = Dot | Named of string * int
+
+fun read_text (s : borrow string) : int = string_length (s)
+fun read_item (r : borrow item) : int =
+    case r of {{ name = n, k = k }} => string_length (n) + k
+fun score (s : borrow shape) : int =
+    case s of
+        Dot => 1
+      | Named ((text, k)) => string_length (text) + k
+fun read_num (x : borrow int) : int = {}
+""".format(BORROW_GET_NUM)
+
+
+class BorrowGetGen:
+    """Family `borrow-get`: one element of one container (an array or a
+    string-keyed map) is borrowed with one of the five element-borrow
+    builtins, then read through the borrow; the sum of the reads is printed
+    and the generator knows its exact value.
+
+    The element type is a scalar int, a string, an `Affine` record or a
+    datatype matched by `case`.  A second element is borrowed sometimes and
+    stays alive across the first read; the container length is read after
+    the last borrow use.  `borrow int` has no read (only `borrow string`
+    and the owned element accessors can be observed), so an int element is
+    read by a helper that takes `borrow int` and the stored value is then
+    read with the plain Copy accessor.
+
+    About one case in six mutates the container (`array_set`,
+    `array_push`, `map_set`) while a borrow of an element is still used
+    afterwards: the oracle calls that wrong, and both checkers must reject
+    it (E0502 for NLL, E0901 for the graph).
+    """
+
+    CONTAINERS = ("array", "map")
+    ELEMENTS = ("int", "string", "record", "datatype")
+    BUILTINS = {
+        "array": ("array_get_borrow", "array_get_borrow_view", "kernel"),
+        "map": ("map_get_borrow", "map_get_borrow_view"),
+    }
+    TYPE_NAMES = {"int": "int", "string": "string",
+                  "record": "item", "datatype": "shape"}
+    TEXTS = ("ab", "cde", "f", "ghij", "klmno", "pqr", "st")
+
+    def __init__(self, rng, seed):
+        self.rng = rng
+        self.container = self.CONTAINERS[seed % 2]
+        self.element = self.ELEMENTS[(seed // 2) % 4]
+        choices = self.BUILTINS[self.container]
+        self.builtin = choices[(seed // 8) % len(choices)]
+        self.kernel = self.builtin == "kernel"
+        self.name = "a" if self.container == "array" else "m"
+        self.lines = []
+        self.parts = []
+        self.oracle = 0
+        self.problems = []
+        self.counter = 0
+        self.target = 0
+
+    def fresh(self, prefix):
+        self.counter += 1
+        return "{}{}".format(prefix, self.counter)
+
+    def emit(self, line):
+        self.lines.append(line)
+
+    def add_part(self, expression, value):
+        name = self.fresh("x")
+        self.emit("val {} = {}".format(name, expression))
+        self.parts.append(name)
+        self.oracle += value
+
+
+    def make_element(self):
+        """One element: its Yack literal and the int its read yields."""
+        rng = self.rng
+        if self.element == "int":
+            value = rng.randint(1, 9)
+            return {"yack": str(value), "read": BORROW_GET_NUM, "copy": value}
+        if self.element == "string":
+            text = rng.choice(self.TEXTS)
+            return {"yack": '"{}"'.format(text), "read": len(text),
+                    "copy": None}
+        if self.element == "record":
+            text = rng.choice(self.TEXTS)
+            k = rng.randint(0, 9)
+            return {"yack": '{{ name = "{}", k = {} }}'.format(text, k),
+                    "read": len(text) + k, "copy": None}
+        if rng.random() < 0.4:
+            return {"yack": "Dot", "read": 1, "copy": None}
+        text = rng.choice(self.TEXTS)
+        k = rng.randint(0, 9)
+        return {"yack": 'Named (("{}", {}))'.format(text, k),
+                "read": len(text) + k, "copy": None}
+
+    def key(self, index):
+        if self.container == "array":
+            return str(index)
+        return '"k{}"'.format(index)
+
+    def build_container(self):
+        count = self.rng.randint(1, 4)
+        elements = [self.make_element() for _ in range(count)]
+        type_name = self.TYPE_NAMES[self.element]
+        if self.container == "array":
+            self.emit("val {} : {} array = array_new ()".format(
+                self.name, type_name))
+            for element in elements:
+                self.emit("val _ = array_push ({}, {})".format(
+                    self.name, element["yack"]))
+        else:
+            self.emit("val {} : {} map = map_new ()".format(
+                self.name, type_name))
+            for index, element in enumerate(elements):
+                self.emit('val _ = map_set ({}, "k{}", {})'.format(
+                    self.name, index, element["yack"]))
+        return elements
+
+
+    def borrow(self, index, builtin):
+        name = self.fresh("b")
+        if self.container == "array":
+            if builtin == "array_get_borrow":
+                text = "array_get_borrow ({}, {})".format(self.name, index)
+            elif builtin == "array_get_borrow_view":
+                text = "array_get_borrow_view (borrow {}, {})".format(
+                    self.name, index)
+            else:
+                self.kernel = True
+                text = "array.get_borrow (borrow {}, {})".format(
+                    self.name, index)
+        else:
+            if builtin == "map_get_borrow":
+                text = "map_get_borrow ({}, {})".format(
+                    self.name, self.key(index))
+            else:
+                text = "map_get_borrow_view (borrow {}, {})".format(
+                    self.name, self.key(index))
+        self.emit("val {} = {}".format(name, text))
+        return name
+
+    def read(self, borrow, element, helper):
+        value = element["read"]
+        if self.element == "int":
+            return "read_num ({})".format(borrow), value
+        if self.element == "string":
+            if helper:
+                return "read_text ({})".format(borrow), value
+            return "string_length ({})".format(borrow), value
+        first = self.fresh("n")
+        second = self.fresh("k")
+        if self.element == "record":
+            if helper:
+                return "read_item ({})".format(borrow), value
+            return ("case {} of {{ name = {}, k = {} }} => "
+                    "string_length ({}) + {}".format(
+                        borrow, first, second, first, second), value)
+        if helper:
+            return "score ({})".format(borrow), value
+        return ("case {} of Dot => 1 | Named (({}, {})) => "
+                "string_length ({}) + {}".format(
+                    borrow, first, second, first, second), value)
+
+    def mutate(self):
+        element = self.make_element()
+        if self.container == "array":
+            if self.rng.random() < 0.5:
+                self.emit("val _ = array_set ({}, {}, {})".format(
+                    self.name, self.target, element["yack"]))
+            else:
+                self.emit("val _ = array_push ({}, {})".format(
+                    self.name, element["yack"]))
+        else:
+            self.emit('val _ = map_set ({}, "k{}", {})'.format(
+                self.name, self.rng.randint(4, 9), element["yack"]))
+
+
+    def build(self):
+        rng = self.rng
+        elements = self.build_container()
+        self.target = rng.randrange(len(elements))
+        second = None
+        if len(elements) >= 2 and rng.random() < 0.6:
+            second = rng.choice([index for index in range(len(elements))
+                                 if index != self.target])
+        first = self.borrow(self.target, self.builtin)
+        other = None
+        if second is not None:
+            builtin = rng.choice(self.BUILTINS[self.container])
+            other = self.borrow(second, builtin)
+        if rng.random() < 0.18:
+            self.problems.append("mutate while an element is borrowed")
+            self.mutate()
+        helper = rng.random() < 0.5
+        expression, value = self.read(first, elements[self.target], helper)
+        self.add_part(expression, value)
+        if other is not None:
+            expression, value = self.read(other, elements[second], helper)
+            self.add_part(expression, value)
+            if rng.random() < 0.5:
+                expression, value = self.read(first, elements[self.target],
+                                              helper)
+                self.add_part(expression, value)
+        if self.element == "int" and self.problems == []:
+
+            if self.container == "array":
+                expression = "array_get ({}, {})".format(
+                    self.name, self.target)
+            else:
+                expression = "map_get ({}, {})".format(
+                    self.name, self.key(self.target))
+            self.add_part(expression, elements[self.target]["copy"])
+        if rng.random() < 0.7:
+            if self.container == "array":
+                if rng.random() < 0.25:
+                    call, argument = "array_length", self.name
+                else:
+                    call = "array_length_borrow"
+                    argument = "borrow {}".format(self.name)
+            else:
+                if rng.random() < 0.25:
+                    call, argument = "map_length", self.name
+                else:
+                    call = "map_length_borrow"
+                    argument = "borrow {}".format(self.name)
+            self.add_part("{} ({})".format(call, argument), len(elements))
+
+    def verdict(self):
+        return list(self.problems)
+
+    def expected(self):
+        return str(self.oracle)
+
+    def source(self):
+        body = "\n".join("        " + line for line in self.lines)
+        result = " + ".join(self.parts) if self.parts else "0"
+        head = "import yack/array\n" if self.kernel else ""
+        return (head + BORROW_GET_PRELUDE +
+                "\nfun main () =\n    let\n" + body +
+                "\n    in print_int (" + result + ")\n    end\n")
+
+
+def generate_borrow_get(seed):
+    gen = BorrowGetGen(random.Random(seed), seed)
+    gen.build()
+    return gen
+
+
 TAIL_MOD = 1000003
 TAIL_DEPTH = 200000
 
@@ -1884,7 +2150,8 @@ def generate_tail(seed):
 
 
 FAMILIES = ("baseline", "case-datatype", "borrow-mut", "containers",
-            "partial-move", "generics", "guard", "callbacks", "tail")
+            "partial-move", "generics", "guard", "callbacks", "tail",
+            "borrow-get")
 
 
 def generate(seed, family="baseline"):
@@ -1906,6 +2173,8 @@ def generate(seed, family="baseline"):
         return generate_callback(seed)
     if family == "tail":
         return generate_tail(seed)
+    if family == "borrow-get":
+        return generate_borrow_get(seed)
     raise SystemExit("unknown family: " + family)
 
 
@@ -1953,6 +2222,9 @@ def judge(seed, family="baseline"):
     gen = generate(seed, family)
     wrong = gen.verdict()
     src = gen.source()
+    expected = None
+    if not wrong and hasattr(gen, "expected"):
+        expected = gen.expected()
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "case.yack")
         with open(path, "w") as f:
@@ -1965,6 +2237,7 @@ def judge(seed, family="baseline"):
         graph = [c for c in codes(graph_out) if c in ("E0900", "E0901")]
         lowering = [c for c in codes(graph_out) if c not in ("E0900", "E0901")]
         asan = ""
+        output = ""
         ll = sh([YACK, "llvm", path],
                 {"YACK_BORROW_BYPASS": "1", "YACK_NO_VALIDATE": "1"})
         if ll.returncode == 0 and ll.stdout:
@@ -1979,12 +2252,20 @@ def judge(seed, family="baseline"):
                     if "ERROR: AddressSanitizer" in line or "ERROR: LeakSanitizer" in line:
                         asan = line.split("ERROR: ")[1].split(" on ")[0]
                         break
+                if expected is not None and not asan:
+                    if run.returncode != 0:
+                        output = "exit {}: {}".format(
+                            run.returncode, run.stderr.strip()[:200])
+                    elif run.stdout.strip() != expected:
+                        output = "printed {} instead of {}".format(
+                            run.stdout.strip() or "<nothing>", expected)
             else:
                 asan = "clang-failed"
         else:
             asan = "no-lowering"
     return {"seed": seed, "src": src, "wrong": wrong, "nll": nll,
-            "graph": graph, "lowering": lowering, "asan": asan}
+            "graph": graph, "lowering": lowering, "asan": asan,
+            "output": output}
 
 
 def loop_self_calls(llvm):
@@ -2135,7 +2416,10 @@ def run_family(family, count, base):
             notes.append("graph-imprecise")
         if truth == "right" and memory == "asan":
             notes.append("asan-on-right")
-        if "NLL-unsound" in notes or "asan-on-right" in notes:
+        if r.get("output"):
+            notes.append("wrong-output")
+        if ("NLL-unsound" in notes or "asan-on-right" in notes
+                or "wrong-output" in notes):
             bad += 1
         if notes:
             name = "{}-{}_{}.yack".format(family, "_".join(notes), r["seed"])
@@ -2143,6 +2427,8 @@ def run_family(family, count, base):
                 f.write("(* truth: {}\n   nll: {}  graph: {}  lowering: {}  asan: {} *)\n".format(
                     "; ".join(r["wrong"]) or "right", r["nll"], r["graph"],
                     r["lowering"], r["asan"] or "clean"))
+                if r.get("output"):
+                    f.write("(* output: {} *)\n".format(r["output"]))
                 f.write(r["src"])
 
     print("truth  nll     graph     memory  count")
