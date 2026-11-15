@@ -90,7 +90,7 @@ struct
   val builtins =
     [ "print_int", "print_int64", "print_float", "print_bool", "print_string"
     , "int64_to_int", "int_to_int64", "int64_to_int_wrapping", "int64_wrapping_add", "int64_wrapping_sub", "int64_wrapping_mul"
-    , "float_to_string", "string_copy", "sprintf"
+    , "float_to_string", "string_to_float", "string_copy", "sprintf"
     , "os.exit"
     , "new_token", "consume_token"
     , "new_resource", "drop_resource"

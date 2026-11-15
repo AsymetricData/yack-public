@@ -117,7 +117,7 @@ fun isMapBuiltin name =
 
 fun isConversionBuiltin name =
   name = "int_to_string" orelse name = "string_to_int" orelse
-  name = "float_to_string" orelse
+  name = "float_to_string" orelse name = "string_to_float" orelse
   List.exists
     (fn width =>
       width <> 32 andalso

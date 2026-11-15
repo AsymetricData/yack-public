@@ -1477,6 +1477,8 @@ expect_run json_combinators examples/json_combinators.yack "4"
 expect_run json_decode examples/json_decode.yack "8"
 json_fields_expected=$'fields 36 3 true\nmissing field `age`\nuser: missing field `age`\nuser.zip: expected string, found null\nitems[1]: expected int, found string\nitems[0].name: expected string, found number\noptions 0 0 7\nempty 0\nfloats 3\nn: expected int, found number `4000000000`\n{"xs":[1,2],"n":null,"big":1234567890123,"f":1.5}'
 expect_run json_fields test/json_fields.yack "$json_fields_expected"
+float_repr_expected=$'0.30000000000000004\n0.1\n4\n1e-10\n1.7976931348623157e+308\n2.2250738585072014e-308\n4.94065645841247e-324\n123456789.12345679\n0.1\n0.1\nnone\nnone\nnone\nnone\nnone\nnone\n0\nnull\nnull\nnull\n1'
+expect_run float_repr test/float_repr.yack "$float_repr_expected"
 
 
 

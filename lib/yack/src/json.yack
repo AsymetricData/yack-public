@@ -20,6 +20,22 @@ datatype value =
   | Array of value list
   | Object of (string, value) list
 
+(* Teste si un flottant est fini, sans `is_nan` du noyau.
+   - `value` : flottant examiné.
+
+   Retourne faux pour `inf` et `nan`. `nan` est le seul cas où
+   `value <= value` est faux ; `inf` dépasse le plus grand flottant fini. *)
+fun internal_float_is_finite (value : float) : bool =
+    if value <= value then
+        if value > 1.7976931348623157e308 then
+            false
+        else if value < 0.0 - 1.7976931348623157e308 then
+            false
+        else
+            true
+    else
+        false
+
 (* Construit la valeur JSON nulle, sans argument ni mutation. *)
 fun null () : value = Null
 
@@ -44,10 +60,15 @@ fun int64 (input : int64) : value = Number (int64_to_string (input))
 (* Convertit un flottant en valeur JSON numérique.
    - `input` : flottant consommé.
 
-   Retourne `Number` contenant `float_to_string (input)`. Un flottant non
-   fini (`inf`, `nan`) produirait un document invalide : l'appelant doit
-   l'éviter. *)
-fun float (input : float) : value = Number (float_to_string (input))
+   Retourne `Number` contenant `float_to_string (input)`, dont le texte est
+   le plus court qui relit exactement le même flottant. Un flottant non fini
+   (`inf`, `nan`) n'a pas de représentation JSON : le résultat est `Null`,
+   comme `JSON.stringify`. *)
+fun float (input : float) : value =
+    if internal_float_is_finite (input) then
+        Number (float_to_string (input))
+    else
+        Null
 
 (* Construit un nombre depuis sa représentation textuelle.
    - `input` : texte consommé et conservé tel quel, sans validation.
@@ -1022,228 +1043,6 @@ fun internal_number_end (text : &string, index : int, size : int) : int option =
     else
         internal_number_integer (text, index, size)
 
-(* Convertit un chiffre ASCII en flottant, sans conversion du noyau.
-   - `code` : code d'un chiffre décimal.
-
-   Retourne de `0.0` à `9.0` ; l'appelant fournit un chiffre valide. *)
-fun internal_digit_float (code : int) : float =
-    if code = 48 then
-        0.0
-    else if code = 49 then
-        1.0
-    else if code = 50 then
-        2.0
-    else if code = 51 then
-        3.0
-    else if code = 52 then
-        4.0
-    else if code = 53 then
-        5.0
-    else if code = 54 then
-        6.0
-    else if code = 55 then
-        7.0
-    else if code = 56 then
-        8.0
-    else
-        9.0
-
-(* Accumule la partie entière d'un nombre JSON validé.
-   - `text` : littéral emprunté, non modifié.
-   - `index` : position courante.
-   - `size` : limite exclusive.
-   - `acc` : valeur accumulée.
-
-   Retourne la valeur et l'index du premier caractère non chiffre. *)
-fun internal_float_integer (text : &string, index : int, size : int, acc : float) : float * int =
-    if index >= size then
-        (acc, index)
-    else
-        let val code = string.char_at_unchecked (text, index)
-        in
-            if internal_is_digit (code) then
-                internal_float_integer (text, index + 1, size, acc * 10.0 + internal_digit_float (code))
-            else
-                (acc, index)
-        end
-
-(* Accumule la partie fractionnaire d'un nombre JSON validé.
-   - `text` : littéral emprunté, non modifié.
-   - `index` : position après le point.
-   - `size` : limite exclusive.
-   - `value` : valeur déjà accumulée.
-   - `scale` : poids du prochain chiffre (`0.1`, `0.01`, …).
-
-   Retourne la valeur et l'index de fin de la fraction. *)
-fun internal_float_fraction (
-    text : &string,
-    index : int,
-    size : int,
-    value : float,
-    scale : float
-) : float * int =
-    if index >= size then
-        (value, index)
-    else
-        let val code = string.char_at_unchecked (text, index)
-        in
-            if internal_is_digit (code) then
-                internal_float_fraction (
-                    text,
-                    index + 1,
-                    size,
-                    value + internal_digit_float (code) * scale,
-                    scale * 0.1
-                )
-            else
-                (value, index)
-        end
-
-(* Lit la valeur absolue d'un exposant, saturée pour éviter un long calcul.
-   - `text` : littéral emprunté, non modifié.
-   - `index` : position du prochain chiffre.
-   - `size` : limite exclusive.
-   - `acc` : magnitude accumulée.
-
-   Retourne la magnitude, plafonnée à `100000` ; au-delà, le résultat sera
-   de toute façon infini ou nul. *)
-fun internal_exponent_magnitude (text : &string, index : int, size : int, acc : int) : int =
-    if index >= size then
-        acc
-    else
-        let val code = string.char_at_unchecked (text, index)
-        in
-            if internal_is_digit (code) then
-                let val next = if acc > 100000 then acc else acc * 10 + code - 48
-                in internal_exponent_magnitude (text, index + 1, size, next) end
-            else
-                acc
-        end
-
-(* Lit l'exposant d'un nombre JSON validé.
-   - `text` : littéral emprunté, non modifié.
-   - `index` : position après la mantisse.
-   - `size` : limite exclusive.
-
-   Retourne l'exposant signé, ou `0` s'il est absent. *)
-fun internal_float_exponent (text : &string, index : int, size : int) : int =
-    if index < size then
-        let val code = string.char_at_unchecked (text, index)
-        in
-            if code = 101 then
-                internal_float_exponent_signed (text, index + 1, size)
-            else if code = 69 then
-                internal_float_exponent_signed (text, index + 1, size)
-            else
-                0
-        end
-    else
-        0
-
-(* Lit un exposant après `e`/`E`, avec signe optionnel.
-   - `text` : littéral emprunté, non modifié.
-   - `index` : position après `e`/`E`.
-   - `size` : limite exclusive.
-
-   Retourne l'exposant signé. *)
-fun internal_float_exponent_signed (text : &string, index : int, size : int) : int =
-    if index < size then
-        let val code = string.char_at_unchecked (text, index)
-        in
-            if code = 45 then
-                0 - internal_exponent_magnitude (text, index + 1, size, 0)
-            else if code = 43 then
-                internal_exponent_magnitude (text, index + 1, size, 0)
-            else
-                internal_exponent_magnitude (text, index, size, 0)
-        end
-    else
-        0
-
-(* Multiplie un flottant par une puissance de dix positive.
-   - `value` : valeur de départ.
-   - `count` : nombre de multiplications restantes, au plus `400`.
-
-   Retourne la valeur multipliée, éventuellement infinie. *)
-fun internal_float_mul10 (value : float, count : int) : float =
-    if count <= 0 then value else internal_float_mul10 (value * 10.0, count - 1)
-
-(* Divise un flottant par une puissance de dix positive.
-   - `value` : valeur de départ.
-   - `count` : nombre de divisions restantes, au plus `400`.
-
-   Retourne la valeur divisée, éventuellement nulle par sous-flux. *)
-fun internal_float_div10 (value : float, count : int) : float =
-    if count <= 0 then value else internal_float_div10 (value / 10.0, count - 1)
-
-(* Applique un exposant décimal à une mantisse.
-   - `value` : mantisse déjà signée.
-   - `exponent` : exposant signé.
-
-   L'exposant est borné à `400` : au-delà, le résultat est infini ou nul,
-   ce que `internal_float_is_finite` et l'appelant traitent. *)
-fun internal_float_scale (value : float, exponent : int) : float =
-    if exponent > 400 then
-        internal_float_mul10 (value, 400)
-    else if exponent < -400 then
-        internal_float_div10 (value, 400)
-    else if exponent >= 0 then
-        internal_float_mul10 (value, exponent)
-    else
-        internal_float_div10 (value, 0 - exponent)
-
-(* Analyse un littéral JSON validé en flottant.
-   - `literal` : texte emprunté, non modifié.
-
-   Retourne `Some` flottant, ou `None` si la grammaire est invalide. Le
-   calcul est fait en Yack (pas de `strtod` dans le noyau) ; un texte qui
-   n'est pas entièrement un nombre JSON est rejeté. *)
-fun internal_parse_float (literal : &string) : float option =
-    if internal_is_number_literal (literal) then
-        let
-            val size = string.length (literal)
-            val negative = string.char_at_unchecked (literal, 0) = 45
-            val start = if negative then 1 else 0
-            val (integer, afterInteger) =
-                internal_float_integer (literal, start, size, 0.0)
-            val (mantissa, afterMantissa) =
-                if afterInteger < size then
-                    if string.char_at_unchecked (literal, afterInteger) = 46 then
-                        internal_float_fraction (
-                            literal,
-                            afterInteger + 1,
-                            size,
-                            integer,
-                            0.1
-                        )
-                    else
-                        (integer, afterInteger)
-                else
-                    (integer, afterInteger)
-            val exponent = internal_float_exponent (literal, afterMantissa, size)
-            val signed = if negative then 0.0 - mantissa else mantissa
-        in
-            Some (internal_float_scale (signed, exponent))
-        end
-    else
-        None
-
-(* Teste si un flottant est fini, sans `is_nan` du noyau.
-   - `value` : flottant examiné.
-
-   Retourne faux pour `inf` et `nan`. `nan` est le seul cas où
-   `value <= value` est faux ; `inf` dépasse le plus grand flottant fini. *)
-fun internal_float_is_finite (value : float) : bool =
-    if value <= value then
-        if value > 1.7976931348623157e308 then
-            false
-        else if value < 0.0 - 1.7976931348623157e308 then
-            false
-        else
-            true
-    else
-        false
-
 (* Vérifie que la valeur JSON est nulle.
    - `value` : valeur inspectée et consommée par correspondance de motif.
 
@@ -1308,19 +1107,21 @@ fun internal_is_number_literal (literal : &string) : bool =
    - `value` : valeur inspectée et consommée.
 
    Accepte un entier JSON (`1`) comme un littéral flottant (`1.5`,
-   `-0.25e3`). Un texte hors grammaire, `inf` ou `nan` donne `Error` ; un
-   débordement (`1e999`) donne aussi `Error` au lieu d'un infini. *)
+   `-0.25e3`), après la vérification stricte de la grammaire JSON des
+   nombres. La conversion passe par `string_to_float` (`strtod`), donc elle
+   est arrondie correctement : un texte hors grammaire, `inf` ou `nan` donne
+   `Error`, et un débordement (`1e999`) aussi au lieu d'un infini. Un
+   sous-flux (`1e-999`) donne `0.0`. *)
 fun as_float (value : value) : float result =
     case value of
         Number literal =>
-            (case internal_parse_float (&literal) of
-                 None =>
-                     Error ("expected float, found number `" ^ literal ^ "`")
-               | Some (parsed) =>
-                     if internal_float_is_finite (parsed) then
-                         Ok (parsed)
-                     else
-                         Error ("expected float, found number `" ^ literal ^ "`"))
+            if internal_is_number_literal (&literal) then
+                (case string_to_float (borrow literal) of
+                     None =>
+                         Error ("expected float, found number `" ^ literal ^ "`")
+                   | Some (parsed) => Ok (parsed))
+            else
+                Error ("expected float, found number `" ^ literal ^ "`")
       | other => Error (internal_type_error (&"float", other))
 
 (* Extrait la liste des éléments d'un tableau JSON.

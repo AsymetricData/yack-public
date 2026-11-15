@@ -202,6 +202,115 @@ struct
         in
           { text = result, ty = resultTy, const = false }
         end
+
+      fun lowerStringToFloat value =
+        let
+          val length = fresh "str2float.len"
+          val path = cString value
+          val endSlot = fresh "str2float.endslot"
+          val endPtr = fresh "str2float.end"
+          val expected = fresh "str2float.expected"
+          val parsed = fresh "str2float.parsed"
+          val firstByte = fresh "str2float.first"
+          val firstCode = fresh "str2float.firstcode"
+          val isSpace = fresh "str2float.space"
+          val isControlLow = fresh "str2float.ctrllow"
+          val isControlHigh = fresh "str2float.ctrlhigh"
+          val isControl = fresh "str2float.ctrl"
+          val leadingSpace = fresh "str2float.leads"
+          val noLeadingSpace = fresh "str2float.noleads"
+          val nonEmpty = fresh "str2float.nonempty"
+          val atEnd = fresh "str2float.atend"
+          val valid = fresh "str2float.valid"
+          val isNan = fresh "str2float.isnan"
+          val tooHigh = fresh "str2float.toohigh"
+          val tooLow = fresh "str2float.toolow"
+          val outOfRange = fresh "str2float.range"
+          val notNan = fresh "str2float.notnan"
+          val notRange = fresh "str2float.notrange"
+          val finite = fresh "str2float.finite"
+          val complete = fresh "str2float.complete"
+          val validAll = fresh "str2float.validall"
+          val slot = allocStack resultTy
+          val someLabel = freshLabel "str2float.some"
+          val noneLabel = freshLabel "str2float.none"
+          val doneLabel = freshLabel "str2float.done"
+          val result = fresh "str2float.result"
+          val _ =
+            emit (length ^ " = extractvalue { ptr, i64, i1 } " ^
+                  #text value ^ ", 1")
+          val _ = emit (endSlot ^ " = alloca ptr")
+          val _ =
+            emit (parsed ^ " = call double @strtod(ptr " ^ path ^
+                  ", ptr " ^ endSlot ^ ")")
+
+          val _ = emit (firstByte ^ " = load i8, ptr " ^ path)
+          val _ = emit (firstCode ^ " = zext i8 " ^ firstByte ^ " to i32")
+          val _ = emit (isSpace ^ " = icmp eq i32 " ^ firstCode ^ ", 32")
+          val _ =
+            emit (isControlLow ^ " = icmp uge i32 " ^ firstCode ^ ", 9")
+          val _ =
+            emit (isControlHigh ^ " = icmp ule i32 " ^ firstCode ^ ", 13")
+          val _ =
+            emit (isControl ^ " = and i1 " ^ isControlLow ^ ", " ^
+                  isControlHigh)
+          val _ =
+            emit (leadingSpace ^ " = or i1 " ^ isSpace ^ ", " ^ isControl)
+          val _ =
+            emit (noLeadingSpace ^ " = xor i1 " ^ leadingSpace ^ ", true")
+          val _ = emit (endPtr ^ " = load ptr, ptr " ^ endSlot)
+          val _ =
+            emit (nonEmpty ^ " = icmp ne ptr " ^ endPtr ^ ", " ^ path)
+          val _ =
+            emit (expected ^ " = getelementptr i8, ptr " ^ path ^
+                  ", i64 " ^ length)
+          val _ =
+            emit (atEnd ^ " = icmp eq ptr " ^ endPtr ^ ", " ^ expected)
+          val _ = emit (valid ^ " = and i1 " ^ nonEmpty ^ ", " ^ atEnd)
+          val _ = emit (isNan ^ " = fcmp uno double " ^ parsed ^ ", " ^ parsed)
+          val _ =
+            emit (tooHigh ^ " = fcmp ogt double " ^ parsed ^
+                  ", 0x7FEFFFFFFFFFFFFF")
+          val _ =
+            emit (tooLow ^ " = fcmp olt double " ^ parsed ^
+                  ", 0xFFEFFFFFFFFFFFFF")
+          val _ =
+            emit (outOfRange ^ " = or i1 " ^ tooHigh ^ ", " ^ tooLow)
+          val _ = emit (notNan ^ " = xor i1 " ^ isNan ^ ", true")
+          val _ = emit (notRange ^ " = xor i1 " ^ outOfRange ^ ", true")
+          val _ =
+            emit (finite ^ " = and i1 " ^ notNan ^ ", " ^ notRange)
+          val _ =
+            emit (complete ^ " = and i1 " ^ noLeadingSpace ^ ", " ^ finite)
+          val _ =
+            emit (validAll ^ " = and i1 " ^ valid ^ ", " ^ complete)
+          val _ =
+            emit ("br i1 " ^ validAll ^ ", label %" ^ someLabel ^
+                  ", label %" ^ noneLabel)
+          val _ = emit (someLabel ^ ":")
+          val someValue =
+            optionValue
+              ( "Some"
+              , SOME { text = parsed, ty = Ir.Float 64, const = false }
+              )
+          val _ =
+            emit ("store " ^ storageTy resultTy ^ " " ^
+                  #text someValue ^ ", ptr " ^ slot)
+          val _ = emit ("br label %" ^ doneLabel)
+          val _ = emit (noneLabel ^ ":")
+          val noneValue = optionValue ("None", NONE)
+          val _ =
+            emit ("store " ^ storageTy resultTy ^ " " ^
+                  #text noneValue ^ ", ptr " ^ slot)
+          val _ = emit ("br label %" ^ doneLabel)
+          val _ = emit (doneLabel ^ ":")
+          val _ =
+            emit (result ^ " = load " ^ storageTy resultTy ^
+                  ", ptr " ^ slot)
+          val _ = emit ("call void @yack_free(ptr " ^ path ^ ")")
+        in
+          { text = result, ty = resultTy, const = false }
+        end
       fun conversionTarget name =
         if name = "int_to_string" then SOME (true, 32)
         else if name = "string_to_int" then SOME (false, 32)
@@ -540,6 +649,7 @@ struct
           end
       | ("float_to_string", [(value, _)]) =>
           let
+            val lengthSlot = allocStack (Ir.Int 32)
             val length = fresh "str.float.len"
             val length64 = fresh "str.float.len64"
             val size = fresh "str.float.size"
@@ -547,9 +657,35 @@ struct
             val v1 = fresh "str.float.v1"
             val v2 = fresh "str.float.v2"
             val buffer = "@yack_fmt_buffer"
-            val _ = emit (length ^ " = call i32 @snprintf(ptr " ^ buffer ^
-                          ", i64 64, ptr @.fmt_float_plain, double " ^
-                          #text value ^ ")")
+
+            fun attempt (precision, nextLabel) =
+              let
+                val formatted = fresh ("str.float.g" ^ Int.toString precision)
+                val parsed = fresh ("str.float.p" ^ Int.toString precision)
+                val same = fresh ("str.float.eq" ^ Int.toString precision)
+                val skipLabel =
+                  freshLabel ("str.float.try" ^ Int.toString precision)
+              in
+                emit (formatted ^ " = call i32 @snprintf(ptr " ^ buffer ^
+                      ", i64 64, ptr @.fmt_float_g" ^
+                      Int.toString precision ^ ", double " ^ #text value ^ ")");
+                emit ("store i32 " ^ formatted ^ ", ptr " ^ lengthSlot);
+                emit (parsed ^ " = call double @strtod(ptr " ^ buffer ^
+                      ", ptr null)");
+                emit (same ^ " = fcmp oeq double " ^ parsed ^ ", " ^
+                      #text value);
+                emit ("br i1 " ^ same ^ ", label %" ^
+                      nextLabel ^ ", label %" ^ skipLabel);
+                emit (skipLabel ^ ":")
+              end
+            val useLabel = freshLabel "str.float.use"
+            val _ = attempt (15, useLabel)
+            val _ = attempt (16, useLabel)
+            val _ = attempt (17, useLabel)
+
+            val _ = emit ("br label %" ^ useLabel)
+            val _ = emit (useLabel ^ ":")
+            val _ = emit (length ^ " = load i32, ptr " ^ lengthSlot)
             val _ = emit (length64 ^ " = sext i32 " ^ length ^ " to i64")
             val _ = emit (size ^ " = add i64 " ^ length64 ^ ", 1")
             val memory = allocString size
@@ -564,6 +700,7 @@ struct
           in
             { text = v2, ty = resultTy, const = false }
           end
+      | ("string_to_float", [(value, _)]) => lowerStringToFloat value
       | ("string_copy", [(value, _)]) =>
           let
             val data = fresh "str.copy.data"

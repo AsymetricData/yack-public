@@ -1,0 +1,59 @@
+
+
+
+import yack/json
+import yack/string
+
+
+fun divide (left : float, right : float) : float = left / right
+
+fun render (text : &string) : string result =
+    case json.parse (text) of
+        Error (message) => Error (message)
+      | Ok (value) =>
+            case json.as_float (value) of
+                Error (message) => Error (message)
+              | Ok (number) => Ok (json.to_string (json.float (number)))
+
+fun show_render (text : &string) : unit =
+    case render (text) of
+        Error (message) => print_string ("FAIL " ^ message)
+      | Ok (first) =>
+            case render (&first) of
+                Error (message) => print_string ("FAIL again " ^ message)
+              | Ok (second) =>
+                    if string.equals (&first, &second) then
+                        print_string (first)
+                    else
+                        print_string ("FAIL unstable " ^ first ^ " " ^ second)
+
+fun show_parse (text : &string) : unit =
+    case string_to_float (text) of
+        None => print_string ("none")
+      | Some (value) => print_string (float_to_string (value))
+
+fun main () =
+    let
+        val _ = print_string (float_to_string (0.1 + 0.2))
+        val _ = print_string (float_to_string (0.1))
+        val _ = print_string (float_to_string (4.0))
+        val _ = print_string (float_to_string (1e-10))
+        val _ = show_render (&"1.7976931348623157e308")
+        val _ = show_render (&"2.2250738585072014e-308")
+        val _ = show_render (&"5e-324")
+        val _ = show_render (&"123456789.123456789")
+        val _ = show_render (&"0.1")
+        val _ = show_parse (&"0.1")
+        val _ = show_parse (&"")
+        val _ = show_parse (&" 1")
+        val _ = show_parse (&"1x")
+        val _ = show_parse (&"1e999")
+        val _ = show_parse (&"nan")
+        val _ = show_parse (&"inf")
+        val _ = show_parse (&"1e-400")
+        val _ = print_string (json.to_string (json.float (divide (1.0, 0.0))))
+        val _ = print_string (json.to_string (json.float (divide (0.0, 0.0))))
+        val _ = print_string (json.to_string (json.float (divide (0.0 - 1.0, 0.0))))
+    in
+        print_string (json.to_string (json.float (1.0)))
+    end

@@ -484,7 +484,9 @@ float.abs, min, max, clamp, sign, is_zero, pow, sqrt, pi, e
 ```
 
 `float` n'a ni parse, ni format, ni `floor`/`ceil`/`round`/`is_nan`. `sqrt` est
-une itération de Newton.
+une itération de Newton. Pour le texte, utiliser les builtins
+`float_to_string` et `string_to_float` ; `float_to_string` imprime le texte
+`%g` le plus court qui relit le même double.
 
 ### `yack/fmt`
 
@@ -504,6 +506,12 @@ sprintf ("%s = %d", (name, count))
 
 Le format doit être un littéral. Pour les cas dynamiques, composer avec `^`,
 `int_to_string`, `float_to_string` et `string.join`.
+
+Les conversions de texte du noyau sont `int_to_string` / `string_to_int`
+(pour chaque largeur entière), plus `float_to_string` et `string_to_float`.
+`float_to_string` imprime le texte `%g` le plus court qui relit exactement le
+même double (`0.1 + 0.2` donne `0.30000000000000004`, `4.0` donne `4`,
+`1e-10` reste `1e-10`), et `string_to_float` le relit avec `strtod`.
 
 ### `yack/path`
 
@@ -1006,9 +1014,12 @@ entry : string * value -> string * value
 
 `Number` conserve le **lexème** (`"42"`, `"-1.5e3"`) : le document rendu ne
 perd ni précision ni notation. `as_float` accepte un entier JSON comme un
-littéral décimal ou exponentiel. Il est écrit en Yack (le noyau n'a pas
-`string_to_float`), rejette les restes non consommés, `inf`, `nan` et un
-débordement (`1e999`). `float` utilise `float_to_string`.
+littéral décimal ou exponentiel. Il vérifie d'abord la grammaire JSON, puis
+convertit avec `string_to_float` (donc `strtod`, arrondi correct), rejette
+les restes non consommés, les espaces de tête, `inf`, `nan` et un
+débordement (`1e999`) ; un sous-flux donne `0.0`. `float` utilise
+`float_to_string`, dont le texte se relit à l'identique ; une valeur non
+finie (`inf`, `nan`) est rendue `null`, comme `JSON.stringify`.
 
 Aides typées :
 

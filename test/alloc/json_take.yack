@@ -196,6 +196,24 @@ fun check_decode_helpers () : int =
               | Ok (number) => number
     in decoded + badDecoded + empty + absurd + syntax end
 
+
+
+fun check_float_parse () : int =
+    let
+        val parsed =
+            case string_to_float (&"1.5") of
+                None => 1
+              | Some (number) => if number > 1.0 then 0 else 1
+        val rejected =
+            case string_to_float (&"1x") of
+                None => 0
+              | Some (_) => 1
+        val floatOk =
+            case json.decode (&"1.5", decode_float) of
+                Error (message) => let val ignored = drop_text (message) in 1 end
+              | Ok (number) => if number > 1.0 then 0 else 1
+    in parsed + rejected + floatOk end
+
 fun check_encoding () : int =
     let
         val big : int64 = 1234567890123
@@ -220,4 +238,4 @@ fun check_encoding () : int =
 fun main () =
     print_int
         (check_take_success () + check_take_errors () + check_lists () +
-         check_decode_helpers () + check_encoding ())
+         check_decode_helpers () + check_float_parse () + check_encoding ())

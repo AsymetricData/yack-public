@@ -19,7 +19,8 @@ fun parameterNames name =
     else if oneOf
       [ "print_int", "print_int64", "print_float", "print_bool"
       , "print_string", "int64_to_int", "int64_to_int_wrapping"
-      , "int_to_int64", "float_to_string", "string_copy", "string_of_int"
+      , "int_to_int64", "float_to_string", "string_to_float", "string_copy"
+      , "string_of_int"
       ] then ["value"]
     else if oneOf
       [ "int64_wrapping_add", "int64_wrapping_sub", "int64_wrapping_mul"
@@ -240,6 +241,17 @@ fun builtinFunctions optionOf ioResultOf () : (string * funSig) list =
     , { name = "float_to_string"
       , params = [Types.TFloat 64]
       , result = Types.TString
+      , span = builtinSpan
+      , arity = 1
+      , paramSpans = []
+      , typeVars = []
+      , generalized = ref []
+      }
+    )
+  , ( "string_to_float"
+    , { name = "string_to_float"
+      , params = [Types.TBorrow (Types.TString, false, NONE)]
+      , result = optionOf (Types.TFloat 64)
       , span = builtinSpan
       , arity = 1
       , paramSpans = []
