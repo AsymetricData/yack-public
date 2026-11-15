@@ -36,8 +36,8 @@
             <p class="eyebrow">Notes de conception · Modèle mémoire · environ 20 minutes</p>
             <h1>La possession à la place <span class="accent">d'un ramasse-miettes.</span></h1>
             <p class="lead">
-                Yack est une expérience : un petit langage de la famille ML, dont la syntaxe
-                plaît à son auteur, compilé en code natif via LLVM. Les types affines et
+                Yack est mon expérience : un petit langage de la famille ML, avec une syntaxe
+                que j'aime écrire, compilé en code natif via LLVM. Les types affines et
                 linéaires, ces idées de possession que Rust a rendues familières, remplacent le
                 ramasse-miettes. La seule cérémonie qui reste est celle que les types imposent.
             </p>
@@ -70,18 +70,18 @@
                     <span class="step-num">01. Le point de départ</span>
                     <h2 id="question-title">Pourquoi le langage existe</h2>
                     <p>
-                        Yack existe parce que son auteur voulait un langage dont la syntaxe lui
-                        plaît : la famille ML, proche de SML et OCaml, avec <code>let</code> et
+                        J'ai écrit Yack parce que je voulais un langage dont la syntaxe me plaît
+                        vraiment : la famille ML, proche de SML et OCaml, avec <code>let</code> et
                         <code>val</code>, <code>fun</code>, les datatypes, le filtrage par motifs,
-                        les modules et les pipes. L'objectif est un langage familier et confortable
-                        à écrire.
+                        les modules et les pipes. Je veux m'y sentir chez moi et l'écrire sans
+                        effort.
                     </p>
                     <p>
                         Rust montre que la possession peut remplacer un ramasse-miettes : les
                         types affines et linéaires, les déplacements et les emprunts font le
-                        travail qu'un collecteur à balayage ferait autrement. Sa syntaxe paraît
-                        plus verbeuse en comparaison, alors Yack garde les idées de possession et
-                        laisse ce poids de côté. Le modèle mémoire est vérifié dans le frontend,
+                        travail qu'un collecteur à balayage ferait autrement. Je trouve sa syntaxe
+                        lourde, alors j'ai gardé les idées de possession et laissé ce poids de
+                        côté. Le modèle mémoire est vérifié dans le frontend,
                         sur une syntaxe qui reste petite.
                     </p>
                     <p>
@@ -90,9 +90,9 @@
                         d'emprunt quand une valeur est lue sans être prise, et un appel qui
                         consomme une valeur linéaire. <a href="#borrowing">La section sur
                         l'emprunt</a> montre les annotations, et <a href="#costs">Ce que cela
-                        coûte</a> décrit où elles se font sentir. Yack est une expérience ; la
-                        version 0.2.0 est utilisable et testée, mais elle n'est pas présentée comme
-                        prête pour la production.
+                        coûte</a> décrit où elles se font sentir. Yack reste une expérience :
+                        la version 0.2.0 est utilisable et testée, mais je ne la considère pas
+                        encore prête pour la production.
                     </p>
                     <div class="callout">
                         <strong>Aucune collecte cachée à l'exécution.</strong>

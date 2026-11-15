@@ -36,8 +36,8 @@
             <p class="eyebrow">Design notes · Memory model · about 20 minutes</p>
             <h1>Ownership instead of <span class="accent">a garbage collector.</span></h1>
             <p class="lead">
-                Yack is an experiment: a small language in the ML family, with a syntax its
-                author finds pleasant, compiled through LLVM to native code. Affine and linear
+                Yack is my experiment: a small language in the ML family, with a syntax I
+                enjoy writing, compiled through LLVM to native code. Affine and linear
                 types, the ownership ideas Rust made familiar, take the place of the garbage
                 collector. The only ceremony left is what the types require.
             </p>
@@ -70,17 +70,16 @@
                     <span class="step-num">01. The starting point</span>
                     <h2 id="question-title">Why the language exists</h2>
                     <p>
-                        Yack exists because its author wanted a language with a syntax they find
-                        pleasant: the ML family, close to SML and OCaml, with <code>let</code> and
+                        I wrote Yack because I wanted a language whose syntax I actually enjoy:
+                        the ML family, close to SML and OCaml, with <code>let</code> and
                         <code>val</code>, <code>fun</code>, datatypes, pattern matching, modules
-                        and pipes. The goal is a language that feels familiar and is comfortable
-                        to write.
+                        and pipes. I want it to feel like home and to be comfortable to write.
                     </p>
                     <p>
                         Rust shows that ownership can replace a garbage collector: affine and
                         linear types, moves and borrows do the work a tracing collector would
-                        otherwise do. Its syntax feels verbose by comparison, so Yack keeps the
-                        ownership ideas and leaves out that weight. The memory model is checked in
+                        otherwise do. I find its syntax heavy, so I kept the ownership ideas and
+                        left that weight out. The memory model is checked in
                         the frontend, over a syntax that stays small.
                     </p>
                     <p>
@@ -89,8 +88,8 @@
                         being taken, and a call that consumes a linear value.
                         <a href="#borrowing">The borrowing section</a> shows the annotations, and
                         <a href="#costs">What it costs</a> describes where they are felt. Yack is
-                        an experiment; version 0.2.0 is usable and tested, but it is not presented
-                        as production-ready.
+                        still an experiment: version 0.2.0 is usable and tested, but I don't
+                        consider it production-ready yet.
                     </p>
                     <div class="callout">
                         <strong>No hidden runtime collection.</strong>

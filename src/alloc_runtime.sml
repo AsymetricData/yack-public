@@ -953,11 +953,14 @@ struct
     , ""
     ]
 
-  fun threadRuntime stackMode =
+  fun threadRuntime (stackMode, threadReserveText) =
     let
       val callLines =
         if stackMode then
-          [ "  call void @yack_root_init()"
+
+          [ "  call void @yack_stack_reserve(ptr @yack_root_stack, i64 " ^
+            threadReserveText ^ ", ptr @yack_root_free)"
+          , "  call void @yack_root_init()"
           , "  %region = alloca %yack.region"
           , "  call void %fn(ptr %region, ptr @yack_root_region, i64 %arg)"
           ]
@@ -1034,6 +1037,10 @@ struct
       val dataReserve =
         if reserve < 67108864 then reserve else 67108864
       val dataReserveText = Int64.toString dataReserve
+
+      val threadReserve =
+        if reserve < 268435456 then reserve else 268435456
+      val threadReserveText = Int64.toString threadReserve
       val scratchName = "yack_scratch"
       val poison = Memory.poisonEnabled ()
       val strict = Memory.strictQuarantine ()
@@ -1205,7 +1212,7 @@ struct
             @ asanRuntime poison
             @ traceScopeRuntime ()
             @ abortRuntime ()
-            @ (if usesThreads then threadRuntime false else [])
+            @ (if usesThreads then threadRuntime (false, "") else [])
           else
             [ "declare noalias ptr @malloc(i64) #2"
             , "declare void @free(ptr) #1"
@@ -1323,7 +1330,7 @@ struct
             @ traceScopeRuntime ()
             @ traceLogRuntime trace
             @ abortRuntime ()
-            @ (if usesThreads then threadRuntime false else [])
+            @ (if usesThreads then threadRuntime (false, "") else [])
       | Memory.Stack =>
           [ "%yack.stack = type { ptr, i64, i64, ptr, i64 }"
           , "; stack = { base, used, cap, freelist, youngest }"
@@ -2026,7 +2033,7 @@ struct
           @ (if usesThreads then
                [ "declare ptr @malloc(i64) #2"
                , "declare void @free(ptr) #1"
-               ] @ threadRuntime true
+               ] @ threadRuntime (true, threadReserveText)
              else [])
     end
 end
