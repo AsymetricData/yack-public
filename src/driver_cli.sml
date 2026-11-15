@@ -358,6 +358,11 @@ struct
             | _ => ()
           val _ = Memory.setArena arena
           val _ = Llvm.setDebugAlloc debug
+          val _ =
+            InternalContext.set
+              (case arguments of
+                 command :: _ => "running `yack " ^ command ^ "`"
+               | [] => "running yack")
         in
         case arguments of
           [] => (usage (); OS.Process.exit OS.Process.failure)

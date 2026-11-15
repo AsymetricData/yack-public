@@ -1,6 +1,7 @@
 import net/Http
 import yack/array
 import yack/bytes
+import yack/file
 import yack/string
 import yack/int
 
@@ -36,7 +37,8 @@ type 'state server = {
     last_sweep : int64,
     limits : limits,
     dispatch : 'state dispatcher,
-    state : 'state
+    state : 'state,
+    io_errors : int32 array
 }
 
 fun event_batch () : int = 64
@@ -47,6 +49,74 @@ fun event_batch () : int = 64
 fun set_interest (epfd : int, fd : int, slot : int, mask : int) : unit =
     let val _ = sys.epoll_mod_token (epfd, fd, mask, slot)
     in ()
+    end
+
+(* Valeurs errno Linux x86-64 d'un pair qui a disparu : la connexion est
+   fermée sans bruit, ce n'est pas une panne du serveur. *)
+fun peer_gone (error : int) : bool =
+    if error = 32 then true
+    else if error = 104 then true
+    else if error = 103 then true
+    else if error = 107 then true
+    else if error = 110 then true
+    else if error = 113 then true
+    else if error = 101 then true
+    else false
+
+(* Indices de `io_errors` : (compteur, dernier errno) par opération. *)
+fun accept_kind () : int = 0
+fun recv_kind () : int = 1
+fun send_kind () : int = 2
+
+(* Compte une erreur inattendue et retient son errno pour le résumé. *)
+fun note_io_error
+    (io_errors : int32 array, kind : int, error : int) : int32 array =
+    let val index = kind * 2
+        val count = array.get_int (borrow io_errors, index)
+        val counted = array.set_int (io_errors, index, count + 1)
+    in array.set_int (counted, index + 1, error)
+    end
+
+(* Écrit une ligne de résumé sur le fd 2. `yack/io` passe par
+   `/dev/stderr` ouvert en écriture, ce qui tronquerait un fichier de
+   redirection ; `yack/file` écrit directement sur le descripteur. *)
+fun report_io_error (what : borrow string, count : int, last : int) : unit =
+    let val times = if count = 1 then "time" else "times"
+        val line =
+            "Http.run: " ^ string.copy (what) ^ " failed " ^
+            int.to_string (count) ^ " " ^ times ^
+            " in the last second (last errno " ^ int.to_string (last) ^ ")\n"
+        val handle = file.stderr ()
+        val data = bytes.from_string (borrow line)
+        val _ = file.write_all (borrow handle, data)
+        val _ = file.close (handle)
+    in ()
+    end
+
+(* Résume et remet à zéro les compteurs : au plus trois lignes par seconde. *)
+fun report_io_errors (io_errors : int32 array) : int32 array =
+    let val accept_count = array.get_int (borrow io_errors, 0)
+        val accept_last = array.get_int (borrow io_errors, 1)
+        val recv_count = array.get_int (borrow io_errors, 2)
+        val recv_last = array.get_int (borrow io_errors, 3)
+        val send_count = array.get_int (borrow io_errors, 4)
+        val send_last = array.get_int (borrow io_errors, 5)
+        val _ =
+            if accept_count > 0 then
+                report_io_error (borrow "accept", accept_count, accept_last)
+            else ()
+        val _ =
+            if recv_count > 0 then
+                report_io_error (borrow "recv", recv_count, recv_last)
+            else ()
+        val _ =
+            if send_count > 0 then
+                report_io_error (borrow "send", send_count, send_last)
+            else ()
+        val reset_accept = array.set_int (io_errors, 0, 0)
+        val reset_recv = array.set_int (reset_accept, 2, 0)
+        val reset_send = array.set_int (reset_recv, 4, 0)
+    in reset_send
     end
 
 (* One owned empty string per slot, so a slot can later receive a response
@@ -144,6 +214,9 @@ fun server_listen
                                         val conn_fds : int32 array = array.make (-1, max)
                                         val started : int64 array = array.make (-1, max)
                                         val active : int64 array = array.make (0, max)
+                                        (* Six cases : (compteur, dernier errno)
+                                           pour accept, recv et send. *)
+                                        val io_errors : int32 array = array.make (0, 6)
                                         val last_sweep = sys.monotonic_ms ()
                                         val _ = sys.epoll_add_token (epfd, fd, 1, -1)
                                         val value : 'state server =
@@ -163,6 +236,7 @@ fun server_listen
                                             , limits = limits
                                             , dispatch = dispatch
                                             , state = state
+                                            , io_errors = io_errors
                                             }
                                     in Ok (value)
                                     end
@@ -194,6 +268,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
         , limits = limits
                 , dispatch = dispatch
                 , state = state
+                , io_errors = io_errors
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val _ = sys.close (fd)
@@ -222,6 +297,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
                 , limits = limits
                 , dispatch = dispatch
                 , state = state
+                , io_errors = io_errors
                 }
             end
 
@@ -243,6 +319,7 @@ fun accept_loop (value : 'state server) : 'state server =
         , limits = limits
         , dispatch = dispatch
         , state = state
+        , io_errors = io_errors
         } =>
             let val client = sys.accept (listener_fd)
             in
@@ -255,6 +332,14 @@ fun accept_loop (value : 'state server) : 'state server =
                             if error = 24 then sys.sleep_ms (10)
                             else if error = 23 then sys.sleep_ms (10)
                             else ()
+                        (* EINTR: the listener stays readable. EAGAIN and
+                           ECONNABORTED are a normal end of the accept
+                           loop / a peer that left while connecting. *)
+                        val io_errors =
+                            if error = 4 then io_errors
+                            else if error = 11 then io_errors
+                            else if error = 103 then io_errors
+                            else note_io_error (io_errors, accept_kind (), error)
                     in
                         { epfd = epfd
                         , listener_fd = listener_fd
@@ -272,6 +357,7 @@ fun accept_loop (value : 'state server) : 'state server =
                         , limits = limits
                         , dispatch = dispatch
                         , state = state
+                        , io_errors = io_errors
                         }
                     end
                 else
@@ -298,6 +384,7 @@ fun accept_loop (value : 'state server) : 'state server =
                                 , limits = limits
                                 , dispatch = dispatch
                                 , state = state
+                                , io_errors = io_errors
                                 }
                             end
                         else
@@ -327,6 +414,7 @@ fun accept_loop (value : 'state server) : 'state server =
                                      , limits = limits
                                      , dispatch = dispatch
                                      , state = state
+                                     , io_errors = io_errors
                                      })
                             end
                     end
@@ -381,6 +469,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
         , limits = limits
         , dispatch = dispatch
         , state = state
+        , io_errors = io_errors
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val total = array.get_int (borrow output_lengths, slot)
@@ -411,6 +500,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                             , limits
                             , dispatch
                             , state
+                            , io_errors
                             )
                     end
                 else
@@ -419,8 +509,14 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                     in
                         if sent < 0 then
                             let val error = sys.errno ()
+                                (* EINTR and EAGAIN keep the pending output
+                                   and wait for EPOLLOUT. *)
+                                val wait =
+                                    if error = 4 then true
+                                    else if error = 11 then true
+                                    else false
                             in
-                                if error = 11 then
+                                if wait then
                                     let val _ = set_interest (epfd, fd, slot, 4)
                                     in
                                         make_server
@@ -440,8 +536,31 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , limits
                                             , dispatch
                                             , state
+                                            , io_errors
                                             )
                                     end
+                                else if peer_gone (error) then
+                                    close_slot
+                                        (make_server
+                                             ( epfd
+                                             , listener_fd
+                                             , fds
+                                             , events
+                                             , data
+                                             , lengths
+                                             , outputs
+                                             , output_lengths
+                                             , output_offsets
+                                             , conn_fds
+                                             , started
+                                             , active
+                                             , last_sweep
+                                             , limits
+                                             , dispatch
+                                             , state
+                                             , io_errors
+                                             ),
+                                         slot)
                                 else
                                     close_slot
                                         (make_server
@@ -461,6 +580,8 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                              , limits
                                              , dispatch
                                              , state
+                                             , note_io_error
+                                                   (io_errors, send_kind (), error)
                                              ),
                                          slot)
                             end
@@ -484,6 +605,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                     , limits
                                     , dispatch
                                     , state
+                                    , io_errors
                                     )
                             end
                         else
@@ -516,6 +638,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , limits
                                             , dispatch
                                             , state
+                                            , io_errors
                                             )
                                     end
                                 else
@@ -538,42 +661,12 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , limits
                                             , dispatch
                                             , state
+                                            , io_errors
                                             )
                                     end
                             end
                     end
             end
-
-fun send_all_loop (fd : int, text : borrow string, offset : int, total : int) : unit =
-    if offset >= total then ()
-    else
-        let val sent = sys.send_string_raw (fd, text, offset, total - offset)
-        in
-            if sent < 0 then
-                let val error = sys.errno ()
-                in
-                    if error = 11 then send_all_loop (fd, text, offset, total)
-                    else ()
-                end
-            else if sent = 0 then ()
-            else send_all_loop (fd, text, offset + sent, total)
-        end
-
-fun send_all (fd : int, text : borrow string) : unit =
-    let val total = string.length (text)
-    in send_all_loop (fd, text, 0, total)
-    end
-
-fun send_hello (fd : int, body : borrow string) : unit =
-    let val length = string.length (body)
-        val length_text = int.to_string (length)
-        val prefix = "HTTP/1.1 200 OK\r\nContent-Length: "
-        val suffix = "\r\nConnection: keep-alive\r\n\r\n"
-        val _ = send_all (fd, borrow prefix)
-        val _ = send_all (fd, borrow length_text)
-        val _ = send_all (fd, borrow suffix)
-    in send_all (fd, body)
-    end
 
 (* Short constant rejection replies: each fits in one write and does not
    depend on application state. *)
@@ -612,6 +705,7 @@ fun make_server
     , limits : limits
     , dispatch : 'state dispatcher
     , state : 'state
+    , io_errors : int32 array
     ) : 'state server =
     { epfd = epfd
     , listener_fd = listener_fd
@@ -629,6 +723,7 @@ fun make_server
     , limits = limits
     , dispatch = dispatch
                 , state = state
+                , io_errors = io_errors
     }
 
 (* Les méthodes sans corps n'ont pas besoin de lire Content-Length.
@@ -691,6 +786,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
         , limits = limits
         , dispatch = dispatch
         , state = state
+        , io_errors = io_errors
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val length = array.get_int (borrow lengths, slot)
@@ -720,6 +816,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                  , limits
                                  , dispatch
                                  , state
+                                 , io_errors
                                  ),
                              slot)
                     end
@@ -728,8 +825,14 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                     in
                         if received < 0 then
                             let val error = sys.errno ()
+                                (* EINTR and EAGAIN: level-triggered epoll
+                                   fires again, the slot is unchanged. *)
+                                val retry =
+                                    if error = 4 then true
+                                    else if error = 11 then true
+                                    else false
                             in
-                                if error = 11 then
+                                if retry then
                                     make_server
                                         ( epfd
                                         , listener_fd
@@ -747,7 +850,30 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                         , limits
                                         , dispatch
                                         , state
+                                        , io_errors
                                         )
+                                else if peer_gone (error) then
+                                    close_slot
+                                        (make_server
+                                             ( epfd
+                                             , listener_fd
+                                             , fds
+                                             , events
+                                             , data
+                                             , lengths
+                                             , outputs
+                                             , output_lengths
+                                             , output_offsets
+                                             , conn_fds
+                                             , started
+                                             , active
+                                             , last_sweep
+                                             , limits
+                                             , dispatch
+                                             , state
+                                             , io_errors
+                                             ),
+                                         slot)
                                 else
                                     close_slot
                                         (make_server
@@ -767,6 +893,8 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                              , limits
                                              , dispatch
                                              , state
+                                             , note_io_error
+                                                   (io_errors, recv_kind (), error)
                                              ),
                                          slot)
                             end
@@ -789,6 +917,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                      , limits
                                      , dispatch
                                      , state
+                                     , io_errors
                                      ),
                                  slot)
                         else
@@ -819,6 +948,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                         , limits
                                         , dispatch
                                         , state
+                                        , io_errors
                                         )
                                 else
                                     let val bodyless =
@@ -881,6 +1011,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                          , limits
                                                          , dispatch
                                                          , state
+                                                         , io_errors
                                                          ),
                                                      slot)
                                             end
@@ -902,6 +1033,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                 , limits
                                                 , dispatch
                                                 , state
+                                                , io_errors
                                                 )
                                         else
                                             let val run = dispatch.run
@@ -964,6 +1096,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                                      , limits
                                                                      , dispatch
                                                                      , next_state
+                                                                     , io_errors
                                                                      ),
                                                                  slot)
                                                             end
@@ -991,6 +1124,7 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                                                          , limits
                                                                          , dispatch
                                                                          , next_state
+                                                                         , io_errors
                                                                          ),
                                                                      slot,
                                                                      false)
@@ -1021,6 +1155,7 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
             , limits = limits
                 , dispatch = dispatch
                 , state = state
+                , io_errors = io_errors
             } =>
                 let val token = array.get_int (borrow fds, index)
                     val pending =
@@ -1045,6 +1180,7 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
                         , limits = limits
                 , dispatch = dispatch
                 , state = state
+                , io_errors = io_errors
                         }
                     val next_value =
                         if token < 0 then accept_loop (rebuilt)
@@ -1081,8 +1217,12 @@ fun close_all (value : 'state server) : unit =
         , limits = limits
         , dispatch = dispatch
         , state = state
+        , io_errors = io_errors
         } =>
-            let val _ = close_slots_from (conn_fds, limits.connections, 0)
+            let (* Flush the counters seen during the last second, so a
+                   shutdown does not drop the final errors. *)
+                val _ = report_io_errors (io_errors)
+                val _ = close_slots_from (conn_fds, limits.connections, 0)
                 val _ = sys.close (listener_fd)
                 val _ = sys.close (epfd)
             in
@@ -1115,6 +1255,7 @@ fun sweep_from
             , limits = limits
             , dispatch = dispatch
             , state = state
+            , io_errors = io_errors
             } =>
                 let val fd = array.get_int (borrow conn_fds, index)
                     val request_started = array.get (borrow started, index)
@@ -1139,6 +1280,7 @@ fun sweep_from
                         , limits = limits
                         , dispatch = dispatch
                         , state = state
+                        , io_errors = io_errors
                         }
                 in
                     if fd < 0 then sweep_from (rebuilt, connections, index + 1, now)
@@ -1180,10 +1322,15 @@ fun serve (value : 'state server) : unit result =
             , limits = limits
             , dispatch = dispatch
             , state = state
+            , io_errors = io_errors
             } =>
                 let val ready = sys.epoll_wait (epfd, fds, events, event_batch (), 200)
                     val now = sys.monotonic_ms ()
                     val sweep_due = now - last_sweep >= 1000
+                    (* At most one summary line per operation per second. *)
+                    val io_errors =
+                        if sweep_due then report_io_errors (io_errors)
+                        else io_errors
                     val rebuilt : 'state server =
                         { epfd = epfd
                         , listener_fd = listener_fd
@@ -1201,6 +1348,7 @@ fun serve (value : 'state server) : unit result =
                         , limits = limits
                         , dispatch = dispatch
                         , state = state
+                        , io_errors = io_errors
                         }
                     val current =
                         if sweep_due then sweep_from (rebuilt, limits.connections, 0, now)

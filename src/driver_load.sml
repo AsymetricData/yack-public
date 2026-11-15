@@ -2,6 +2,12 @@ structure DriverLoad =
 struct
   exception ModuleAbort
 
+  fun testFailure phase =
+    case OS.Process.getEnv "YACK_INTERNAL_ERROR_TEST" of
+      SOME requested =>
+        if requested = phase then raise Fail "internal error test" else ()
+    | NONE => ()
+
   fun resolveDependency (root, path) =
     if OS.Path.isAbsolute path then OS.Path.mkCanonical path
     else OS.Path.concat (root, path)
@@ -239,6 +245,8 @@ struct
         )
     | SOME source =>
         let
+          val _ = InternalContext.set ("parsing " ^ file)
+          val _ = testFailure "parse"
           val sources =
             ref
               [ { id = 0
@@ -1790,6 +1798,8 @@ struct
                   if Diag.hasErrors qualifyDiagnostics' then NONE
                   else
                     let
+                      val _ = InternalContext.set ("typing " ^ file)
+                      val _ = testFailure "typing"
                       val checked =
                         Check.checkWithPrelude
                           (preludeFileId, #requireMain options, program)
@@ -1809,6 +1819,9 @@ struct
                         syntaxDiagnostics @ qualifyDiagnostics' @
                         resolutionReported @ typeReported
                       val hardErrors = Diag.hasErrors earlier
+                      val _ =
+                        ( InternalContext.set ("checking ownership in " ^ file)
+                        ; testFailure "ownership" )
 
                       val ownershipResult =
                         SOME
@@ -1895,7 +1908,7 @@ struct
       , report = fn (sources, diagnostics) =>
           DriverIo.renderDiags sources diagnostics
       , note = fn message =>
-          TextIO.output (TextIO.stdErr, "yack: " ^ message ^ "\n")
+          TextIO.output (TextIO.stdErr, "error: " ^ message ^ "\n")
       }
       file
 
@@ -1911,7 +1924,7 @@ struct
       , report = fn (sources, diagnostics) =>
           DriverIo.renderDiags sources diagnostics
       , note = fn message =>
-          TextIO.output (TextIO.stdErr, "yack: " ^ message ^ "\n")
+          TextIO.output (TextIO.stdErr, "error: " ^ message ^ "\n")
       }
       file
 

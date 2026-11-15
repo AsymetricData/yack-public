@@ -64,6 +64,7 @@ src/json.sml
 src/driver_types.sml
 src/driver_io.sml
 src/stdlib_root.sml
+src/internal_context.sml
 src/driver_load.sml
 src/driver_ui.sml
 src/driver_process.sml

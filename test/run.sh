@@ -303,6 +303,79 @@ expect_multi() {
   pass "$name"
 }
 
+
+
+
+expect_internal_error() {
+  local name=$1
+  local phase=$2
+  local context=$3
+  local file=$4
+  local output status
+  output=$(YACK_INTERNAL_ERROR_TEST="$phase" "$YACK" check "$file" 2>&1)
+  status=$?
+  if [ "$status" -ne 70 ]; then
+    fail "$name" "expected exit 70, got $status"
+    printf '%s\n' "$output" | sed 's/^/     /'
+    return
+  fi
+  if ! printf '%s' "$output" |
+       grep -Fq "internal error[E0902]: Fail: internal error test"; then
+    fail "$name" "missing the E0902 message"
+    printf '%s\n' "$output" | sed 's/^/     /'
+    return
+  fi
+  if ! printf '%s' "$output" | grep -Fq "while $context"; then
+    fail "$name" "missing context [while $context]"
+    printf '%s\n' "$output" | sed 's/^/     /'
+    return
+  fi
+  if ! printf '%s' "$output" |
+       grep -Fq "https://github.com/AsymetricData/yack-public/issues"; then
+    fail "$name" "missing the report URL"
+    printf '%s\n' "$output" | sed 's/^/     /'
+    return
+  fi
+  if printf '%s' "$output" | grep -q "unhandled exception"; then
+    fail "$name" "raw unhandled exception leaked"
+    printf '%s\n' "$output" | sed 's/^/     /'
+    return
+  fi
+  pass "$name"
+}
+
+expect_internal_error internal_error_parse parse \
+  "parsing test/borrow_field.yack" test/borrow_field.yack
+expect_internal_error internal_error_typing typing \
+  "typing test/borrow_field.yack" test/borrow_field.yack
+expect_internal_error internal_error_ownership ownership \
+  "checking ownership in test/borrow_field.yack" test/borrow_field.yack
+
+
+missing_output=$("$YACK" check /nonexistent/file.yack 2>&1)
+missing_status=$?
+if [ "$missing_status" -eq 1 ] &&
+   printf '%s' "$missing_output" | grep -q "^error:" &&
+   ! printf '%s' "$missing_output" | grep -q "E0902"; then
+  pass internal_error_missing_file
+else
+  fail internal_error_missing_file "expected exit 1 with an error: line" \
+    "status=$missing_status" "output=[$missing_output]"
+fi
+
+
+type_output=$("$YACK" check test/reject/mut_borrow_read_field.yack 2>&1)
+type_status=$?
+if [ "$type_status" -eq 1 ] &&
+   printf '%s' "$type_output" | grep -q "\[E0502\]" &&
+   ! printf '%s' "$type_output" | grep -q "E0902"; then
+  pass internal_error_type_error
+else
+  fail internal_error_type_error "expected exit 1 with E0502 only" \
+    "status=$type_status"
+  printf '%s\n' "$type_output" | sed 's/^/     /'
+fi
+
 expect_resolve() {
   local name=$1
   local file=$2

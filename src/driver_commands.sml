@@ -438,7 +438,8 @@ struct
     end
 
   fun lowerDiagnostics file mode checked =
-    #diagnostics (lowerForCheck file mode checked)
+    ( InternalContext.set ("lowering " ^ file)
+    ; #diagnostics (lowerForCheck file mode checked) )
 
   fun arenaBlocks { file, text, mode, checked : DriverTypes.checked, lowered : Lower.result } =
     let
@@ -522,6 +523,7 @@ struct
 
   and lowerUnvalidatedFrom roots mode checked =
     let
+      val _ = InternalContext.set "lowering"
       val lowered = lowerFrom roots mode checked
       val diagnostics = #diagnostics lowered
       val _ = renderDiags (#sources checked) diagnostics
