@@ -1942,6 +1942,13 @@ for example in examples/*.yack; do
   pass "build_$name"
 done
 
+
+if bash test/error_codes.sh; then
+  pass error_codes_documented
+else
+  fail error_codes_documented "docs/errors.md and src/*.sml disagree"
+fi
+
 if [ "$failed" -ne 0 ]; then
   printf '\ntests failed\n'
   exit 1

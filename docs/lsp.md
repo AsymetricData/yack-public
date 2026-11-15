@@ -51,7 +51,8 @@ compris quand ils sont importés par le fichier courant.
 publie `textDocument/publishDiagnostics`. Les diagnostics proviennent des mêmes
 structures `Diag.t` que la CLI, avec :
 
-- code stable (`E2002`, `E3004`, `E0402`, `E0502`, …) ;
+- code stable (`E2002`, `E3004`, `E0402`, `E0502`, …), documenté dans
+  [`docs/errors.md`](errors.md) ;
 - sévérité, portée exacte et source `yack` ;
 - notes et hints ajoutés au message (`•` et `→`).
 

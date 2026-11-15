@@ -594,6 +594,8 @@ l'idempotence), le LSP, et la documentation des 660 déclarations de
 ## Documentation
 
 - [`tutorial/`](tutorial/) : tutoriel rapide pour apprendre Yack ;
+- [`docs/errors.md`](docs/errors.md) : référence de tous les codes de
+  diagnostic (`E....`, `W....`) ;
 - [`docs/performance.md`](docs/performance.md) : complexité et pistes
   d'optimisation du frontend ;
 - [`docs/stdlib.md`](docs/stdlib.md) : bibliothèque standard `yack/*` ;
