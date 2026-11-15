@@ -6,7 +6,7 @@ SOURCES := $(wildcard src/*.sml)
 BUILD_INFO := src/build_info.sml
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-.PHONY: all test test-nll test-alpage test-http-server test-http-limits test-http-io-errors test-http-fuzz test-borrow test-sqlite-pool test-threads test-lsp test-stdlib-docs test-error-codes test-asan test-stack test-cli test-fuzz test-fuzz-asan test-fuzz-ownership test-regions watch watch-once clean
+.PHONY: all test test-nll test-alpage test-http-server test-http-limits test-http-io-errors test-http-fuzz test-borrow test-sqlite-pool test-threads test-lsp test-stdlib-docs test-error-codes test-extern-layout test-asan test-stack test-cli test-fuzz test-fuzz-asan test-fuzz-ownership test-regions watch watch-once clean
 
 all: yack
 
@@ -75,6 +75,10 @@ test-stdlib-docs:
 
 test-error-codes:
 	bash test/error_codes.sh
+
+test-extern-layout:
+	bash test/extern_layout.sh
+	bash test/extern_layout.sh --self-test
 
 test-cli: yack
 	bash -c 'ulimit -v 2000000; timeout 300 ./test/cli.sh'

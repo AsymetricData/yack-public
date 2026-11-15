@@ -37,11 +37,11 @@ extern fun connect_raw
 
 extern record pollfd (size = 8) {
   fd : int32 @ 0,
-  events : int32 @ 4
+  events : int16 @ 4
 }
 
 extern record poll_result (size = 8) {
-  revents : int32 @ 4
+  revents : int16 @ 6
 }
 
 extern record so_error (size = 4) {
@@ -211,6 +211,10 @@ fun internal_wait_connected (descriptor : int, deadline : int64) : int =
         if expired then 110
         else
             let
+                (* `struct pollfd` : `fd` sur 4 octets, puis `events = 4`
+                   (POLLOUT). L'entier 32 bits 4 little-endian se lit donc
+                   `events = 4`, `revents = 0` en deux champs `int16`
+                   (Linux x86-64). *)
                 val fdsText =
                     internal_int32_bytes (descriptor) ^
                     internal_int32_bytes (4)

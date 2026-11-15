@@ -1971,6 +1971,14 @@ else
   fail error_codes_documented "docs/errors.md and src/*.sml disagree"
 fi
 
+
+
+if bash test/extern_layout.sh; then
+  pass extern_layout
+else
+  fail extern_layout "lib/**/*.yack disagrees with the C headers"
+fi
+
 if [ "$failed" -ne 0 ]; then
   printf '\ntests failed\n'
   exit 1
