@@ -1,0 +1,13 @@
+
+
+import yack/string
+
+fun main () =
+    let
+        val repeated = string.repeat (borrow "0123456789", 1000)
+        val joined = string.join (",", ["alpha", "beta"])
+        val total =
+            string.length (borrow repeated) + string.length (borrow joined)
+    in
+        print_int (total)
+    end

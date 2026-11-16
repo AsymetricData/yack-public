@@ -1,0 +1,71 @@
+
+
+
+
+
+
+
+
+
+
+import yack/string
+
+
+
+
+fun values_from (count : int, acc : string list) : string list =
+    if count <= 0 then acc else values_from (count - 1, "0123456789" :: acc)
+
+fun repeated_bytes_ok () : bool =
+    arena
+        val text = string.repeat (borrow "0123456789", 400000)
+        val size = string.length (borrow text)
+    in
+        if size = 4000000 then
+            if string.char_at_int (borrow text, 0) = 48 then
+                if string.char_at_int (borrow text, 9) = 57 then
+                    if string.char_at_int (borrow text, 10) = 48 then
+                        string.char_at_int (borrow text, size - 1) = 57
+                    else
+                        false
+                else
+                    false
+            else
+                false
+        else
+            false
+    end
+
+fun joined_bytes_ok () : bool =
+    arena
+        val text = string.join (",", values_from (100000, []))
+        val size = string.length (borrow text)
+    in
+        if size = 1099999 then
+            if string.char_at_int (borrow text, 0) = 48 then
+                if string.char_at_int (borrow text, 10) = 44 then
+                    if string.char_at_int (borrow text, 11) = 48 then
+                        string.char_at_int (borrow text, size - 1) = 57
+                    else
+                        false
+                else
+                    false
+            else
+                false
+        else
+            false
+    end
+
+fun main () =
+    let
+        val repeated = string.repeat (borrow "0123456789", 400000)
+        val joined = string.join (",", values_from (100000, []))
+        val repeated_size = string.length (borrow repeated)
+        val joined_size = string.length (borrow joined)
+        val ok =
+            if repeated_bytes_ok () then joined_bytes_ok () else false
+        val _ = print_int (repeated_size)
+        val _ = print_int (joined_size)
+    in
+        if ok then print_string ("ok") else print_string ("bad")
+    end

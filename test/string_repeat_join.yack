@@ -1,0 +1,34 @@
+
+
+
+
+
+
+
+
+
+import yack/string
+
+fun main () =
+    let
+        val r0 = string.repeat (borrow "ab", 0)
+        val rn = string.repeat (borrow "ab", -3)
+        val r1 = string.repeat (borrow "ab", 1)
+        val re = string.repeat (borrow "", 5)
+        val j0 = string.join (",", [])
+        val j1 = string.join (",", ["x"])
+        val je = string.join ("", ["a", "b"])
+        val j3 = string.join (",", ["a", "b", "c"])
+        val rf = string.repeat_from (borrow "xy", 2, "pre")
+        val jf = string.join_from (borrow ",", ["a", "b"], false, "pre")
+        val jfirst = string.join_from (borrow ",", ["a", "b"], true, "pre")
+    in
+        let val line1 = "[" ^ r0 ^ "][" ^ rn ^ "][" ^ r1 ^ "][" ^ re ^ "]"
+            val line2 = "[" ^ j0 ^ "][" ^ j1 ^ "][" ^ je ^ "][" ^ j3 ^ "]"
+            val line3 = "[" ^ rf ^ "] [" ^ jf ^ "] [" ^ jfirst ^ "]"
+            val _ = print_string (line1)
+            val _ = print_string (line2)
+        in
+            print_string (line3)
+        end
+    end

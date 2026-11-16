@@ -64,8 +64,8 @@ fun yack__yack_io_print_line {
 fun yack__yack_string_copy {
   b0(%0.text : &string):
     %1 : int = const 0
-    %2 : int = string.string_length %0.text  # at 13:82
-    %3 : string = string.string_slice %0.text!, move %1!, move %2!  # at 13:82
+    %2 : int = string.string_length %0.text  # at 15:82
+    %3 : string = string.string_slice %0.text!, move %1!, move %2!  # at 15:82
     return move %3!
 }
 fun yack_exclusive {

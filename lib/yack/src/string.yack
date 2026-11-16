@@ -1,3 +1,5 @@
+import yack/array
+import yack/bytes as byte_array
 import yack/char
 
 (* yack/string : chaînes d'octets, indexées par octet.
@@ -343,6 +345,40 @@ fun trim_right (text : borrow string) : string =
 fun trim (text : borrow string) : string =
     let val right = trim_right (text) in trim_left (borrow right) end
 
+(* Calcule la taille en octets du préfixe suivi des copies à venir.
+   - `text` : chaîne répétée, empruntée.
+   - `count` : nombre de copies à ajouter ; une valeur non positive n’ajoute rien.
+   - `acc` : préfixe possédé dont la longueur entre dans le total.
+
+   Retourne la somme en `int64`, pour refuser un résultat plus grand qu’un `int`
+   avant d’allouer le buffer. *)
+fun repeat_total (text : borrow string, count : int, acc : borrow string) : int64 =
+    let
+        val size = int_to_int64 (string_length (text))
+        val copies =
+            if count <= 0 then int_to_int64 (0) else int_to_int64 (count)
+    in
+        int_to_int64 (string_length (acc)) + size * copies
+    end
+
+(* Écrit `count` copies de `text` dans le buffer à partir de `offset`.
+   - `text` : chaîne répétée, empruntée.
+   - `count` : nombre de copies restantes à écrire.
+   - `limit` : taille totale du buffer, borne exclusive des écritures.
+   - `offset` : prochain octet à écrire.
+   - `target` : buffer emprunté, muté en place.
+
+   Retourne le décalage après la dernière copie. *)
+fun repeat_fill
+        (text : borrow string, count : int, limit : int, offset : int,
+         target : borrow int8 array) : int =
+    if count <= 0 then
+        offset
+    else
+        let val next = byte_array.write_string (target, offset, limit, text)
+        in repeat_fill (text, count - 1, limit, next, target)
+        end
+
 (* Ajoute plusieurs copies d’une chaîne à un accumulateur.
    - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
      modifié en place).
@@ -350,9 +386,18 @@ fun trim (text : borrow string) : string =
      rien.
    - `acc` : chaîne possédée servant d’accumulateur.
 
-   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
+   Retourne une chaîne possédée ; les arguments empruntés restent inchangés. Le
+   buffer de sortie est alloué une seule fois, donc le coût mémoire reste linéaire
+   même à l’intérieur d’un `arena`. *)
 fun repeat_from (text : borrow string, count : int, acc : string) : string =
-    if count <= 0 then acc else repeat_from (text, count - 1, acc ^ copy (text))
+    let
+        val total = int64_to_int (repeat_total (text, count, borrow acc))
+        val target : int8 array = array.make_uninit (total)
+        val offset = byte_array.write_string (borrow target, 0, total, borrow acc)
+        val _ = repeat_fill (text, count, total, offset, borrow target)
+    in
+        byte_array.to_string (target)
+    end
 
 (* Répète une chaîne un nombre donné de fois.
    - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni
@@ -363,6 +408,58 @@ fun repeat_from (text : borrow string, count : int, acc : string) : string =
    Retourne une chaîne possédée ; les arguments empruntés restent inchangés. *)
 fun repeat (text : borrow string, count : int) : string = repeat_from (text, count, "")
 
+(* Calcule la taille totale des valeurs jointes, hors accumulateur.
+   - `separator` : séparateur emprunté, compté entre deux valeurs.
+   - `values` : liste empruntée, non consommée.
+   - `first` : indique si l’élément courant est le premier, donc sans séparateur.
+   - `acc` : longueur déjà comptée.
+
+   Retourne la longueur en octets en `int64` ; les valeurs et le séparateur restent
+   empruntés. *)
+fun join_length_from
+        (separator : borrow string, values : borrow string list,
+         first : bool, acc : int64) : int64 =
+    case values of
+        Nil => acc
+      | Cons (value, rest) =>
+            let
+                val gap =
+                    if first then
+                        int_to_int64 (0)
+                    else
+                        int_to_int64 (string_length (separator))
+                val next = acc + gap + int_to_int64 (string_length (value))
+            in
+                join_length_from (separator, rest, false, next)
+            end
+
+(* Écrit un séparateur puis une valeur dans le buffer, à partir d’`offset`.
+   - `separator` : séparateur emprunté, écrit avant chaque valeur sauf la première.
+   - `values` : liste possédée, consommée pendant le parcours.
+   - `first` : indique si l’élément courant est le premier, donc sans séparateur.
+   - `limit` : taille totale du buffer, borne exclusive des écritures.
+   - `offset` : prochain octet à écrire.
+   - `target` : buffer emprunté, muté en place.
+
+   Retourne le décalage après la dernière valeur. *)
+fun join_fill_from
+        (separator : borrow string, values : string list, first : bool,
+         limit : int, offset : int, target : borrow int8 array) : int =
+    case values of
+        Nil => offset
+      | Cons (value, rest) =>
+            let
+                val offset =
+                    if first then
+                        offset
+                    else
+                        byte_array.write_string (target, offset, limit, separator)
+                val next =
+                    byte_array.write_string (target, offset, limit, borrow value)
+            in
+                join_fill_from (separator, rest, false, limit, next, target)
+            end
+
 (* Assemble une liste de chaînes avec un séparateur et un accumulateur.
    - `separator` : séparateur emprunté (emprunté, non consommé ni modifié en place).
    - `values` : liste possédée, consommée pendant le parcours.
@@ -370,25 +467,35 @@ fun repeat (text : borrow string, count : int) : string = repeat_from (text, cou
    - `acc` : chaîne possédée servant d’accumulateur.
 
    Retourne une chaîne possédée ; la liste est consommée et l’accumulateur est rendu
-   complété. *)
+   complété. La taille totale est calculée avant l’allocation, puis les morceaux
+   sont copiés dans un unique buffer : le coût mémoire reste linéaire même à
+   l’intérieur d’un `arena`. *)
 fun join_from (
     separator : borrow string,
     values : string list,
     first : bool,
     acc : string
 ) : string =
-    case values of
-        Nil => acc
-      | Cons (value, rest) =>
-          let
-              val next =
-                  if first then
-                      copy (borrow value)
-                  else
-                      acc ^ copy (separator) ^ copy (borrow value)
-          in
-              join_from (separator, rest, false, next)
-          end
+    let
+        val inner =
+            join_length_from (separator, borrow values, first, int_to_int64 (0))
+        val total =
+            int64_to_int (
+                if first then
+                    inner
+                else
+                    int_to_int64 (string_length (borrow acc)) + inner)
+        val target : int8 array = array.make_uninit (total)
+        val offset =
+            if first then
+                0
+            else
+                byte_array.write_string (borrow target, 0, total, borrow acc)
+        val _ =
+            join_fill_from (separator, values, first, total, offset, borrow target)
+    in
+        byte_array.to_string (target)
+    end
 
 (* Assemble les chaînes d’une liste en insérant un séparateur.
    - `separator` : séparateur possédé, consommé par l’appel.
@@ -397,9 +504,7 @@ fun join_from (
    Retourne une chaîne possédée après consommation du séparateur et de la liste
    d’entrée. *)
 fun join (separator : string, values : string list) : string =
-    let val copied = copy (borrow separator)
-    in join_from (borrow copied, values, true, "")
-    end
+    join_from (borrow separator, values, true, "")
 
 (* Découpe une chaîne à partir d’un index sur chaque octet séparateur.
    - `text` : chaîne source empruntée, indexée par octet (emprunté, non consommé ni

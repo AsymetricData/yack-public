@@ -554,6 +554,33 @@ expect_abort_under_vmem() {
 }
 
 
+
+expect_run_under_vmem() {
+  local name=$1
+  local file=$2
+  local limit=$3
+  local expected=$4
+  local output status actual
+  if ! output=$("$YACK" build "$file" "$TMP/$name" 2>&1); then
+    fail "$name" "compile failed"
+    printf '%s\n' "$output" | sed 's/^/     /'
+    return
+  fi
+  actual=$(bash -c "ulimit -v $limit; exec taskset -c 0-7 '$TMP/$name'" 2>&1)
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "$name" "program exited with $status"
+    printf '%s\n' "$actual" | sed 's/^/     /'
+    return
+  fi
+  if [ "$actual" != "$expected" ]; then
+    fail "$name" "unexpected output" "expected [$expected]" "got [$actual]"
+    return
+  fi
+  pass "$name"
+}
+
+
 expect_ir_line() {
   local name=$1
   local file=$2
@@ -1643,6 +1670,11 @@ expect_run package_dependency examples/pkgdep/app/src/main.yack "49"
 
 expect_run implicit_stdlib test/implicit_stdlib.yack "ok"
 expect_run stdlib_string_index_of test/string_index_of.yack "2 5 -1 -1"
+expect_run stdlib_string_repeat_join test/string_repeat_join.yack $'[][][ab][]\n[][x][ab][a,b,c]\n[prexyxy] [pre,a,b] [a,b]'
+
+
+expect_run_under_vmem stdlib_string_arena_linear test/string_arena_linear.yack 200000 $'4000000\n1099999\nok'
+expect_no_leak alloc_string_repeat_join test/alloc/string_repeat_join.yack
 
 
 
