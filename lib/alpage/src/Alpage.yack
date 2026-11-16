@@ -6,6 +6,7 @@ import alpage/Reply
 import alpage/Request
 import alpage/Response
 import http_server/Server as Http
+import net/Http as NetHttp
 import yack/array
 import yack/list
 import yack/string
@@ -460,12 +461,15 @@ fun dispatch (app : t, request : Request.t) : Reply.t * t =
             end
 
 fun dispatch_text (text : consume string, app : consume t) : string * t =
-    let val request = Request.parse (text)
+    let val keep = NetHttp.keep_alive (borrow text)
+        val request = Request.parse (text)
     in
         case dispatch (app, request) of
             (reply, app) =>
                 let val response = Reply.to_response (reply)
-                    val rendered = Response.render_keepalive (response)
+                    val rendered =
+                        if keep then Response.render_keepalive (response)
+                        else Response.render (response)
                 in
                     (rendered, app)
                 end

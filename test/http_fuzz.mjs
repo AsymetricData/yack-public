@@ -79,6 +79,7 @@ const SCENARIO_NAMES = [
   "pipeline_flood",
   "churn",
   "mutate",
+  "smuggling",
 ];
 
 function failUsage(message) {
@@ -946,6 +947,127 @@ async function scenarioMutate(config) {
 
 
 
+function smugglingCases() {
+  const text = (value) => Buffer.from(value, "latin1");
+  const good = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+  const cases = [];
+  cases.push([
+    "te_cl_te_chunked",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n" +
+        "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n" + good,
+    ),
+  ]);
+  cases.push([
+    "te_cl_cl_first",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n" +
+        "Content-Length: 43\r\n\r\n" + good,
+    ),
+  ]);
+  cases.push([
+    "obfuscated_te",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: xchunked\r\n" +
+        "Content-Length: 43\r\n\r\n" + good,
+    ),
+  ]);
+  cases.push([
+    "cl_double_value",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n" +
+        "Content-Length: 43\r\n\r\n" + good,
+    ),
+  ]);
+  cases.push([
+    "chunked_negative_size",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+        "-1\r\n" + good + "0\r\n\r\n",
+    ),
+  ]);
+  cases.push([
+    "chunked_missing_crlf",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+        "5\r\nhello" + good + "0\r\n\r\n",
+    ),
+  ]);
+  cases.push([
+    "chunked_trailer_smuggle",
+    text(
+      "POST /sum HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+        "0\r\n\r\n" + good + "0\r\n\r\n",
+    ),
+  ]);
+  cases.push([
+    "obs_fold_body",
+    text("POST /sum HTTP/1.1\r\nHost: x\r\nX-A: 1\r\n 2\r\nContent-Length: 0\r\n\r\n" + good),
+  ]);
+  cases.push([
+    "bare_cr_header",
+    text("POST /sum HTTP/1.1\r\nHost: x\r\nX-A: 1\rContent-Length: 43\r\n\r\n" + good),
+  ]);
+  cases.push([
+    "get_with_body_smuggle",
+    text("GET / HTTP/1.1\r\nHost: x\r\nContent-Length: 43\r\n\r\n" + good),
+  ]);
+  return cases;
+}
+
+async function scenarioSmuggling() {
+  const problems = [];
+  let executed = 0;
+  for (const [name, payload] of smugglingCases()) {
+    executed++;
+    const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "latin1");
+    const result = await new Promise((resolve) => {
+      let buffer = Buffer.alloc(0);
+      let settled = false;
+      const finish = (kind) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        socket.destroy();
+        resolve({ kind, buffer });
+      };
+      const socket = track(net.createConnection({ host: HOST, port: opts.port }));
+      const timer = setTimeout(() => finish("timeout"), 1500);
+      socket.once("connect", () => safeWrite(socket, data));
+      socket.on("data", (chunk) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        if (completeResponse(buffer) !== null) {
+
+          setTimeout(() => finish("status"), 200);
+        }
+      });
+      socket.once("close", () => finish("closed"));
+      socket.once("error", (error) => finish(error.code ?? "error"));
+    });
+    const text = result.buffer.toString("latin1");
+    const responses = (text.match(/HTTP\/1\.[01] 2\d\d/g) ?? []).length;
+    const total = (text.match(/HTTP\/1\.[01] \d{3}/g) ?? []).length;
+    if (serverAlive() === false) {
+      problems.push(`smuggling/${name}: server died`);
+      break;
+    }
+    if (responses > 1) {
+      problems.push(`smuggling/${name}: ${responses} successful responses for one request (smuggled request executed)`);
+    }
+    if (total === 0 && result.kind === "status") {
+      problems.push(`smuggling/${name}: unparsable response`);
+    }
+  }
+  return {
+    during: null,
+    outcomes: `${executed}/${smugglingCases().length} cases: smuggled=${problems.length}`,
+    problems,
+  };
+}
+
+
+
+
 const baseline = {
   rss_kb: rssKb(),
   fds: fdCount(),
@@ -979,6 +1101,7 @@ async function runScenario(name, body) {
   }
   if (alive === false) failures.push(`${name}: server died`);
   if (idle.busy) failures.push(`${name}: idle CPU ${idle.percent}% over 1 s (busy loop)`);
+  for (const problem of detail.problems ?? []) failures.push(problem);
   if (detail.during && !detail.during.ok) {
     const label = name === "slowloris" ? "slowloris health degraded during hold" : "health degraded during";
     warnings.push(`${name}: ${label} (${detail.during.detail})`);
@@ -1046,6 +1169,7 @@ async function main() {
       await runScenario("pipeline_flood", () => scenarioPipelineFlood());
     }
     if (selected.has("churn")) await runScenario("churn", () => scenarioChurn(settings.churn));
+    if (selected.has("smuggling")) await runScenario("smuggling", () => scenarioSmuggling());
     if (selected.has("mutate")) await runScenario("mutate", () => scenarioMutate(settings));
   }
 

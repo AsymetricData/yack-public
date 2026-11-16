@@ -1,5 +1,6 @@
 import web/Cookie
 import yack/string
+import yack/time
 
 (* yack/web/Response : réponse HTTP possédée.
 
@@ -23,7 +24,11 @@ type t : Affine = {
 }
 
 fun status_text (code : int) : string =
-    if code = 200 then
+    if code = 100 then
+        "Continue"
+    else if code = 101 then
+        "Switching Protocols"
+    else if code = 200 then
         "OK"
     else if code = 201 then
         "Created"
@@ -45,17 +50,33 @@ fun status_text (code : int) : string =
         "Not Found"
     else if code = 405 then
         "Method Not Allowed"
+    else if code = 408 then
+        "Request Timeout"
     else if code = 409 then
         "Conflict"
+    else if code = 411 then
+        "Length Required"
+    else if code = 413 then
+        "Content Too Large"
+    else if code = 414 then
+        "URI Too Long"
+    else if code = 417 then
+        "Expectation Failed"
     else if code = 422 then
         "Unprocessable Entity"
     else if code = 429 then
         "Too Many Requests"
+    else if code = 431 then
+        "Request Header Fields Too Large"
     else if code = 500 then
         "Internal Server Error"
     else if code = 501 then
         "Not Implemented"
-    else if code = 503 then "Service Unavailable" else "OK"
+    else if code = 503 then
+        "Service Unavailable"
+    else if code = 505 then
+        "HTTP Version Not Supported"
+    else "OK"
 
 fun make (status : int, content_type : string, body : string) : t =
     {
@@ -166,13 +187,30 @@ fun render_headers (headers : (string, string) list) : string =
 fun render_with (response : t, connection : borrow string) : string =
     case response of
         { status = status, headers = headers, body = body, session = _change } =>
-            "HTTP/1.1 " ^ int_to_string (status) ^ " " ^ status_text (status) ^ "\r\n" ^
-                render_headers (headers) ^
-                "Content-Length: " ^
-                int_to_string (string.length (borrow body)) ^
-                "\r\n" ^
-                "Connection: " ^ string_copy (connection) ^ "\r\n\r\n" ^
-                body
+            let val informational = status >= 100
+                val bodyless =
+                    if informational then
+                        if status < 200 then true
+                        else status = 204
+                    else false
+                val keep_length = if bodyless then false else true
+                val body_length = string.length (borrow body)
+                val length_line =
+                    if keep_length then
+                        "Content-Length: " ^ int_to_string (body_length) ^ "\r\n"
+                    else ""
+                val content = if bodyless then "" else body
+                val date =
+                    time.http_date
+                        (time.now_ms () / int_to_int64 (1000))
+            in
+                "HTTP/1.1 " ^ int_to_string (status) ^ " " ^ status_text (status) ^ "\r\n" ^
+                    "Date: " ^ date ^ "\r\n" ^
+                    render_headers (headers) ^
+                    length_line ^
+                    "Connection: " ^ string_copy (connection) ^ "\r\n\r\n" ^
+                    content
+            end
 
 fun render (response : t) : string =
     let val connection = "close"

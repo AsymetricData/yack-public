@@ -1,14 +1,18 @@
 import http_server/Server as Base
+import net/Http
 import web/Request
 import web/Response
 import web/Router
 
 fun dispatch_text (text : consume string, app : Router.t) : string * Router.t =
-    let val request = Request.parse (text)
+    let val keep = Http.keep_alive (borrow text)
+        val request = Request.parse (text)
     in
         case Router.dispatch (app, request) of
             (response, app) =>
-                let val rendered = Response.render_keepalive (response)
+                let val rendered =
+                        if keep then Response.render_keepalive (response)
+                        else Response.render (response)
                 in
                     (rendered, app)
                 end

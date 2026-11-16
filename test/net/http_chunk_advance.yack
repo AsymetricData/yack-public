@@ -1,0 +1,51 @@
+
+
+
+
+
+
+import net/Http
+import yack/bool
+import yack/bytes
+import yack/int
+import yack/string
+
+fun drain
+    ( data : int8 array
+    , limit : int
+    , state : Http.chunk_state
+    , fuel : int
+    ) : int8 array * Http.chunk_state =
+    if fuel <= 0 then (data, state)
+    else if state.stage = 4 then (data, state)
+    else if state.status <> 0 then (data, state)
+    else
+        let val (data, next) = Http.chunk_advance (data, limit, state)
+        in
+            if bool.and (next.scan = state.scan, next.stage = state.stage) then
+                (data, next)
+            else drain (data, limit, next, fuel - 1)
+        end
+
+fun decode (text : borrow string) : string =
+    let val payload = bytes.from_string (text)
+        val limit = string.length (text)
+        val (data, state) =
+            drain
+                ( payload
+                , limit
+                , { stage = 0, scan = 0, write = 0, left = 0, status = 0 }
+                , 64
+                )
+    in
+        if state.status <> 0 then int_to_string (state.status)
+        else
+            int_to_string (state.write) ^ ":" ^
+            bytes.to_string_range (borrow data, 0, state.write)
+    end
+
+fun main () =
+    let val good = decode (borrow "5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-T: 1\r\n\r\n")
+        val bad = decode (borrow "zz\r\nhello\r\n0\r\n\r\n")
+    in print_string (good ^ "\n" ^ bad ^ "\n")
+    end

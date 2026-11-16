@@ -1421,6 +1421,7 @@ expect_error extern_record_layout E3047 "$TMP/extern/cross/src/main.yack" 'does 
 
 expect_run time_module examples/time.yack $'1970-01-01T00:00:00.000Z\n2023-11-14T22:13:20.000Z\n1\n1'
 expect_run time_precision test/time_precision.yack "ok"
+expect_run time_http_date test/time_http_date.yack $'ok\nok\nok'
 expect_run time_negative_year test/time_negative_year.yack "-0001-01-01T00:00:00.000Z"
 expect_run random_module examples/random.yack $'1\n1\n1'
 expect_run random_bytes test/random_bytes.yack "1000"
@@ -1692,6 +1693,8 @@ expect_run stdlib_ffi_fs_fd test/alloc/stdlib_ffi_fs.yack $'2\n0'
 expect_run stdlib_ffi_file_fd test/alloc/stdlib_ffi_file.yack "0"
 expect_run stdlib_ffi_net_fd test/net/leak.yack "0"
 expect_run net_resolve test/net/resolve.yack "ok"
+expect_no_leak http_chunk_advance test/net/http_chunk_advance.yack
+expect_run http_chunk_advance_body test/net/http_chunk_advance.yack $'11:hello world\n400'
 expect_run net_timeout test/net/timeout.yack "ok"
 expect_run stdlib_ffi_process_fd test/alloc/stdlib_ffi_process.yack $'0\n0'
 expect_run process test/process.yack $'ok streams\nok quoting\nok empty\nok missing\nok signal\nok stdin_text\nok stdin_fd\nok big_stdout\nok nul_argument\nok output_fds'

@@ -47,6 +47,59 @@ fun internal_pad4 (value : int64) : string =
     else if value < int_to_int64 (1000) then "0" ^ int64_to_string (value)
     else int64_to_string (value)
 
+(* Nom court du jour de la semaine. 1970-01-01 est un jeudi.
+   - `days` : jours depuis l'époque Unix. *)
+fun internal_weekday (days : int64) : string =
+    let val shifted = days + int_to_int64 (4)
+        val era = internal_floor_div (shifted, int_to_int64 (7))
+        val index = shifted - era * int_to_int64 (7)
+    in
+        if index = int_to_int64 (0) then "Sun"
+        else if index = int_to_int64 (1) then "Mon"
+        else if index = int_to_int64 (2) then "Tue"
+        else if index = int_to_int64 (3) then "Wed"
+        else if index = int_to_int64 (4) then "Thu"
+        else if index = int_to_int64 (5) then "Fri"
+        else "Sat"
+    end
+
+(* Nom court du mois.
+   - `month` : mois entre 1 et 12. *)
+fun internal_month_name (month : int64) : string =
+    if month = int_to_int64 (1) then "Jan"
+    else if month = int_to_int64 (2) then "Feb"
+    else if month = int_to_int64 (3) then "Mar"
+    else if month = int_to_int64 (4) then "Apr"
+    else if month = int_to_int64 (5) then "May"
+    else if month = int_to_int64 (6) then "Jun"
+    else if month = int_to_int64 (7) then "Jul"
+    else if month = int_to_int64 (8) then "Aug"
+    else if month = int_to_int64 (9) then "Sep"
+    else if month = int_to_int64 (10) then "Oct"
+    else if month = int_to_int64 (11) then "Nov"
+    else "Dec"
+
+(* Formate une époque en date HTTP `IMF-fixdate` (RFC 9110 §5.6.7) :
+   `Sun, 06 Nov 1994 08:49:37 GMT`.
+   - `epoch_s` : secondes depuis l'époque Unix, négatives avant 1970.
+
+   Rend une chaîne possédée. *)
+fun http_date (epoch_s : int64) : string =
+    let
+        val day_s = int_to_int64 (86400)
+        val days = internal_floor_div (epoch_s, day_s)
+        val seconds = epoch_s - days * day_s
+        val (year, month, day) = internal_civil_from_days (days)
+        val hour = seconds / int_to_int64 (3600)
+        val minute = (seconds / int_to_int64 (60)) % int_to_int64 (60)
+        val second = seconds % int_to_int64 (60)
+    in
+        internal_weekday (days) ^ ", " ^ internal_pad2 (day) ^ " " ^
+        internal_month_name (month) ^ " " ^ internal_pad4 (year) ^ " " ^
+        internal_pad2 (hour) ^ ":" ^ internal_pad2 (minute) ^ ":" ^
+        internal_pad2 (second) ^ " GMT"
+    end
+
 (* Convertit un nombre de jours depuis l'époque en date civile grégorienne.
    Algorithme de Howard Hinnant, valable aussi avant 1970.
    - `days` : jours depuis le 1970-01-01.

@@ -1,4 +1,5 @@
 import net/Url
+import yack/array
 import yack/char
 import yack/string
 import yack/int
@@ -292,3 +293,408 @@ fun render_response_keepalive (body : string) : string =
         "\r\nConnection: keep-alive\r\n\r\n" ^
         body
     end
+
+(* Avance sur les espaces et tabulations de début de jeton. *)
+fun internal_skip_ows (text : borrow string, index : int, stop : int) : int =
+    if index >= stop then stop
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 32 then internal_skip_ows (text, index + 1, stop)
+            else if code = 9 then internal_skip_ows (text, index + 1, stop)
+            else index
+        end
+
+(* Recule sur les espaces et tabulations de fin de jeton. *)
+fun internal_trim_ows (text : borrow string, start : int, stop : int) : int =
+    if stop <= start then start
+    else
+        let val code = string.char_at_unchecked (text, stop - 1)
+        in
+            if code = 32 then internal_trim_ows (text, start, stop - 1)
+            else if code = 9 then internal_trim_ows (text, start, stop - 1)
+            else stop
+        end
+
+fun internal_equals_ci_from
+    ( text : borrow string
+    , start : int
+    , stop : int
+    , token : borrow string
+    , index : int
+    ) : bool =
+    if index >= stop - start then true
+    else if
+        char.to_lower_code (string.char_at_unchecked (text, start + index)) <>
+        char.to_lower_code (string.char_at_unchecked (token, index))
+    then false
+    else internal_equals_ci_from (text, start, stop, token, index + 1)
+
+(* Compare une tranche à un jeton ASCII, sans tenir compte de la casse. *)
+fun internal_equals_ci
+    (text : borrow string, start : int, stop : int, token : borrow string)
+    : bool =
+    if stop - start <> string.length (token) then false
+    else internal_equals_ci_from (text, start, stop, token, 0)
+
+(* Cherche `token` dans une liste séparée par des virgules. *)
+fun internal_tokens_contain_from
+    (text : borrow string, index : int, stop : int, token : borrow string)
+    : bool =
+    if index >= stop then false
+    else
+        let val comma = string.index_of_char_from (text, index, 44)
+            val end_index = if comma < 0 then stop else if comma > stop then stop else comma
+            val start = internal_skip_ows (text, index, end_index)
+            val last = internal_trim_ows (text, start, end_index)
+            val found = internal_equals_ci (text, start, last, token)
+        in
+            if found then true
+            else internal_tokens_contain_from (text, end_index + 1, stop, token)
+        end
+
+fun internal_tokens_contain (value : borrow string, token : borrow string) : bool =
+    internal_tokens_contain_from (value, 0, string.length (value), token)
+
+(* Début du bloc d'en-têtes : après la ligne de requête. *)
+fun header_region_start (text : borrow string) : int =
+    let val first_cr = string.index_of_char_from (text, 0, 13)
+    in if first_cr < 0 then string.length (text) else first_cr + 2
+    end
+
+(* Fin du bloc d'en-têtes, sans le `CRLF` vide final. *)
+fun header_region_stop (text : borrow string) : int =
+    let val end_index = header_end (text)
+    in if end_index < 0 then string.length (text) else end_index - 2
+    end
+
+(* Indique si l'en-tête `name` contient `token` dans sa liste de valeurs.
+   `text` peut être une requête ou une réponse complète. *)
+fun header_has_token
+    (text : borrow string, name : borrow string, token : borrow string)
+    : bool =
+    let val start = header_region_start (text)
+        val stop = header_region_stop (text)
+    in
+        case find_header_in_range (text, start, stop, name) of
+            None => false
+          | Some value => internal_tokens_contain (borrow value, token)
+    end
+
+(* Version mineure de la ligne de requête (0 pour HTTP/1.0, 1 pour HTTP/1.1),
+   ou 1 si la ligne est illisible. *)
+fun internal_request_minor (text : borrow string) : int =
+    let val first = string.index_of_char_from (text, 0, 32)
+        val second = string.index_of_char_from (text, first + 1, 32)
+        (* « HTTP/1.x » commence à second + 1 ; le chiffre mineur est à
+           second + 8. *)
+        val dot = second + 8
+    in
+        if second < 0 then 1
+        else if dot >= string.length (text) then 1
+        else if string.char_at_unchecked (text, dot) = 48 then 0
+        else 1
+    end
+
+(* Politique de persistance demandée par la requête (RFC 9112 §9.3).
+   - `request` : texte brut d'une requête, en-têtes compris.
+
+   HTTP/1.1 garde la connexion sauf `Connection: close` ; HTTP/1.0 la ferme
+   sauf `Connection: keep-alive`. Le jeton est cherché dans la liste, sans
+   tenir compte de la casse. *)
+fun keep_alive (request : &string) : bool =
+    let val text = request
+        val close_name = "connection"
+        val keep_name = "connection"
+        val close_token = "close"
+        val keep_token = "keep-alive"
+        val closing =
+            header_has_token (text, borrow close_name, borrow close_token)
+        val keeping =
+            header_has_token (text, borrow keep_name, borrow keep_token)
+        val minor = internal_request_minor (text)
+    in
+        if closing then false
+        else if minor = 1 then true
+        else keeping
+    end
+
+(* État incrémental du décodeur. Les offsets sont absolus dans le tableau
+   d'octets fourni, donc le décodeur ne copie jamais l'entrée.
+
+   - `stage` : 0 taille, 1 données, 2 CRLF de fin de bloc, 3 trailers, 4 fin.
+   - `scan` : prochain octet brut à lire.
+   - `write` : prochain octet décodé à écrire (toujours <= `scan`).
+   - `left` : octets restants dans le bloc de données courant.
+   - `status` : 0 correct, 400 taille ou syntaxe invalide. *)
+type chunk_state : Copy = {
+    stage : int,
+    scan : int,
+    write : int,
+    left : int,
+    status : int
+}
+
+fun chunk_start (start : int) : chunk_state =
+    { stage = 0, scan = start, write = start, left = 0, status = 0 }
+
+fun internal_byte (data : borrow int8 array, index : int) : int8 =
+    array.get (data, index)
+
+(* Espaces et tabulations autour de la taille d'un bloc. *)
+fun internal_skip_byte_ows
+    (data : borrow int8 array, index : int, stop : int)
+    : int =
+    if index >= stop then stop
+    else
+        let val code = internal_byte (data, index)
+        in
+            if code = 32 then internal_skip_byte_ows (data, index + 1, stop)
+            else if code = 9 then internal_skip_byte_ows (data, index + 1, stop)
+            else index
+        end
+
+fun internal_trim_byte_ows
+    (data : borrow int8 array, start : int, stop : int)
+    : int =
+    if stop <= start then start
+    else
+        let val code = internal_byte (data, stop - 1)
+        in
+            if code = 32 then internal_trim_byte_ows (data, start, stop - 1)
+            else if code = 9 then internal_trim_byte_ows (data, start, stop - 1)
+            else stop
+        end
+
+fun internal_find_byte
+    (data : borrow int8 array, index : int, limit : int, value : int8)
+    : int =
+    if index >= limit then -1
+    else if internal_byte (data, index) = value then index
+    else internal_find_byte (data, index + 1, limit, value)
+
+(* Un `CR` isolé est une erreur : dans une ligne terminée par `LF`, le seul
+   `CR` accepté est celui qui précède immédiatement le `LF`. *)
+fun internal_has_bare_cr
+    (data : borrow int8 array, index : int, stop : int)
+    : bool =
+    if index >= stop then false
+    else if internal_byte (data, index) = 13 then true
+    else internal_has_bare_cr (data, index + 1, stop)
+
+fun internal_hex_digit (value : int8) : int =
+    if value = 48 then 0
+    else if value = 49 then 1
+    else if value = 50 then 2
+    else if value = 51 then 3
+    else if value = 52 then 4
+    else if value = 53 then 5
+    else if value = 54 then 6
+    else if value = 55 then 7
+    else if value = 56 then 8
+    else if value = 57 then 9
+    else if value = 65 then 10
+    else if value = 66 then 11
+    else if value = 67 then 12
+    else if value = 68 then 13
+    else if value = 69 then 14
+    else if value = 70 then 15
+    else if value = 97 then 10
+    else if value = 98 then 11
+    else if value = 99 then 12
+    else if value = 100 then 13
+    else if value = 101 then 14
+    else if value = 102 then 15
+    else -1
+
+(* Taille hexadécimale d'un bloc, `-1` si elle est vide, non hexadécimale ou
+   si elle dépasse un `int` (2^31 - 1). *)
+fun internal_chunk_size_from
+    (data : borrow int8 array, index : int, stop : int, acc : int)
+    : int =
+    if index >= stop then acc
+    else
+        let val digit = internal_hex_digit (internal_byte (data, index))
+        in
+            if digit < 0 then -1
+            else if acc > 134217727 then -1
+            else
+                internal_chunk_size_from
+                    (data, index + 1, stop, acc * 16 + digit)
+        end
+
+fun internal_chunk_size (data : borrow int8 array, start : int, stop : int) : int =
+    if start >= stop then -1
+    else internal_chunk_size_from (data, start, stop, 0)
+
+(* Recopie `count` octets de `src` vers `dst`, toujours avec `dst <= src`. *)
+fun internal_copy_down
+    (data : int8 array, src : int, dst : int, count : int)
+    : int8 array =
+    if count <= 0 then data
+    else
+        let val value = array.get (borrow data, src)
+            val data = array.set (data, dst, value)
+        in internal_copy_down (data, src + 1, dst + 1, count - 1)
+        end
+
+fun internal_chunk_error (data : int8 array, state : chunk_state) : int8 array * chunk_state =
+    ( data
+    , { stage = 4
+      , scan = state.scan
+      , write = state.write
+      , left = 0
+      , status = 400
+      }
+    )
+
+(* Décode les octets disponibles `[state.scan, limit)` et rend l'état mis à
+   jour. Le tableau est muté sur place : les octets décodés remplacent, plus
+   bas, les octets bruts déjà lus. Complexité linéaire. *)
+fun chunk_advance
+    (data : int8 array, limit : int, state : chunk_state)
+    : int8 array * chunk_state =
+    if state.status <> 0 then (data, state)
+    else if state.stage = 4 then (data, state)
+    else if state.stage = 0 then
+        let val line_end = internal_find_byte (borrow data, state.scan, limit, 10)
+        in
+            if line_end < 0 then (data, state)
+            else
+                let val content_end =
+                        if line_end > state.scan then
+                            if internal_byte (borrow data, line_end - 1) = 13 then
+                                line_end - 1
+                            else line_end
+                        else line_end
+                    val bare =
+                        internal_has_bare_cr
+                            (borrow data, state.scan, content_end)
+                in
+                    if bare then internal_chunk_error (data, state)
+                    else
+                        let val start = internal_skip_byte_ows (borrow data, state.scan, content_end)
+                            val stop = internal_trim_byte_ows (borrow data, start, content_end)
+                            val semicolon = internal_find_byte (borrow data, start, stop, 59)
+                            val hex_stop = if semicolon < 0 then stop else semicolon
+                            val size = internal_chunk_size (borrow data, start, hex_stop)
+                        in
+                            if size < 0 then internal_chunk_error (data, state)
+                            else if size = 0 then
+                                chunk_advance
+                                    ( data
+                                    , limit
+                                    , { stage = 3
+                                      , scan = line_end + 1
+                                      , write = state.write
+                                      , left = 0
+                                      , status = 0
+                                      }
+                                    )
+                            else
+                                chunk_advance
+                                    ( data
+                                    , limit
+                                    , { stage = 1
+                                      , scan = line_end + 1
+                                      , write = state.write
+                                      , left = size
+                                      , status = 0
+                                      }
+                                    )
+                        end
+                end
+        end
+    else if state.stage = 1 then
+        let val available = limit - state.scan
+        in
+            if available <= 0 then (data, state)
+            else
+                let val take = if available < state.left then available else state.left
+                    val data = internal_copy_down (data, state.scan, state.write, take)
+                in
+                    chunk_advance
+                        ( data
+                        , limit
+                        , { stage = if take >= state.left then 2 else 1
+                          , scan = state.scan + take
+                          , write = state.write + take
+                          , left = state.left - take
+                          , status = 0
+                          }
+                        )
+                end
+        end
+    else if state.stage = 2 then
+        let val available = limit - state.scan
+        in
+            if available <= 0 then (data, state)
+            else
+                let val first = internal_byte (borrow data, state.scan)
+                in
+                    if first = 10 then
+                        chunk_advance
+                            ( data
+                            , limit
+                            , { stage = 0
+                              , scan = state.scan + 1
+                              , write = state.write
+                              , left = 0
+                              , status = 0
+                              }
+                            )
+                    else if first = 13 then
+                        if available < 2 then (data, state)
+                        else if internal_byte (borrow data, state.scan + 1) = 10 then
+                            chunk_advance
+                                ( data
+                                , limit
+                                , { stage = 0
+                                  , scan = state.scan + 2
+                                  , write = state.write
+                                  , left = 0
+                                  , status = 0
+                                  }
+                                )
+                        else internal_chunk_error (data, state)
+                    else internal_chunk_error (data, state)
+                end
+        end
+    else
+        let val line_end = internal_find_byte (borrow data, state.scan, limit, 10)
+        in
+            if line_end < 0 then (data, state)
+            else
+                let val content_end =
+                        if line_end > state.scan then
+                            if internal_byte (borrow data, line_end - 1) = 13 then
+                                line_end - 1
+                            else line_end
+                        else line_end
+                    val bare =
+                        internal_has_bare_cr
+                            (borrow data, state.scan, content_end)
+                in
+                    if bare then internal_chunk_error (data, state)
+                    else if content_end = state.scan then
+                        ( data
+                        , { stage = 4
+                          , scan = line_end + 1
+                          , write = state.write
+                          , left = 0
+                          , status = 0
+                          }
+                        )
+                    else
+                        chunk_advance
+                            ( data
+                            , limit
+                            , { stage = 3
+                              , scan = line_end + 1
+                              , write = state.write
+                              , left = 0
+                              , status = 0
+                              }
+                            )
+                end
+        end

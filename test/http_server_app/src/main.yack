@@ -15,14 +15,61 @@ fun sum (ctx : Ctx.t, request : consume Request.t) : Reply.t =
 
 
 
+fun echo (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val req = borrow request
+        val body = Request.body (req)
+    in Reply.ok (Response.text (body))
+    end
+
+
+
+fun echo_length (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    let val req = borrow request
+        val body = Request.body (req)
+        val size = string.length (borrow body)
+    in Reply.ok (Response.text (int_to_string (size)))
+    end
+
+fun no_content (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.make (204, "text/plain; charset=utf-8", ""))
+
+
+
 fun big (ctx : Ctx.t, request : consume Request.t) : Reply.t =
     Reply.ok (Response.text (string.repeat (borrow "0123456789", 2000)))
+
+
+
+
+
+
+fun grow_body (size : int, acc : string) : string =
+    let val length = string.length (borrow acc)
+    in
+        if length >= size then acc
+        else
+            let val half = string.copy (borrow acc)
+            in grow_body (size, acc ^ half)
+            end
+    end
+
+
+
+
+
+fun huge (ctx : Ctx.t, request : consume Request.t) : Reply.t =
+    Reply.ok (Response.text (grow_body (2621440, "0123456789")))
 
 fun application () : Alpage.t =
     Alpage.new ()
     |> Alpage.get ("/", home)
     |> Alpage.get ("/big", big)
+    |> Alpage.get ("/huge", huge)
     |> Alpage.post ("/sum", sum)
+    |> Alpage.add ("HEAD", "/", home)
+    |> Alpage.post ("/echo", echo)
+    |> Alpage.post ("/echo-len", echo_length)
+    |> Alpage.get ("/nocontent", no_content)
 
 
 
@@ -57,9 +104,12 @@ fun env_int (name : string, fallback : int) : int =
 
 
 fun apply_limits (settings : Alpage.config) : Alpage.config =
-    let val requests =
+    let val connections =
+            Alpage.max_connections
+                (settings, env_int ("YACK_HTTP_MAX_CONNECTIONS", 1024))
+        val requests =
             Alpage.max_request_bytes
-                (settings, env_int ("YACK_HTTP_MAX_REQUEST_BYTES", 16384))
+                (connections, env_int ("YACK_HTTP_MAX_REQUEST_BYTES", 16384))
         val responses =
             Alpage.max_response_bytes
                 (requests, env_int ("YACK_HTTP_MAX_RESPONSE_BYTES", 65536))

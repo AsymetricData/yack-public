@@ -1,9 +1,13 @@
 import net/Http
 import yack/array
+import yack/bool
 import yack/bytes
+import yack/char
 import yack/file
 import yack/string
 import yack/int
+import yack/list
+import yack/time
 
 type 'state dispatcher = {
     run : (consume string, consume 'state) -> string * 'state
@@ -38,6 +42,7 @@ type 'state server = {
     limits : limits,
     dispatch : 'state dispatcher,
     state : 'state,
+    parse : int32 array,
     io_errors : int32 array
 }
 
@@ -212,11 +217,25 @@ fun server_listen
                                         val output_lengths : int32 array = array.make (0, max)
                                         val output_offsets : int32 array = array.make (0, max)
                                         val conn_fds : int32 array = array.make (-1, max)
-                                        val started : int64 array = array.make (-1, max)
-                                        val active : int64 array = array.make (0, max)
+                                        (* `array.make` instantiates from the
+                                           initialiser: an int literal would
+                                           pick the int32 variant and allocate
+                                           `max` 4-byte elements for an int64
+                                           array, so slots >= max/2 write past
+                                           the end of the block. Spell the
+                                           initialiser as int64. *)
+                                        val started : int64 array =
+                                            array.make
+                                                (int_to_int64 (-1), max)
+                                        val active : int64 array =
+                                            array.make
+                                                (int_to_int64 (0), max)
                                         (* Six cases : (compteur, dernier errno)
                                            pour accept, recv et send. *)
                                         val io_errors : int32 array = array.make (0, 6)
+                                        (* Per-slot HTTP/1.1 parser state, 16 ints
+                                           per connection (see parse_field). *)
+                                        val parse : int32 array = array.make (0, max * 16)
                                         val last_sweep = sys.monotonic_ms ()
                                         val _ = sys.epoll_add_token (epfd, fd, 1, -1)
                                         val value : 'state server =
@@ -236,6 +255,7 @@ fun server_listen
                                             , limits = limits
                                             , dispatch = dispatch
                                             , state = state
+                                            , parse = parse
                                             , io_errors = io_errors
                                             }
                                     in Ok (value)
@@ -268,7 +288,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
         , limits = limits
                 , dispatch = dispatch
                 , state = state
-                , io_errors = io_errors
+                , io_errors = io_errors, parse = parse
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val _ = sys.close (fd)
@@ -280,6 +300,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
                 val outputs = clear_output (outputs, slot)
                 val started = array.set (started, slot, -1)
                 val active = array.set (active, slot, 0)
+                val parse = parse_reset (parse, slot)
             in
                 { epfd = epfd
                 , listener_fd = listener_fd
@@ -297,7 +318,7 @@ fun close_slot (value : 'state server, slot : int) : 'state server =
                 , limits = limits
                 , dispatch = dispatch
                 , state = state
-                , io_errors = io_errors
+                , io_errors = io_errors, parse = parse
                 }
             end
 
@@ -319,7 +340,7 @@ fun accept_loop (value : 'state server) : 'state server =
         , limits = limits
         , dispatch = dispatch
         , state = state
-        , io_errors = io_errors
+        , io_errors = io_errors, parse = parse
         } =>
             let val client = sys.accept (listener_fd)
             in
@@ -357,7 +378,7 @@ fun accept_loop (value : 'state server) : 'state server =
                         , limits = limits
                         , dispatch = dispatch
                         , state = state
-                        , io_errors = io_errors
+                        , io_errors = io_errors, parse = parse
                         }
                     end
                 else
@@ -384,7 +405,7 @@ fun accept_loop (value : 'state server) : 'state server =
                                 , limits = limits
                                 , dispatch = dispatch
                                 , state = state
-                                , io_errors = io_errors
+                                , io_errors = io_errors, parse = parse
                                 }
                             end
                         else
@@ -414,7 +435,7 @@ fun accept_loop (value : 'state server) : 'state server =
                                      , limits = limits
                                      , dispatch = dispatch
                                      , state = state
-                                     , io_errors = io_errors
+                                     , io_errors = io_errors, parse = parse
                                      })
                             end
                     end
@@ -469,40 +490,73 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
         , limits = limits
         , dispatch = dispatch
         , state = state
-        , io_errors = io_errors
+        , io_errors = io_errors, parse = parse
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val total = array.get_int (borrow output_lengths, slot)
                 val offset = array.get_int (borrow output_offsets, slot)
             in
                 if offset >= total then
-                    let val output_lengths = array.set_int (output_lengths, slot, 0)
-                        val output_offsets = array.set_int (output_offsets, slot, 0)
-                        val outputs = clear_output (outputs, slot)
-                        val _ =
-                            if resuming then set_interest (epfd, fd, slot, 1)
-                            else ()
-                    in
-                        make_server
-                            ( epfd
-                            , listener_fd
-                            , fds
-                            , events
-                            , data
-                            , lengths
-                            , outputs
-                            , output_lengths
-                            , output_offsets
-                            , conn_fds
-                            , started
-                            , active
-                            , last_sweep
-                            , limits
-                            , dispatch
-                            , state
-                            , io_errors
+                    if parse_get (borrow parse, slot, parse_closing ()) = 1 then
+                        close_slot
+                            ( make_server
+                                  ( epfd
+                                  , listener_fd
+                                  , fds
+                                  , events
+                                  , data
+                                  , lengths
+                                  , outputs
+                                  , output_lengths
+                                  , output_offsets
+                                  , conn_fds
+                                  , started
+                                  , active
+                                  , last_sweep
+                                  , limits
+                                  , dispatch
+                                  , state
+                                  , parse
+                                  , io_errors
+                                  )
+                            , slot
                             )
-                    end
+                    else
+                        let val output_lengths = array.set_int (output_lengths, slot, 0)
+                            val output_offsets = array.set_int (output_offsets, slot, 0)
+                            val outputs = clear_output (outputs, slot)
+                            val pending =
+                                array.get_int (borrow lengths, slot) > 0
+                            val rebuilt =
+                                make_server
+                                    ( epfd
+                                    , listener_fd
+                                    , fds
+                                    , events
+                                    , data
+                                    , lengths
+                                    , outputs
+                                    , output_lengths
+                                    , output_offsets
+                                    , conn_fds
+                                    , started
+                                    , active
+                                    , last_sweep
+                                    , limits
+                                    , dispatch
+                                    , state
+                                    , parse
+                                    , io_errors
+                                    )
+                            val _ =
+                                if resuming then
+                                    set_interest (epfd, fd, slot, 1)
+                                else ()
+                        in
+                            if pending then
+                                serve_buffered (rebuilt, slot)
+                            else rebuilt
+                        end
                 else
                     let val text = array.get_borrow (borrow outputs, slot)
                         val sent = sys.send_string_raw (fd, text, offset, total - offset)
@@ -536,6 +590,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , limits
                                             , dispatch
                                             , state
+                                            , parse
                                             , io_errors
                                             )
                                     end
@@ -558,6 +613,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                              , limits
                                              , dispatch
                                              , state
+                                             , parse
                                              , io_errors
                                              ),
                                          slot)
@@ -580,6 +636,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                              , limits
                                              , dispatch
                                              , state
+                                             , parse
                                              , note_io_error
                                                    (io_errors, send_kind (), error)
                                              ),
@@ -605,6 +662,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                     , limits
                                     , dispatch
                                     , state
+                                    , parse
                                     , io_errors
                                     )
                             end
@@ -614,32 +672,30 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                 val active = array.set (active, slot, sys.monotonic_ms ())
                             in
                                 if next_offset >= total then
-                                    let val output_lengths = array.set_int (output_lengths, slot, 0)
-                                        val output_offsets = array.set_int (output_offsets, slot, 0)
-                                        val outputs = clear_output (outputs, slot)
-                                        val _ =
-                                            if resuming then set_interest (epfd, fd, slot, 1)
-                                            else ()
+
+                                    let val rebuilt =
+                                            make_server
+                                                ( epfd
+                                                , listener_fd
+                                                , fds
+                                                , events
+                                                , data
+                                                , lengths
+                                                , outputs
+                                                , output_lengths
+                                                , output_offsets
+                                                , conn_fds
+                                                , started
+                                                , active
+                                                , last_sweep
+                                                , limits
+                                                , dispatch
+                                                , state
+                                                , parse
+                                                , io_errors
+                                                )
                                     in
-                                        make_server
-                                            ( epfd
-                                            , listener_fd
-                                            , fds
-                                            , events
-                                            , data
-                                            , lengths
-                                            , outputs
-                                            , output_lengths
-                                            , output_offsets
-                                            , conn_fds
-                                            , started
-                                            , active
-                                            , last_sweep
-                                            , limits
-                                            , dispatch
-                                            , state
-                                            , io_errors
-                                            )
+                                        flush_slot (rebuilt, slot, resuming)
                                     end
                                 else
                                     let val _ = set_interest (epfd, fd, slot, 4)
@@ -661,6 +717,7 @@ fun flush_slot (value : 'state server, slot : int, resuming : bool) : 'state ser
                                             , limits
                                             , dispatch
                                             , state
+                                            , parse
                                             , io_errors
                                             )
                                     end
@@ -705,6 +762,7 @@ fun make_server
     , limits : limits
     , dispatch : 'state dispatcher
     , state : 'state
+    , parse : int32 array
     , io_errors : int32 array
     ) : 'state server =
     { epfd = epfd
@@ -723,52 +781,995 @@ fun make_server
     , limits = limits
     , dispatch = dispatch
                 , state = state
+                , parse = parse
                 , io_errors = io_errors
     }
 
-(* Les méthodes sans corps n'ont pas besoin de lire Content-Length.
-   La détection se fait sur les octets déjà lus : aucune chaîne temporaire
-   n'est allouée avant l'entrée dans l'arène de la requête. *)
-fun method_is_get (b0 : int8, b1 : int8, b2 : int8, b3 : int8) : bool =
-    if b0 = 71 then
-        if b1 = 69 then
-            if b2 = 84 then b3 = 32
-            else false
+(* Champs du tableau `parse`, 16 entiers par connexion. *)
+fun parse_phase () : int = 0
+fun parse_head_end () : int = 1
+fun parse_body_need () : int = 2
+fun parse_keep () : int = 3
+fun parse_is_head () : int = 4
+fun parse_expect () : int = 5
+fun parse_continued () : int = 6
+fun parse_chunk_stage () : int = 7
+fun parse_chunk_scan () : int = 8
+fun parse_chunk_write () : int = 9
+fun parse_chunk_left () : int = 10
+fun parse_chunk_status () : int = 11
+fun parse_closing () : int = 12
+fun parse_stride () : int = 16
+
+fun parse_get (parse : borrow int32 array, slot : int, field : int) : int =
+    array.get_int (parse, slot * parse_stride () + field)
+
+fun parse_set
+    (parse : int32 array, slot : int, field : int, value : int)
+    : int32 array =
+    array.set_int (parse, slot * parse_stride () + field, value)
+
+(* Remet un slot à neuf avant la requête suivante. *)
+fun parse_reset (parse : int32 array, slot : int) : int32 array =
+    let val parse = parse_set (parse, slot, 0, 0)
+        val parse = parse_set (parse, slot, 1, 0)
+        val parse = parse_set (parse, slot, 2, 0)
+        val parse = parse_set (parse, slot, 3, 0)
+        val parse = parse_set (parse, slot, 4, 0)
+        val parse = parse_set (parse, slot, 5, 0)
+        val parse = parse_set (parse, slot, 6, 0)
+        val parse = parse_set (parse, slot, 7, 0)
+        val parse = parse_set (parse, slot, 8, 0)
+        val parse = parse_set (parse, slot, 9, 0)
+        val parse = parse_set (parse, slot, 10, 0)
+        val parse = parse_set (parse, slot, 11, 0)
+        val parse = parse_set (parse, slot, 12, 0)
+    in parse end
+
+(* Octet autorisé dans un `token` (RFC 9110 §5.6.2). *)
+fun internal_is_token (code : int) : bool =
+    if code >= 65 then
+        if code <= 90 then true
+        else if code >= 97 then code <= 122
         else false
+    else if code >= 48 then code <= 57
+    else if code = 33 then true
+    else if code = 35 then true
+    else if code = 36 then true
+    else if code = 37 then true
+    else if code = 38 then true
+    else if code = 39 then true
+    else if code = 42 then true
+    else if code = 43 then true
+    else if code = 45 then true
+    else if code = 46 then true
+    else if code = 94 then true
+    else if code = 95 then true
+    else if code = 96 then true
+    else if code = 124 then true
+    else if code = 126 then true
     else false
 
-fun method_is_head
-    (b0 : int8, b1 : int8, b2 : int8, b3 : int8, b4 : int8) : bool =
-    if b0 = 72 then
-        if b1 = 69 then
-            if b2 = 65 then
-                if b3 = 68 then b4 = 32
-                else false
-            else false
-        else false
+fun internal_is_token_from
+    (text : borrow string, index : int, stop : int)
+    : bool =
+    if index >= stop then true
+    else if internal_is_token (string.char_at_unchecked (text, index)) then
+        internal_is_token_from (text, index + 1, stop)
     else false
 
-(* Longueur du corps annoncée par l'en-tête, à partir du bloc d'en-têtes
-   brut (ligne de requête comprise). *)
-fun content_length_of_headers (headers : string) : int =
-    let val size = string.length (borrow headers)
-        val first_cr = string.index_of_char_from (borrow headers, 0, 13)
-        val header_start = first_cr + 2
-        val header_stop = if size >= 4 then size - 4 else 0
-        val name = "content-length"
-        val found =
-            Http.find_header_in_range
-                (borrow headers, header_start, header_stop, borrow name)
-    in
-        case found of
-            None => 0
-          | Some value =>
-                (case string_to_int (borrow value) of
-                     Some parsed => parsed
-                   | None => 0)
+(* Un `CR` n'est accepté que juste avant le `LF` de fin de ligne. *)
+fun internal_bare_cr_in
+    (text : borrow string, index : int, stop : int)
+    : bool =
+    if index >= stop then false
+    else if string.char_at_unchecked (text, index) = 13 then true
+    else internal_bare_cr_in (text, index + 1, stop)
+
+fun internal_skip_spaces
+    (text : borrow string, index : int, stop : int)
+    : int =
+    if index >= stop then stop
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code = 32 then internal_skip_spaces (text, index + 1, stop)
+            else if code = 9 then internal_skip_spaces (text, index + 1, stop)
+            else index
+        end
+
+fun internal_trim_spaces
+    (text : borrow string, start : int, stop : int)
+    : int =
+    if stop <= start then start
+    else
+        let val code = string.char_at_unchecked (text, stop - 1)
+        in
+            if code = 32 then internal_trim_spaces (text, start, stop - 1)
+            else if code = 9 then internal_trim_spaces (text, start, stop - 1)
+            else stop
+        end
+
+fun internal_equals_ci_from
+    ( text : borrow string
+    , start : int
+    , stop : int
+    , literal : borrow string
+    , index : int
+    ) : bool =
+    if index >= stop - start then true
+    else if
+        char.to_lower_code (string.char_at_unchecked (text, start + index)) <>
+        char.to_lower_code (string.char_at_unchecked (literal, index))
+    then false
+    else internal_equals_ci_from (text, start, stop, literal, index + 1)
+
+fun internal_equals_ci
+    (text : borrow string, start : int, stop : int, literal : borrow string)
+    : bool =
+    if stop - start <> string.length (literal) then false
+    else internal_equals_ci_from (text, start, stop, literal, 0)
+
+(* Cherche `token` dans une liste séparée par des virgules. *)
+fun internal_tokens_contain_from
+    (text : borrow string, index : int, stop : int, token : borrow string)
+    : bool =
+    if index >= stop then false
+    else
+        let val comma = string.index_of_char_from (text, index, 44)
+            val end_index =
+                if comma < 0 then stop
+                else if comma > stop then stop
+                else comma
+            val start = internal_skip_spaces (text, index, end_index)
+            val last = internal_trim_spaces (text, start, end_index)
+        in
+            if internal_equals_ci (text, start, last, token) then true
+            else internal_tokens_contain_from (text, end_index + 1, stop, token)
+        end
+
+fun internal_tokens_contain
+    (text : borrow string, start : int, stop : int, token : borrow string)
+    : bool =
+    internal_tokens_contain_from (text, start, stop, token)
+
+(* Tous les jetons valent `token`, et il y en a au moins un. *)
+fun internal_tokens_all_from
+    (text : borrow string, index : int, stop : int, token : borrow string)
+    : bool =
+    if index >= stop then true
+    else
+        let val comma = string.index_of_char_from (text, index, 44)
+            val end_index =
+                if comma < 0 then stop
+                else if comma > stop then stop
+                else comma
+            val start = internal_skip_spaces (text, index, end_index)
+            val last = internal_trim_spaces (text, start, end_index)
+            val matches =
+                if last <= start then false
+                else internal_equals_ci (text, start, last, token)
+        in
+            if matches then
+                internal_tokens_all_from (text, end_index + 1, stop, token)
+            else false
+        end
+
+fun internal_digits_value_from
+    (text : borrow string, index : int, stop : int, acc : int64)
+    : int =
+    if index >= stop then
+        if acc > int_to_int64 (2147483647) then -1 else int64_to_int (acc)
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code < 48 then -1
+            else if code > 57 then -1
+            else if acc > int_to_int64 (214748364) then -1
+            else
+                internal_digits_value_from
+                    ( text
+                    , index + 1
+                    , stop
+                    , acc * int_to_int64 (10) + int_to_int64 (code - 48)
+                    )
+        end
+
+(* Valeur décimale nue : pas de signe, pas d'espace interne. *)
+fun internal_digits_value
+    (text : borrow string, start : int, stop : int)
+    : int =
+    if start >= stop then -1
+    else internal_digits_value_from (text, start, stop, int_to_int64 (0))
+
+fun internal_length_element
+    (text : borrow string, start : int, stop : int)
+    : int =
+    let val first = internal_skip_spaces (text, start, stop)
+        val last = internal_trim_spaces (text, first, stop)
+    in internal_digits_value (text, first, last)
     end
 
-fun handle_read (value : 'state server, slot : int) : 'state server =
+(* Liste `5, 5` : toutes les valeurs doivent être identiques. *)
+fun internal_length_tail
+    (text : borrow string, index : int, stop : int, expected : int)
+    : int =
+    if index > stop then expected
+    else
+        let val comma = string.index_of_char_from (text, index, 44)
+            val end_index =
+                if comma < 0 then stop
+                else if comma > stop then stop
+                else comma
+            val value = internal_length_element (text, index, end_index)
+        in
+            if value < 0 then -1
+            else if value <> expected then -1
+            else if comma < 0 then expected
+            else if comma >= stop then expected
+            else internal_length_tail (text, comma + 1, stop, expected)
+        end
+
+fun internal_content_length
+    (text : borrow string, start : int, stop : int)
+    : int =
+    let val comma = string.index_of_char_from (text, start, 44)
+        val end_index =
+            if comma < 0 then stop
+            else if comma > stop then stop
+            else comma
+        val first = internal_length_element (text, start, end_index)
+    in
+        if first < 0 then -1
+        else if comma < 0 then first
+        else if comma >= stop then first
+        else internal_length_tail (text, comma + 1, stop, first)
+    end
+
+fun internal_coding
+    (text : borrow string, start : int, stop : int)
+    : int =
+    let val first = internal_skip_spaces (text, start, stop)
+        val semicolon = string.index_of_char_from (text, first, 59)
+        val parameter_end =
+            if semicolon < 0 then stop
+            else if semicolon > stop then stop
+            else semicolon
+        val last = internal_trim_spaces (text, first, parameter_end)
+        val chunked = "chunked"
+    in
+        if last <= first then 0
+        else if bool.not (internal_is_token_from (text, first, last)) then 0
+        else if internal_equals_ci (text, first, last, borrow chunked) then 1
+        else 2
+    end
+
+fun internal_last_coding_from
+    (text : borrow string, index : int, stop : int, last : int)
+    : int =
+    if index > stop then last
+    else
+        let val comma = string.index_of_char_from (text, index, 44)
+            val end_index =
+                if comma < 0 then stop
+                else if comma > stop then stop
+                else comma
+            val code = internal_coding (text, index, end_index)
+        in
+            if code = 0 then 0
+            else if comma < 0 then code
+            else if comma >= stop then code
+            else internal_last_coding_from (text, comma + 1, stop, code)
+        end
+
+fun internal_last_coding
+    (text : borrow string, start : int, stop : int)
+    : int =
+    if start >= stop then 0
+    else internal_last_coding_from (text, start, stop, 0)
+
+type request_line : Copy = { minor : int, is_head : bool }
+
+datatype request_line_result =
+    Request_line_error of int
+  | Request_line_ok of request_line
+
+fun internal_is_head_method
+    (text : borrow string, start : int, stop : int)
+    : bool =
+    if stop - start <> 4 then false
+    else if string.char_at_unchecked (text, start) <> 72 then false
+    else if string.char_at_unchecked (text, start + 1) <> 69 then false
+    else if string.char_at_unchecked (text, start + 2) <> 65 then false
+    else string.char_at_unchecked (text, start + 3) = 68
+
+fun internal_valid_target
+    (text : borrow string, index : int, stop : int)
+    : bool =
+    if index >= stop then true
+    else
+        let val code = string.char_at_unchecked (text, index)
+        in
+            if code <= 32 then false
+            else if code = 127 then false
+            else internal_valid_target (text, index + 1, stop)
+        end
+
+fun internal_version_digit (code : int) : bool =
+    if code >= 48 then code <= 57 else false
+
+fun parse_request_line
+    (text : borrow string, start : int, lf : int)
+    : request_line_result =
+    let val content_end =
+            if lf > start then
+                if string.char_at_unchecked (text, lf - 1) = 13 then lf - 1
+                else lf
+            else lf
+    in
+        if content_end <= start then Request_line_error (400)
+        else if internal_bare_cr_in (text, start, content_end) then
+            Request_line_error (400)
+        else
+            let val sp1 = string.index_of_char_from (text, start, 32)
+                val sp2 =
+                    if sp1 < 0 then -1
+                    else string.index_of_char_from (text, sp1 + 1, 32)
+            in
+                if sp1 < 0 then Request_line_error (400)
+                else if sp1 >= content_end then Request_line_error (400)
+                else if sp1 = start then Request_line_error (400)
+                else if sp2 < 0 then Request_line_error (400)
+                else if sp2 >= content_end then Request_line_error (400)
+                else if sp2 = sp1 + 1 then Request_line_error (400)
+                else if bool.not (internal_is_token_from (text, start, sp1)) then
+                    Request_line_error (400)
+                else if
+                    bool.not (internal_valid_target (text, sp1 + 1, sp2))
+                then Request_line_error (400)
+                else
+                    let val version_start = sp2 + 1
+                        val version_length = content_end - version_start
+                        val http_literal = "HTTP/"
+                    in
+                        if version_length <> 8 then Request_line_error (400)
+                        else if
+                            bool.not
+                                (internal_equals_ci
+                                     ( text
+                                     , version_start
+                                     , version_start + 5
+                                     , borrow http_literal
+                                     ))
+                        then Request_line_error (400)
+                        else
+                            let val major =
+                                    string.char_at_unchecked
+                                        (text, version_start + 5)
+                                val dot =
+                                    string.char_at_unchecked
+                                        (text, version_start + 6)
+                                val minor =
+                                    string.char_at_unchecked
+                                        (text, version_start + 7)
+                            in
+                                if bool.not (internal_version_digit (major)) then
+                                    Request_line_error (400)
+                                else if dot <> 46 then Request_line_error (400)
+                                else if bool.not (internal_version_digit (minor)) then
+                                    Request_line_error (400)
+                                else if major <> 49 then Request_line_error (505)
+                                else if minor = 48 then
+                                    Request_line_ok
+                                        ({ minor = 0
+                                         , is_head =
+                                               internal_is_head_method
+                                                   (text, start, sp1)
+                                         })
+                                else if minor = 49 then
+                                    Request_line_ok
+                                        ({ minor = 1
+                                         , is_head =
+                                               internal_is_head_method
+                                                   (text, start, sp1)
+                                         })
+                                else Request_line_error (505)
+                            end
+                    end
+            end
+    end
+
+type head_scan : Copy = {
+    body_length : int,
+    cl_seen : bool,
+    te_seen : bool,
+    last_chunked : bool,
+    host_count : int,
+    close_flag : bool,
+    keep_flag : bool,
+    expect_continue : bool,
+    expect_other : bool,
+    minor : int
+}
+
+datatype head_scan_result =
+    Head_scan_state of head_scan
+  | Head_scan_error of int
+
+fun scan_headers_from
+    (text : borrow string, cursor : int, stop : int, state : head_scan)
+    : head_scan_result =
+    if cursor >= stop then Head_scan_state (state)
+    else
+        let val lf = string.index_of_char_from (text, cursor, 10)
+        in
+            if lf < 0 then Head_scan_state (state)
+            else
+                let val content_end =
+                        if lf > cursor then
+                            if
+                                string.char_at_unchecked (text, lf - 1) = 13
+                            then lf - 1
+                            else lf
+                        else lf
+                    val bare =
+                        internal_bare_cr_in (text, cursor, content_end)
+                in
+                    if bare then Head_scan_error (400)
+                    else if content_end = cursor then Head_scan_state (state)
+                    else if string.char_at_unchecked (text, cursor) = 32 then
+                        Head_scan_error (400)
+                    else if string.char_at_unchecked (text, cursor) = 9 then
+                        Head_scan_error (400)
+                    else
+                        let val colon =
+                                string.index_of_char_from (text, cursor, 58)
+                        in
+                            if colon < 0 then Head_scan_error (400)
+                            else if colon >= content_end then
+                                Head_scan_error (400)
+                            else if
+                                bool.not
+                                    (internal_is_token_from
+                                         (text, cursor, colon))
+                            then Head_scan_error (400)
+                            else
+                                let val value_start =
+                                        internal_skip_spaces
+                                            (text, colon + 1, content_end)
+                                    val value_stop =
+                                        internal_trim_spaces
+                                            ( text
+                                            , value_start
+                                            , content_end
+                                            )
+                                    val cl_name = "content-length"
+                                    val te_name = "transfer-encoding"
+                                    val host_name = "host"
+                                    val conn_name = "connection"
+                                    val expect_name = "expect"
+                                in
+                                    if
+                                        internal_equals_ci
+                                            ( text
+                                            , cursor
+                                            , colon
+                                            , borrow cl_name
+                                            )
+                                    then
+                                        let val parsed =
+                                                internal_content_length
+                                                    ( text
+                                                    , value_start
+                                                    , value_stop
+                                                    )
+                                        in
+                                            if parsed < 0 then
+                                                Head_scan_error (400)
+                                            else if state.cl_seen then
+                                                if parsed = state.body_length
+                                                then
+                                                    scan_headers_from
+                                                        ( text
+                                                        , lf + 1
+                                                        , stop
+                                                        , state
+                                                        )
+                                                else Head_scan_error (400)
+                                            else
+                                                scan_headers_from
+                                                    ( text
+                                                    , lf + 1
+                                                    , stop
+                                                    , { body_length = parsed
+                                                      , cl_seen = true
+                                                      , te_seen =
+                                                            state.te_seen
+                                                      , last_chunked =
+                                                            state.last_chunked
+                                                      , host_count =
+                                                            state.host_count
+                                                      , close_flag =
+                                                            state.close_flag
+                                                      , keep_flag =
+                                                            state.keep_flag
+                                                      , expect_continue =
+                                                            state.expect_continue
+                                                      , expect_other =
+                                                            state.expect_other
+                                                      , minor = state.minor
+                                                      }
+                                                    )
+                                        end
+                                    else if
+                                        internal_equals_ci
+                                            ( text
+                                            , cursor
+                                            , colon
+                                            , borrow te_name
+                                            )
+                                    then
+                                        let val code =
+                                                internal_last_coding
+                                                    ( text
+                                                    , value_start
+                                                    , value_stop
+                                                    )
+                                        in
+                                            if code = 0 then
+                                                Head_scan_error (400)
+                                            else
+                                                scan_headers_from
+                                                    ( text
+                                                    , lf + 1
+                                                    , stop
+                                                    , { body_length =
+                                                            state.body_length
+                                                      , cl_seen = state.cl_seen
+                                                      , te_seen = true
+                                                      , last_chunked = code = 1
+                                                      , host_count =
+                                                            state.host_count
+                                                      , close_flag =
+                                                            state.close_flag
+                                                      , keep_flag =
+                                                            state.keep_flag
+                                                      , expect_continue =
+                                                            state.expect_continue
+                                                      , expect_other =
+                                                            state.expect_other
+                                                      , minor = state.minor
+                                                      }
+                                                    )
+                                        end
+                                    else if
+                                        internal_equals_ci
+                                            ( text
+                                            , cursor
+                                            , colon
+                                            , borrow host_name
+                                            )
+                                    then
+                                        scan_headers_from
+                                            ( text
+                                            , lf + 1
+                                            , stop
+                                            , { body_length = state.body_length
+                                              , cl_seen = state.cl_seen
+                                              , te_seen = state.te_seen
+                                              , last_chunked =
+                                                    state.last_chunked
+                                              , host_count =
+                                                    state.host_count + 1
+                                              , close_flag = state.close_flag
+                                              , keep_flag = state.keep_flag
+                                              , expect_continue =
+                                                    state.expect_continue
+                                              , expect_other =
+                                                    state.expect_other
+                                              , minor = state.minor
+                                              }
+                                            )
+                                    else if
+                                        internal_equals_ci
+                                            ( text
+                                            , cursor
+                                            , colon
+                                            , borrow conn_name
+                                            )
+                                    then
+                                        let val close_token = "close"
+                                            val keep_token = "keep-alive"
+                                            val closes =
+                                                internal_tokens_contain
+                                                    ( text
+                                                    , value_start
+                                                    , value_stop
+                                                    , borrow close_token
+                                                    )
+                                            val keeps =
+                                                internal_tokens_contain
+                                                    ( text
+                                                    , value_start
+                                                    , value_stop
+                                                    , borrow keep_token
+                                                    )
+                                        in
+                                            scan_headers_from
+                                                ( text
+                                                , lf + 1
+                                                , stop
+                                                , { body_length =
+                                                        state.body_length
+                                                  , cl_seen = state.cl_seen
+                                                  , te_seen = state.te_seen
+                                                  , last_chunked =
+                                                        state.last_chunked
+                                                  , host_count =
+                                                        state.host_count
+                                                  , close_flag =
+                                                        if state.close_flag then
+                                                            true
+                                                        else closes
+                                                  , keep_flag =
+                                                        if state.keep_flag then
+                                                            true
+                                                        else keeps
+                                                  , expect_continue =
+                                                        state.expect_continue
+                                                  , expect_other =
+                                                        state.expect_other
+                                                  , minor = state.minor
+                                                  }
+                                                )
+                                        end
+                                    else if
+                                        internal_equals_ci
+                                            ( text
+                                            , cursor
+                                            , colon
+                                            , borrow expect_name
+                                            )
+                                    then
+                                        let val continue_token =
+                                                "100-continue"
+                                            val all_continue =
+                                                if value_start >= value_stop then
+                                                    false
+                                                else
+                                                    internal_tokens_all_from
+                                                        ( text
+                                                        , value_start
+                                                        , value_stop
+                                                        , borrow continue_token
+                                                        )
+                                        in
+                                            scan_headers_from
+                                                ( text
+                                                , lf + 1
+                                                , stop
+                                                , { body_length =
+                                                        state.body_length
+                                                  , cl_seen = state.cl_seen
+                                                  , te_seen = state.te_seen
+                                                  , last_chunked =
+                                                        state.last_chunked
+                                                  , host_count =
+                                                        state.host_count
+                                                  , close_flag =
+                                                        state.close_flag
+                                                  , keep_flag = state.keep_flag
+                                                  , expect_continue =
+                                                        if state.expect_continue
+                                                        then true
+                                                        else all_continue
+                                                  , expect_other =
+                                                        if state.expect_other then
+                                                            true
+                                                        else bool.not (all_continue)
+                                                  , minor = state.minor
+                                                  }
+                                                )
+                                        end
+                                    else
+                                        scan_headers_from
+                                            ( text
+                                            , lf + 1
+                                            , stop
+                                            , state
+                                            )
+                                end
+                        end
+                end
+        end
+
+type head_parse : Copy = {
+    body_length : int,
+    chunked : bool,
+    keep : bool,
+    expect_continue : bool,
+    is_head : bool
+}
+
+datatype head_result =
+    Head_incomplete
+  | Head_reject of int
+  | Head_ok of head_parse
+
+fun head_ok_of
+    (state : head_scan, line : request_line, chunked : bool)
+    : head_parse =
+    { body_length = if state.cl_seen then state.body_length else 0
+    , chunked = chunked
+    , keep =
+          if state.close_flag then false
+          else if state.minor = 1 then true
+          else state.keep_flag
+    , expect_continue = state.expect_continue
+    , is_head = line.is_head
+    }
+
+fun finish_head (state : head_scan, line : request_line) : head_result =
+    if state.host_count > 1 then Head_reject (400)
+    else if state.te_seen then
+        if state.cl_seen then Head_reject (400)
+        else if state.minor = 0 then Head_reject (400)
+        else if state.expect_other then Head_reject (417)
+        else if bool.not (state.last_chunked) then Head_reject (501)
+        else Head_ok (head_ok_of (state, line, true))
+    else if state.minor = 1 then
+        if state.host_count = 0 then Head_reject (400)
+        else if state.expect_other then Head_reject (417)
+        else Head_ok (head_ok_of (state, line, false))
+    else if state.expect_other then Head_reject (417)
+    else Head_ok (head_ok_of (state, line, false))
+
+fun parse_head (head : borrow string) : head_result =
+    let val size = string.length (head)
+    in
+        if size < 4 then Head_incomplete
+        else
+            let val start =
+                    if string.char_at_unchecked (head, 0) = 13 then
+                        if string.char_at_unchecked (head, 1) = 10 then 2
+                        else 0
+                    else if string.char_at_unchecked (head, 0) = 10 then 1
+                    else 0
+                val lf = string.index_of_char_from (head, start, 10)
+            in
+                if lf < 0 then Head_incomplete
+                else
+                    case parse_request_line (head, start, lf) of
+                        Request_line_error (code) => Head_reject (code)
+                      | Request_line_ok line =>
+                            let val initial =
+                                    { body_length = 0
+                                    , cl_seen = false
+                                    , te_seen = false
+                                    , last_chunked = false
+                                    , host_count = 0
+                                    , close_flag = false
+                                    , keep_flag = false
+                                    , expect_continue = false
+                                    , expect_other = false
+                                    , minor = line.minor
+                                    }
+                            in
+                                case scan_headers_from
+                                         (head, lf + 1, size, initial) of
+                                    Head_scan_error (code) =>
+                                        Head_reject (code)
+                                  | Head_scan_state (state) =>
+                                        finish_head (state, line)
+                            end
+            end
+    end
+
+(* Vue `Copy` du résultat d'analyse. Le bloc `arena` de `serve_buffered` ne
+   peut rendre qu'une valeur Copy : un datatype qui sort de l'arène serait
+   recopié en racine, soit un nœud par requête (fuite en mode stack). *)
+type parsed_head : Copy = {
+    kind : int,
+    status : int,
+    body_length : int,
+    chunked : bool,
+    keep : bool,
+    expect_continue : bool,
+    is_head : bool
+}
+
+fun head_copy (parsed : head_result) : parsed_head =
+    case parsed of
+        Head_incomplete =>
+            { kind = 0
+            , status = 0
+            , body_length = 0
+            , chunked = false
+            , keep = false
+            , expect_continue = false
+            , is_head = false
+            }
+      | Head_reject (status) =>
+            { kind = 1
+            , status = status
+            , body_length = 0
+            , chunked = false
+            , keep = false
+            , expect_continue = false
+            , is_head = false
+            }
+      | Head_ok (info) =>
+            { kind = 2
+            , status = 0
+            , body_length = info.body_length
+            , chunked = info.chunked
+            , keep = info.keep
+            , expect_continue = info.expect_continue
+            , is_head = info.is_head
+            }
+
+fun internal_headers_rev
+    ( head : borrow string
+    , cursor : int
+    , stop : int
+    , acc : string list
+    ) : string list =
+    if cursor >= stop then acc
+    else
+        let val lf = string.index_of_char_from (head, cursor, 10)
+        in
+            if lf < 0 then acc
+            else
+                let val content_end =
+                        if lf > cursor then
+                            if
+                                string.char_at_unchecked (head, lf - 1) = 13
+                            then lf - 1
+                            else lf
+                        else lf
+                in
+                    if content_end = cursor then acc
+                    else
+                        let val colon =
+                                string.index_of_char_from (head, cursor, 58)
+                            val cl_name = "content-length"
+                            val te_name = "transfer-encoding"
+                            val skip =
+                                if colon < 0 then false
+                                else if
+                                    internal_equals_ci
+                                        ( head
+                                        , cursor
+                                        , colon
+                                        , borrow cl_name
+                                        )
+                                then true
+                                else
+                                    internal_equals_ci
+                                        ( head
+                                        , cursor
+                                        , colon
+                                        , borrow te_name
+                                        )
+                        in
+                            if skip then
+                                internal_headers_rev
+                                    (head, lf + 1, stop, acc)
+                            else
+                                internal_headers_rev
+                                    ( head
+                                    , lf + 1
+                                    , stop
+                                    , Cons
+                                          (( string.slice
+                                                 (head, cursor, lf + 1)
+                                           , acc
+                                           ))
+                                    )
+                        end
+                end
+        end
+
+fun prepare_request
+    ( head : borrow string
+    , data : borrow int8 array
+    , body_start : int
+    , body_length : int
+    ) : string =
+    let val head_length = string.length (head)
+        val start =
+            if string.char_at_unchecked (head, 0) = 13 then
+                if string.char_at_unchecked (head, 1) = 10 then 2 else 0
+            else if string.char_at_unchecked (head, 0) = 10 then 1
+            else 0
+        val lf = string.index_of_char_from (head, start, 10)
+        val line = string.slice (head, start, lf + 1)
+        val headers =
+            list.reverse
+                (internal_headers_rev (head, lf + 1, head_length, Nil))
+        val empty_separator = ""
+        val separator = string.copy (borrow empty_separator)
+        val rendered = string.join (separator, headers)
+        val body =
+            bytes.to_string_range (data, body_start, body_length)
+    in
+        line ^ rendered ^ "Content-Length: " ^
+        int_to_string (body_length) ^ "\r\n\r\n" ^ body
+    end
+
+fun internal_reason (status : int) : string =
+    if status = 400 then "Bad Request"
+    else if status = 408 then "Request Timeout"
+    else if status = 413 then "Content Too Large"
+    else if status = 414 then "URI Too Long"
+    else if status = 417 then "Expectation Failed"
+    else if status = 431 then "Request Header Fields Too Large"
+    else if status = 500 then "Internal Server Error"
+    else if status = 501 then "Not Implemented"
+    else if status = 505 then "HTTP Version Not Supported"
+    else "Bad Request"
+
+(* Réponse d'erreur complète, datée (RFC 9110 §6.6.1). *)
+fun reject_reply (status : int) : string =
+    let val date =
+            time.http_date (sys.realtime_ms () / int_to_int64 (1000))
+    in
+        "HTTP/1.1 " ^ int.to_string (status) ^ " " ^
+        internal_reason (status) ^ "\r\nDate: " ^ date ^
+        "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    end
+
+fun reject_and_close
+    (value : 'state server, slot : int, fd : int, status : int)
+    : 'state server =
+    let val reply = reject_reply (status)
+        val _ = send_once (fd, borrow reply)
+    in close_slot (value, slot)
+    end
+
+(* Accès en lecture au serveur sans le consommer : les aides ci-dessous
+   prennent `borrow` et laissent l'appelant libre de reconstruire le record
+   une seule fois par branche. *)
+fun server_fd (value : borrow 'state server, slot : int) : int =
+    case value of
+        { conn_fds = conn_fds } => array.get_int (conn_fds, slot)
+
+fun server_length (value : borrow 'state server, slot : int) : int =
+    case value of
+        { lengths = lengths } => array.get_int (lengths, slot)
+
+fun server_request_bytes (value : borrow 'state server) : int =
+    case value of
+        { limits = limits } => limits.request_bytes
+
+fun server_header_end
+    (value : borrow 'state server, start : int, limit : int)
+    : int =
+    case value of
+        { data = data } => bytes.header_end (data, start, limit)
+
+fun server_range
+    (value : borrow 'state server, start : int, count : int)
+    : string =
+    case value of
+        { data = data } => bytes.to_string_range (data, start, count)
+
+fun server_find_lf
+    (value : borrow 'state server, start : int, limit : int)
+    : int =
+    case value of
+        { data = data } => internal_find_lf (data, start, limit)
+
+fun server_parse_get
+    (value : borrow 'state server, slot : int, field : int)
+    : int =
+    case value of
+        { parse = parse } => parse_get (parse, slot, field)
+
+(* Reconstruit le serveur avec un champ de `parse` modifié. *)
+fun server_parse_update
+    (value : 'state server, slot : int, field : int, field_value : int)
+    : 'state server =
     case value of
         { epfd = epfd
         , listener_fd = listener_fd
@@ -786,53 +1787,1123 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
         , limits = limits
         , dispatch = dispatch
         , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            make_server
+                ( epfd
+                , listener_fd
+                , fds
+                , events
+                , data
+                , lengths
+                , outputs
+                , output_lengths
+                , output_offsets
+                , conn_fds
+                , started
+                , active
+                , last_sweep
+                , limits
+                , dispatch
+                , state
+                , parse_set (parse, slot, field, field_value)
+                , io_errors
+                )
+
+(* Enregistre l'analyse d'un nouvel en-tête et reconstruit le serveur une
+   seule fois : 13 `parse_set` sur le tableau local, puis un `make_server`. *)
+fun server_begin_request
+    ( value : 'state server
+    , slot : int
+    , phase : int
+    , head_end : int
+    , body_need : int
+    , keep : int
+    , is_head : int
+    , expect : int
+    , head_abs : int
+    ) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val parse = parse_set (parse, slot, parse_phase (), phase)
+                val parse = parse_set (parse, slot, parse_head_end (), head_end)
+                val parse = parse_set (parse, slot, parse_body_need (), body_need)
+                val parse = parse_set (parse, slot, parse_keep (), keep)
+                val parse = parse_set (parse, slot, parse_is_head (), is_head)
+                val parse = parse_set (parse, slot, parse_expect (), expect)
+                val parse = parse_set (parse, slot, parse_continued (), 0)
+                val parse = parse_set (parse, slot, parse_closing (), 0)
+                val parse = parse_set (parse, slot, parse_chunk_stage (), 0)
+                val parse = parse_set (parse, slot, parse_chunk_scan (), head_abs)
+                val parse = parse_set (parse, slot, parse_chunk_write (), head_abs)
+                val parse = parse_set (parse, slot, parse_chunk_left (), 0)
+                val parse = parse_set (parse, slot, parse_chunk_status (), 0)
+            in
+                make_server
+                    ( epfd
+                    , listener_fd
+                    , fds
+                    , events
+                    , data
+                    , lengths
+                    , outputs
+                    , output_lengths
+                    , output_offsets
+                    , conn_fds
+                    , started
+                    , active
+                    , last_sweep
+                    , limits
+                    , dispatch
+                    , state
+                    , parse
+                    , io_errors
+                    )
+            end
+
+(* Décode les octets disponibles dans le buffer du slot et reconstruit le
+   serveur avec le tableau mis à jour. *)
+fun server_chunk_step
+    (value : 'state server, slot : int, limit : int, chunk : Http.chunk_state)
+    : 'state server * Http.chunk_state =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val combined = Http.chunk_advance (data, limit, chunk)
+                val data = combined.0
+                val chunk = combined.1
+                val parse =
+                    parse_set (parse, slot, parse_chunk_stage (), chunk.stage)
+                val parse =
+                    parse_set (parse, slot, parse_chunk_scan (), chunk.scan)
+                val parse =
+                    parse_set (parse, slot, parse_chunk_write (), chunk.write)
+                val parse =
+                    parse_set (parse, slot, parse_chunk_left (), chunk.left)
+                val parse =
+                    parse_set (parse, slot, parse_chunk_status (), chunk.status)
+            in
+                ( make_server
+                      ( epfd
+                      , listener_fd
+                      , fds
+                      , events
+                      , data
+                      , lengths
+                      , outputs
+                      , output_lengths
+                      , output_offsets
+                      , conn_fds
+                      , started
+                      , active
+                      , last_sweep
+                      , limits
+                      , dispatch
+                      , state
+                      , parse
+                      , io_errors
+                      )
+                , chunk
+                )
+            end
+
+(* Arme l'envoi de la réponse déjà stockée dans `outputs`. Appelé hors de
+   l'arène : le texte de la réponse appartient au tableau racine, il ne
+   traverse pas la fermeture de la portée. *)
+fun server_arm_output
+    ( value : 'state server
+    , slot : int
+    , total : int
+    , closing : bool
+    ) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val output_lengths = array.set_int (output_lengths, slot, total)
+                val output_offsets = array.set_int (output_offsets, slot, 0)
+                val parse =
+                    parse_set
+                        ( parse
+                        , slot
+                        , parse_closing ()
+                        , if closing then 1 else 0
+                        )
+            in
+                make_server
+                    ( epfd
+                    , listener_fd
+                    , fds
+                    , events
+                    , data
+                    , lengths
+                    , outputs
+                    , output_lengths
+                    , output_offsets
+                    , conn_fds
+                    , started
+                    , active
+                    , last_sweep
+                    , limits
+                    , dispatch
+                    , state
+                    , parse
+                    , io_errors
+                    )
+            end
+
+(* Stocke une réponse partiellement écrite et arme EPOLLOUT. *)
+fun server_store_output
+    ( value : 'state server
+    , slot : int
+    , text : string
+    , total : int
+    , sent : int
+    , closing : bool
+    ) : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val fd = array.get_int (borrow conn_fds, slot)
+                val outputs = array.set (outputs, slot, text)
+                val output_lengths =
+                    array.set_int (output_lengths, slot, total)
+                val output_offsets =
+                    array.set_int (output_offsets, slot, sent)
+                val _ = set_interest (epfd, fd, slot, 4)
+                val parse =
+                    parse_set
+                        ( parse
+                        , slot
+                        , parse_closing ()
+                        , if closing then 1 else 0
+                        )
+            in
+                make_server
+                    ( epfd
+                    , listener_fd
+                    , fds
+                    , events
+                    , data
+                    , lengths
+                    , outputs
+                    , output_lengths
+                    , output_offsets
+                    , conn_fds
+                    , started
+                    , active
+                    , last_sweep
+                    , limits
+                    , dispatch
+                    , state
+                    , parse
+                    , io_errors
+                    )
+            end
+
+(* Compte une erreur d'E/S et reconstruit le serveur. *)
+fun server_note_error
+    (value : 'state server, kind : int, error : int)
+    : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            make_server
+                ( epfd
+                , listener_fd
+                , fds
+                , events
+                , data
+                , lengths
+                , outputs
+                , output_lengths
+                , output_offsets
+                , conn_fds
+                , started
+                , active
+                , last_sweep
+                , limits
+                , dispatch
+                , state
+                , parse
+                , note_io_error (io_errors, kind, error)
+                )
+
+(* Met à jour la longueur bufferisée et l'horodatage après une lecture. *)
+fun server_after_read
+    (value : 'state server, slot : int, previous : int, received : int)
+    : 'state server =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val now = sys.monotonic_ms ()
+                val lengths =
+                    array.set_int (lengths, slot, previous + received)
+                val active = array.set (active, slot, now)
+                val started =
+                    if previous = 0 then array.set (started, slot, now)
+                    else started
+            in
+                make_server
+                    ( epfd
+                    , listener_fd
+                    , fds
+                    , events
+                    , data
+                    , lengths
+                    , outputs
+                    , output_lengths
+                    , output_offsets
+                    , conn_fds
+                    , started
+                    , active
+                    , last_sweep
+                    , limits
+                    , dispatch
+                    , state
+                    , parse
+                    , io_errors
+                    )
+            end
+
+(* Envoie au plus une fois `HTTP/1.1 100 Continue` sur le slot. *)
+fun continue_request (value : 'state server, slot : int) : 'state server =
+    let val expected =
+            server_parse_get (borrow value, slot, parse_expect ()) = 1
+        val already =
+            server_parse_get (borrow value, slot, parse_continued ()) = 1
+    in
+        if bool.not (expected) then value
+        else if already then value
+        else
+            let val fd = server_fd (borrow value, slot)
+                val line = "HTTP/1.1 100 Continue\r\n\r\n"
+                val _ = send_once (fd, borrow line)
+            in
+                server_parse_update
+                    (value, slot, parse_continued (), 1)
+            end
+    end
+
+fun internal_send_retry
+    (fd : int, text : borrow string, offset : int, total : int)
+    : int =
+    let val sent = sys.send_string_raw (fd, text, offset, total - offset)
+    in
+        if sent < 0 then
+            let val error = sys.errno ()
+            in
+                if error = 4 then internal_send_retry (fd, text, offset, total)
+                else sent
+            end
+        else sent
+    end
+
+(* Envoie la réponse armée par `server_arm_output`, hors de l'arène : le
+   texte appartient au tableau racine et ne traverse pas la portée. Rend le
+   serveur et `true` si la connexion peut enchaîner sur une requête déjà
+   bufferisée. L'appelant fait alors la queue (`serve_buffered`) : cet
+   appel-ci n'appelle pas `serve_buffered`, pour qu'un pipelining de N
+   requêtes ne consomme pas N frames. *)
+fun send_armed_output
+    (value : 'state server, slot : int) : 'state server * bool =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val fd = array.get_int (borrow conn_fds, slot)
+                val total = array.get_int (borrow output_lengths, slot)
+                val offset = array.get_int (borrow output_offsets, slot)
+                val sent =
+                    let val text = array.get_borrow (borrow outputs, slot)
+                    in internal_send_retry (fd, text, offset, total)
+                    end
+                val closing = parse_get (borrow parse, slot, parse_closing ()) = 1
+            in
+                if sent < 0 then
+                    let val error = sys.errno ()
+                    in
+                        if peer_gone (error) then
+                            ( close_slot
+                                  ( make_server
+                                        ( epfd
+                                        , listener_fd
+                                        , fds
+                                        , events
+                                        , data
+                                        , lengths
+                                        , outputs
+                                        , output_lengths
+                                        , output_offsets
+                                        , conn_fds
+                                        , started
+                                        , active
+                                        , last_sweep
+                                        , limits
+                                        , dispatch
+                                        , state
+                                        , parse
+                                        , io_errors
+                                        )
+                                  , slot
+                                  )
+                            , false
+                            )
+                        else
+                            ( close_slot
+                                  ( server_note_error
+                                        ( make_server
+                                              ( epfd
+                                              , listener_fd
+                                              , fds
+                                              , events
+                                              , data
+                                              , lengths
+                                              , outputs
+                                              , output_lengths
+                                              , output_offsets
+                                              , conn_fds
+                                              , started
+                                              , active
+                                              , last_sweep
+                                              , limits
+                                              , dispatch
+                                              , state
+                                              , parse
+                                              , io_errors
+                                              )
+                                        , send_kind ()
+                                        , error
+                                        )
+                                  , slot
+                                  )
+                            , false
+                            )
+                    end
+                else if offset + sent >= total then
+                    if closing then
+                        ( close_slot
+                              ( make_server
+                                    ( epfd
+                                    , listener_fd
+                                    , fds
+                                    , events
+                                    , data
+                                    , lengths
+                                    , outputs
+                                    , output_lengths
+                                    , output_offsets
+                                    , conn_fds
+                                    , started
+                                    , active
+                                    , last_sweep
+                                    , limits
+                                    , dispatch
+                                    , state
+                                    , parse
+                                    , io_errors
+                                    )
+                              , slot
+                              )
+                        , false
+                        )
+                    else
+                        let val output_lengths =
+                                array.set_int (output_lengths, slot, 0)
+                            val output_offsets =
+                                array.set_int (output_offsets, slot, 0)
+                            val outputs = clear_output (outputs, slot)
+                        in
+                            ( make_server
+                                  ( epfd
+                                  , listener_fd
+                                  , fds
+                                  , events
+                                  , data
+                                  , lengths
+                                  , outputs
+                                  , output_lengths
+                                  , output_offsets
+                                  , conn_fds
+                                  , started
+                                  , active
+                                  , last_sweep
+                                  , limits
+                                  , dispatch
+                                  , state
+                                  , parse
+                                  , io_errors
+                                  )
+                            , true
+                            )
+                        end
+                else
+                    let val output_offsets =
+                            array.set_int (output_offsets, slot, offset + sent)
+                        val _ = set_interest (epfd, fd, slot, 4)
+                    in
+                        ( make_server
+                              ( epfd
+                              , listener_fd
+                              , fds
+                              , events
+                              , data
+                              , lengths
+                              , outputs
+                              , output_lengths
+                              , output_offsets
+                              , conn_fds
+                              , started
+                              , active
+                              , last_sweep
+                              , limits
+                              , dispatch
+                              , state
+                              , parse
+                              , io_errors
+                              )
+                        , false
+                        )
+                    end
+            end
+
+fun internal_cut_body (response : string) : string =
+    let val separator = "\r\n\r\n"
+        val index = string.index_of (borrow response, borrow separator)
+    in
+        if index < 0 then response
+        else string.slice (borrow response, 0, index + 4)
+    end
+
+fun internal_compact
+    (data : int8 array, target : int, source : int, stop : int)
+    : int8 array =
+    if source >= stop then data
+    else
+        let val value = array.get (borrow data, source)
+            val data = array.set (data, target, value)
+        in internal_compact (data, target + 1, source + 1, stop)
+        end
+
+fun internal_find_lf
+    (data : borrow int8 array, index : int, limit : int)
+    : int =
+    if index >= limit then -1
+    else if array.get (data, index) = 10 then index
+    else internal_find_lf (data, index + 1, limit)
+
+(* Termine une requête complète : dispatche le texte normalisé, livre la
+   réponse, puis compacte les octets pipelinés restants. *)
+fun complete_request
+    ( value : 'state server
+    , slot : int
+    , head_length : int
+    , body_length : int
+    , consumed : int
+    , keep : bool
+    , head_method : bool
+    ) : 'state server * bool =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val start = slot * limits.request_bytes
+                val length = array.get_int (borrow lengths, slot)
+                val fd = array.get_int (borrow conn_fds, slot)
+                val close_name = "connection"
+                val close_token = "close"
+                val run = dispatch.run
+            in
+                let val result =
+                        arena
+                            val head_text =
+                                bytes.to_string_range
+                                    (borrow data, start, head_length)
+                            val request_text =
+                                prepare_request
+                                    ( borrow head_text
+                                    , borrow data
+                                    , start + head_length
+                                    , body_length
+                                    )
+                            val dispatched = run (request_text, state)
+                        in
+                            case dispatched of
+                                (response, next_state) =>
+                                    let val response =
+                                            if head_method then
+                                                internal_cut_body (response)
+                                            else response
+                                        val total =
+                                            string.length (borrow response)
+                                        val closing =
+                                            if keep then
+                                                Http.header_has_token
+                                                    ( borrow response
+                                                    , borrow close_name
+                                                    , borrow close_token
+                                                    )
+                                            else true
+                                        (* Le tableau racine possède la
+                                           réponse : le texte est normalisé en
+                                           racine avant la fermeture de l'arène.
+                                           Le bloc ne rend donc que des
+                                           scalaires et un tableau déjà racine ;
+                                           aucun enregistrement serveur (ni ses
+                                           tableaux) ne traverse `end`. *)
+                                        val outputs =
+                                            if total > limits.response_bytes
+                                            then outputs
+                                            else array.set (outputs, slot, response)
+                                    in (next_state, total, closing, outputs)
+                                    end
+                        end
+                in
+                    case result of
+                        (next_state, total, closing, outputs) =>
+                            if total > limits.response_bytes then
+                                ( reject_and_close
+                                      ( make_server
+                                            ( epfd
+                                            , listener_fd
+                                            , fds
+                                            , events
+                                            , data
+                                            , lengths
+                                            , outputs
+                                            , output_lengths
+                                            , output_offsets
+                                            , conn_fds
+                                            , started
+                                            , active
+                                            , last_sweep
+                                            , limits
+                                            , dispatch
+                                            , next_state
+                                            , parse
+                                            , io_errors
+                                            )
+                                      , slot
+                                      , fd
+                                      , 500
+                                      )
+                                , false
+                                )
+                            else
+                                let val remaining = length - consumed
+                                    val data =
+                                        internal_compact
+                                            ( data
+                                            , start
+                                            , start + consumed
+                                            , start + length
+                                            )
+                                    val lengths =
+                                        array.set_int
+                                            (lengths, slot, remaining)
+                                    val parse = parse_reset (parse, slot)
+                                    val started =
+                                        array.set
+                                            ( started
+                                            , slot
+                                            , if remaining > 0 then
+                                                  sys.monotonic_ms ()
+                                              else int_to_int64 (-1)
+                                            )
+                                    val active =
+                                        array.set
+                                            ( active
+                                            , slot
+                                            , sys.monotonic_ms ()
+                                            )
+                                    val rebuilt =
+                                        make_server
+                                            ( epfd
+                                            , listener_fd
+                                            , fds
+                                            , events
+                                            , data
+                                            , lengths
+                                            , outputs
+                                            , output_lengths
+                                            , output_offsets
+                                            , conn_fds
+                                            , started
+                                            , active
+                                            , last_sweep
+                                            , limits
+                                            , dispatch
+                                            , next_state
+                                            , parse
+                                            , io_errors
+                                            )
+                                    val armed =
+                                        server_arm_output
+                                            (rebuilt, slot, total, closing)
+                                in
+                                    send_armed_output (armed, slot)
+                                end
+                end
+            end
+
+(* Lit dans le buffer du slot. Rend le serveur reconstruit, le nombre
+   d'octets reçus (ou -1) et l'errno lu juste après l'appel. *)
+fun server_recv
+    (value : 'state server, fd : int, offset : int, count : int)
+    : 'state server * int * int =
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
+        , io_errors = io_errors
+        } =>
+            let val received = sys.recv_into_raw (fd, data, offset, count)
+                val error = if received < 0 then sys.errno () else 0
+            in
+                ( make_server
+                      ( epfd
+                      , listener_fd
+                      , fds
+                      , events
+                      , data
+                      , lengths
+                      , outputs
+                      , output_lengths
+                      , output_offsets
+                      , conn_fds
+                      , started
+                      , active
+                      , last_sweep
+                      , limits
+                      , dispatch
+                      , state
+                      , parse
+                      , io_errors
+                      )
+                , received
+                , error
+                )
+            end
+
+(* Analyse et exécute les requêtes complètes déjà bufferisées. Chaque appel
+   traite une requête puis se rappelle en position terminale, donc un
+   pipelining de N requêtes ne consomme pas N frames. *)
+fun serve_buffered (value : 'state server, slot : int) : 'state server =
+    let val fd = server_fd (borrow value, slot)
+        val length = server_length (borrow value, slot)
+        val request_bytes = server_request_bytes (borrow value)
+        val phase = server_parse_get (borrow value, slot, parse_phase ())
+        val start = slot * request_bytes
+    in
+        if fd < 0 then value
+        else if length <= 0 then value
+        else if phase = 0 then
+            let val head_abs =
+                    server_header_end (borrow value, start, start + length)
+            in
+                if head_abs < 0 then
+                    let val lf =
+                            server_find_lf
+                                (borrow value, start, start + length)
+                        val too_long =
+                            if lf < 0 then length > 8192
+                            else lf - start > 8192
+                    in
+                        if too_long then
+                            reject_and_close (value, slot, fd, 414)
+                        else value
+                    end
+                else
+                    let val head_length = head_abs - start
+                        val head =
+                            arena
+                                val head_text =
+                                    server_range
+                                        (borrow value, start, head_length)
+                                val parsed = parse_head (borrow head_text)
+                            in head_copy (parsed)
+                            end
+                    in
+                        if head.kind = 0 then value
+                        else if head.kind = 1 then
+                            reject_and_close (value, slot, fd, head.status)
+                        else
+                                let val room = request_bytes - head_length
+                                    val complete =
+                                        if head.chunked then false
+                                        else length >= head_length + head.body_length
+                                in
+                                    if head.chunked then
+                                        if head_length >= request_bytes then
+                                            reject_and_close
+                                                (value, slot, fd, 413)
+                                        else if length > head_length then
+                                            serve_buffered
+                                                ( server_begin_request
+                                                      ( value
+                                                      , slot
+                                                      , 2
+                                                      , head_length
+                                                      , head.body_length
+                                                      , if head.keep then 1 else 0
+                                                      , if head.is_head then 1 else 0
+                                                      , if head.expect_continue then 1
+                                                        else 0
+                                                      , head_abs
+                                                      )
+                                                , slot
+                                                )
+                                        else
+                                            continue_request
+                                                ( server_begin_request
+                                                      ( value
+                                                      , slot
+                                                      , 2
+                                                      , head_length
+                                                      , head.body_length
+                                                      , if head.keep then 1 else 0
+                                                      , if head.is_head then 1 else 0
+                                                      , if head.expect_continue then 1
+                                                        else 0
+                                                      , head_abs
+                                                      )
+                                                , slot
+                                                )
+                                    else if head.body_length > room then
+                                        reject_and_close
+                                            (value, slot, fd, 413)
+                                    else if complete then
+                                        let val result =
+                                                complete_request
+                                                    ( value
+                                                    , slot
+                                                    , head_length
+                                                    , head.body_length
+                                                    , head_length + head.body_length
+                                                    , head.keep
+                                                    , head.is_head
+                                                    )
+                                        in
+                                            if result.1 then
+                                                serve_buffered (result.0, slot)
+                                            else result.0
+                                        end
+                                    else
+                                        continue_request
+                                            ( server_begin_request
+                                                  ( value
+                                                  , slot
+                                                  , 1
+                                                  , head_length
+                                                  , head.body_length
+                                                  , if head.keep then 1 else 0
+                                                  , if head.is_head then 1 else 0
+                                                  , if head.expect_continue then 1
+                                                    else 0
+                                                  , head_abs
+                                                  )
+                                            , slot
+                                            )
+                                end
+                    end
+            end
+        else if phase = 1 then
+            let val head_length =
+                    server_parse_get
+                        (borrow value, slot, parse_head_end ())
+                val need =
+                    server_parse_get
+                        (borrow value, slot, parse_body_need ())
+            in
+                if length < head_length + need then
+                    continue_request (value, slot)
+                else
+                    let val keep =
+                            server_parse_get
+                                (borrow value, slot, parse_keep ()) = 1
+                        val head_method =
+                            server_parse_get
+                                (borrow value, slot, parse_is_head ()) = 1
+                        val result =
+                            complete_request
+                                ( value
+                                , slot
+                                , head_length
+                                , need
+                                , head_length + need
+                                , keep
+                                , head_method
+                                )
+                    in
+                        if result.1 then
+                            serve_buffered (result.0, slot)
+                        else result.0
+                    end
+            end
+        else
+            let val head_length =
+                    server_parse_get
+                        (borrow value, slot, parse_head_end ())
+                val chunk : Http.chunk_state =
+                    { stage =
+                          server_parse_get
+                              (borrow value, slot, parse_chunk_stage ())
+                    , scan =
+                          server_parse_get
+                              (borrow value, slot, parse_chunk_scan ())
+                    , write =
+                          server_parse_get
+                              (borrow value, slot, parse_chunk_write ())
+                    , left =
+                          server_parse_get
+                              (borrow value, slot, parse_chunk_left ())
+                    , status =
+                          server_parse_get
+                              (borrow value, slot, parse_chunk_status ())
+                    }
+                val combined =
+                    server_chunk_step
+                        (value, slot, start + length, chunk)
+                val next = combined.0
+                val chunk = combined.1
+                val decoded = chunk.write - (start + head_length)
+                val room = request_bytes - head_length
+            in
+                if chunk.status <> 0 then
+                    reject_and_close (next, slot, fd, chunk.status)
+                else if decoded > room then
+                    reject_and_close (next, slot, fd, 413)
+                else if decoded < 0 then
+                    reject_and_close (next, slot, fd, 400)
+                else if chunk.stage = 4 then
+                    let val keep =
+                            server_parse_get
+                                (borrow next, slot, parse_keep ()) = 1
+                        val head_method =
+                            server_parse_get
+                                (borrow next, slot, parse_is_head ()) = 1
+                        val result =
+                            complete_request
+                                ( next
+                                , slot
+                                , head_length
+                                , decoded
+                                , chunk.scan - start
+                                , keep
+                                , head_method
+                                )
+                    in
+                        if result.1 then
+                            serve_buffered (result.0, slot)
+                        else result.0
+                    end
+                else if length >= request_bytes then
+                    reject_and_close (next, slot, fd, 413)
+                else continue_request (next, slot)
+            end
+    end
+
+fun handle_read (value : 'state server, slot : int) : 'state server =
+    let val early_fd = server_fd (borrow value, slot)
+        val early_length = server_length (borrow value, slot)
+        val early_bytes = server_request_bytes (borrow value)
+        val early_phase = server_parse_get (borrow value, slot, parse_phase ())
+    in
+        if early_bytes - early_length <= 0 then
+            reject_and_close
+                ( value
+                , slot
+                , early_fd
+                , if early_phase = 0 then 431 else 413
+                )
+        else
+    case value of
+        { epfd = epfd
+        , listener_fd = listener_fd
+        , fds = fds
+        , events = events
+        , data = data
+        , lengths = lengths
+        , outputs = outputs
+        , output_lengths = output_lengths
+        , output_offsets = output_offsets
+        , conn_fds = conn_fds
+        , started = started
+        , active = active
+        , last_sweep = last_sweep
+        , limits = limits
+        , dispatch = dispatch
+        , state = state
+        , parse = parse
         , io_errors = io_errors
         } =>
             let val fd = array.get_int (borrow conn_fds, slot)
                 val length = array.get_int (borrow lengths, slot)
                 val start = slot * limits.request_bytes
                 val available = limits.request_bytes - length
+                val phase = parse_get (borrow parse, slot, parse_phase ())
             in
-                if available <= 0 then
-
-                    let val reply = reject_headers_too_large ()
-                        val _ = send_once (fd, borrow reply)
-                    in
-                        close_slot
-                            (make_server
-                                 ( epfd
-                                 , listener_fd
-                                 , fds
-                                 , events
-                                 , data
-                                 , lengths
-                                 , outputs
-                                 , output_lengths
-                                 , output_offsets
-                                 , conn_fds
-                                 , started
-                                 , active
-                                 , last_sweep
-                                 , limits
-                                 , dispatch
-                                 , state
-                                 , io_errors
-                                 ),
-                             slot)
-                    end
-                else
-                    let val received = sys.recv_into_raw (fd, data, start + length, available)
+                let val received =
+                        sys.recv_into_raw
+                            (fd, data, start + length, available)
+                        val error =
+                            if received < 0 then sys.errno () else 0
                     in
                         if received < 0 then
-                            let val error = sys.errno ()
-                                (* EINTR and EAGAIN: level-triggered epoll
-                                   fires again, the slot is unchanged. *)
-                                val retry =
+                            let val retry =
                                     if error = 4 then true
                                     else if error = 11 then true
                                     else false
-                            in
-                                if retry then
+                                val rebuilt =
                                     make_server
                                         ( epfd
                                         , listener_fd
@@ -850,87 +2921,61 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                         , limits
                                         , dispatch
                                         , state
+                                        , parse
                                         , io_errors
                                         )
+                            in
+                                if retry then rebuilt
                                 else if peer_gone (error) then
-                                    close_slot
-                                        (make_server
-                                             ( epfd
-                                             , listener_fd
-                                             , fds
-                                             , events
-                                             , data
-                                             , lengths
-                                             , outputs
-                                             , output_lengths
-                                             , output_offsets
-                                             , conn_fds
-                                             , started
-                                             , active
-                                             , last_sweep
-                                             , limits
-                                             , dispatch
-                                             , state
-                                             , io_errors
-                                             ),
-                                         slot)
+                                    close_slot (rebuilt, slot)
                                 else
                                     close_slot
-                                        (make_server
-                                             ( epfd
-                                             , listener_fd
-                                             , fds
-                                             , events
-                                             , data
-                                             , lengths
-                                             , outputs
-                                             , output_lengths
-                                             , output_offsets
-                                             , conn_fds
-                                             , started
-                                             , active
-                                             , last_sweep
-                                             , limits
-                                             , dispatch
-                                             , state
-                                             , note_io_error
-                                                   (io_errors, recv_kind (), error)
-                                             ),
-                                         slot)
+                                        ( server_note_error
+                                              ( rebuilt
+                                              , recv_kind ()
+                                              , error
+                                              )
+                                        , slot
+                                        )
                             end
                         else if received = 0 then
                             close_slot
-                                (make_server
-                                     ( epfd
-                                     , listener_fd
-                                     , fds
-                                     , events
-                                     , data
-                                     , lengths
-                                     , outputs
-                                     , output_lengths
-                                     , output_offsets
-                                     , conn_fds
-                                     , started
-                                     , active
-                                     , last_sweep
-                                     , limits
-                                     , dispatch
-                                     , state
-                                     , io_errors
-                                     ),
-                                 slot)
+                                ( make_server
+                                      ( epfd
+                                      , listener_fd
+                                      , fds
+                                      , events
+                                      , data
+                                      , lengths
+                                      , outputs
+                                      , output_lengths
+                                      , output_offsets
+                                      , conn_fds
+                                      , started
+                                      , active
+                                      , last_sweep
+                                      , limits
+                                      , dispatch
+                                      , state
+                                      , parse
+                                      , io_errors
+                                      )
+                                , slot
+                                )
                         else
-                            let val next_length = length + received
-                                val lengths = array.set_int (lengths, slot, next_length)
-                                val active = array.set (active, slot, sys.monotonic_ms ())
+                            let val now = sys.monotonic_ms ()
+                                val lengths =
+                                    array.set_int
+                                        ( lengths
+                                        , slot
+                                        , length + received
+                                        )
+                                val active = array.set (active, slot, now)
                                 val started =
                                     if length = 0 then
-                                        array.set (started, slot, sys.monotonic_ms ())
+                                        array.set (started, slot, now)
                                     else started
-                                val end_index = bytes.header_end (borrow data, start, start + next_length)
-                            in
-                                if end_index < 0 then
+                                val rebuilt =
                                     make_server
                                         ( epfd
                                         , listener_fd
@@ -948,192 +2993,15 @@ fun handle_read (value : 'state server, slot : int) : 'state server =
                                         , limits
                                         , dispatch
                                         , state
+                                        , parse
                                         , io_errors
                                         )
-                                else
-                                    let val bodyless =
-                                            if next_length < 4 then false
-                                            else
-                                                let val b0 = array.get (borrow data, start)
-                                                    val b1 = array.get (borrow data, start + 1)
-                                                    val b2 = array.get (borrow data, start + 2)
-                                                    val b3 = array.get (borrow data, start + 3)
-                                                in
-                                                    if method_is_get (b0, b1, b2, b3) then true
-                                                    else if next_length < 5 then false
-                                                    else
-                                                        method_is_head
-                                                            ( b0
-                                                            , b1
-                                                            , b2
-                                                            , b3
-                                                            , array.get (borrow data, start + 4)
-                                                            )
-                                                end
-                                        val header_length = end_index - start
-                                        val expected =
-                                            if bodyless then header_length
-                                            else
-                                                arena
-                                                    val headers =
-                                                        bytes.to_string_range
-                                                            (borrow data, start, header_length)
-                                                    val content_length =
-                                                        content_length_of_headers (headers)
-                                                    val room =
-                                                        limits.request_bytes - header_length
-                                                in
-
-                                                    if content_length > room then -1
-                                                    else header_length + content_length
-                                                end
-                                    in
-                                        if expected < 0 then
-
-                                            let val reply = reject_content_too_large ()
-                                                val _ = send_once (fd, borrow reply)
-                                            in
-                                                close_slot
-                                                    (make_server
-                                                         ( epfd
-                                                         , listener_fd
-                                                         , fds
-                                                         , events
-                                                         , data
-                                                         , lengths
-                                                         , outputs
-                                                         , output_lengths
-                                                         , output_offsets
-                                                         , conn_fds
-                                                         , started
-                                                         , active
-                                                         , last_sweep
-                                                         , limits
-                                                         , dispatch
-                                                         , state
-                                                         , io_errors
-                                                         ),
-                                                     slot)
-                                            end
-                                        else if next_length < expected then
-                                            make_server
-                                                ( epfd
-                                                , listener_fd
-                                                , fds
-                                                , events
-                                                , data
-                                                , lengths
-                                                , outputs
-                                                , output_lengths
-                                                , output_offsets
-                                                , conn_fds
-                                                , started
-                                                , active
-                                                , last_sweep
-                                                , limits
-                                                , dispatch
-                                                , state
-                                                , io_errors
-                                                )
-                                        else
-                                            let val run = dispatch.run
-                                                val result =
-                                                    arena
-                                                        val request_text =
-                                                            bytes.to_string_range
-                                                                (borrow data, start, next_length)
-                                                        val dispatched =
-                                                            run (request_text, state)
-                                                    in
-                                                        case dispatched of
-                                                            (response, next_state) =>
-                                                                let val response_length =
-                                                                        string.length (borrow response)
-                                                                    (* Store the
-                                                                       response
-                                                                       before the
-                                                                       arena ends:
-                                                                       the array
-                                                                       owns it, so
-                                                                       the compiler
-                                                                       allocates
-                                                                       the copy in
-                                                                       the root
-                                                                       region. *)
-                                                                    val outputs =
-                                                                        if response_length > limits.response_bytes then outputs
-                                                                        else array.set (outputs, slot, response)
-                                                                in
-                                                                    ( next_state
-                                                                    , response_length
-                                                                    , outputs
-                                                                    )
-                                                                end
-                                                    end
-                                            in
-                                                case result of
-                                                    (next_state, response_length, outputs) =>
-                                                        if response_length > limits.response_bytes then
-
-                                                            let val reply = reject_response_too_large ()
-                                                                val _ = send_once (fd, borrow reply)
-                                                            in
-                                                                close_slot
-                                                                    (make_server
-                                                                     ( epfd
-                                                                     , listener_fd
-                                                                     , fds
-                                                                     , events
-                                                                     , data
-                                                                     , lengths
-                                                                     , outputs
-                                                                     , output_lengths
-                                                                     , output_offsets
-                                                                     , conn_fds
-                                                                     , started
-                                                                     , active
-                                                                     , last_sweep
-                                                                     , limits
-                                                                     , dispatch
-                                                                     , next_state
-                                                                     , io_errors
-                                                                     ),
-                                                                 slot)
-                                                            end
-                                                        else
-                                                            let val lengths = array.set_int (lengths, slot, 0)
-                                                                val output_lengths = array.set_int (output_lengths, slot, response_length)
-                                                                val output_offsets = array.set_int (output_offsets, slot, 0)
-                                                                val started = array.set (started, slot, -1)
-                                                            in
-                                                                flush_slot
-                                                                    (make_server
-                                                                         ( epfd
-                                                                         , listener_fd
-                                                                         , fds
-                                                                         , events
-                                                                         , data
-                                                                         , lengths
-                                                                         , outputs
-                                                                         , output_lengths
-                                                                         , output_offsets
-                                                                         , conn_fds
-                                                                         , started
-                                                                         , active
-                                                                         , last_sweep
-                                                                         , limits
-                                                                         , dispatch
-                                                                         , next_state
-                                                                         , io_errors
-                                                                         ),
-                                                                     slot,
-                                                                     false)
-                                                            end
-                                            end
-                                    end
+                            in
+                                serve_buffered (rebuilt, slot)
                             end
                     end
             end
+    end
 
 fun handle_events (value : 'state server, count : int, index : int) : 'state server =
     if index >= count then value
@@ -1155,7 +3023,7 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
             , limits = limits
                 , dispatch = dispatch
                 , state = state
-                , io_errors = io_errors
+                , io_errors = io_errors, parse = parse
             } =>
                 let val token = array.get_int (borrow fds, index)
                     val pending =
@@ -1180,7 +3048,7 @@ fun handle_events (value : 'state server, count : int, index : int) : 'state ser
                         , limits = limits
                 , dispatch = dispatch
                 , state = state
-                , io_errors = io_errors
+                , io_errors = io_errors, parse = parse
                         }
                     val next_value =
                         if token < 0 then accept_loop (rebuilt)
@@ -1217,7 +3085,7 @@ fun close_all (value : 'state server) : unit =
         , limits = limits
         , dispatch = dispatch
         , state = state
-        , io_errors = io_errors
+        , io_errors = io_errors, parse = parse
         } =>
             let (* Flush the counters seen during the last second, so a
                    shutdown does not drop the final errors. *)
@@ -1255,7 +3123,7 @@ fun sweep_from
             , limits = limits
             , dispatch = dispatch
             , state = state
-            , io_errors = io_errors
+            , io_errors = io_errors, parse = parse
             } =>
                 let val fd = array.get_int (borrow conn_fds, index)
                     val request_started = array.get (borrow started, index)
@@ -1280,7 +3148,7 @@ fun sweep_from
                         , limits = limits
                         , dispatch = dispatch
                         , state = state
-                        , io_errors = io_errors
+                        , io_errors = io_errors, parse = parse
                         }
                 in
                     if fd < 0 then sweep_from (rebuilt, connections, index + 1, now)
@@ -1294,7 +3162,15 @@ fun sweep_from
                                     now - last_active > limits.idle_timeout
                         in
                             if expired then
-                                sweep_from (close_slot (rebuilt, index), connections, index + 1, now)
+                                let val _ =
+                                        if request_started >= 0 then
+                                            let val reply = reject_reply (408)
+                                            in send_once (fd, borrow reply) end
+                                        else ()
+                                    val next = close_slot (rebuilt, index)
+                                in
+                                    sweep_from (next, connections, index + 1, now)
+                                end
                             else sweep_from (rebuilt, connections, index + 1, now)
                         end
                 end
@@ -1322,7 +3198,7 @@ fun serve (value : 'state server) : unit result =
             , limits = limits
             , dispatch = dispatch
             , state = state
-            , io_errors = io_errors
+            , io_errors = io_errors, parse = parse
             } =>
                 let val ready = sys.epoll_wait (epfd, fds, events, event_batch (), 200)
                     val now = sys.monotonic_ms ()
@@ -1348,7 +3224,7 @@ fun serve (value : 'state server) : unit result =
                         , limits = limits
                         , dispatch = dispatch
                         , state = state
-                        , io_errors = io_errors
+                        , io_errors = io_errors, parse = parse
                         }
                     val current =
                         if sweep_due then sweep_from (rebuilt, limits.connections, 0, now)

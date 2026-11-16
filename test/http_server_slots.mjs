@@ -73,6 +73,49 @@ function waitForResponse(socket, state, timeoutMs = 2000) {
   });
 }
 
+function waitForHead(socket, state, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("timeout waiting for headers"));
+    }, timeoutMs);
+    const onData = (chunk) => {
+      state.buffer = Buffer.concat([state.buffer, chunk]);
+      const end = state.buffer.indexOf("\r\n\r\n");
+      if (end < 0) return;
+      const head = state.buffer.subarray(0, end).toString("latin1");
+      const lines = head.split("\r\n");
+      const status = Number(lines[0].split(" ")[1]);
+      const headers = new Map();
+      for (const line of lines.slice(1)) {
+        const colon = line.indexOf(":");
+        if (colon < 0) continue;
+        headers.set(line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim());
+      }
+      cleanup();
+      state.buffer = state.buffer.subarray(end + 4);
+      resolve({ status, headers, body: "" });
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("connection closed before headers"));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+    };
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+  });
+}
+
 function assert(condition, message) {
   if (!condition) fail(message);
 }
@@ -104,9 +147,12 @@ async function main() {
   await get(high, highState, "/missing", 404);
 
 
+
   high.write("HEAD / HTTP/1.1\r\nHost: localhost\r\n\r\n");
-  const head = await waitForResponse(high, highState);
+  const head = await waitForHead(high, highState);
   assert(head.status === 405 || head.status === 200, `HEAD status ${head.status}`);
+  assert((head.headers.get("content-length") ?? "0") !== "0" || head.status === 405,
+    "HEAD without Content-Length");
 
 
   high.write(

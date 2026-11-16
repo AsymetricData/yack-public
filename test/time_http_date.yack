@@ -1,0 +1,22 @@
+
+
+
+
+import yack/string
+import yack/time
+
+fun verdict (got : borrow string, expected : borrow string) : string =
+    if string.equals (got, expected) then "ok"
+    else "FAIL: got " ^ string.copy (got)
+
+fun main () =
+    let val reference = time.http_date (int_to_int64 (784111777))
+        val leap = time.http_date (int_to_int64 (951782400))
+        val after_2038 = time.http_date (int_to_int64 (2147483647) + int_to_int64 (1))
+        val report = verdict (borrow reference, borrow "Sun, 06 Nov 1994 08:49:37 GMT")
+        val report =
+            report ^ "\n" ^ verdict (borrow leap, borrow "Tue, 29 Feb 2000 00:00:00 GMT")
+        val report =
+            report ^ "\n" ^ verdict (borrow after_2038, borrow "Tue, 19 Jan 2038 03:14:08 GMT")
+    in print_string (report)
+    end
